@@ -1,0 +1,129 @@
+{
+  "store": {
+    "name": "Weis Markets #49",
+    "address": "740 South Broad St",
+    "city": "Lititz",
+    "state": "PA",
+    "zip": "17543",
+    "telephone": "717-626-7865"
+  },
+  "sections": {
+    "Grocery": [
+      {
+        "item": "CLASSIC COKE 24PK PC",
+        "price": 13.99,
+        "type": "F"
+      },
+      {
+        "item": "COKE 24 PKG",
+        "discount": 1.00,
+        "type": "B"
+      },
+      {
+        "label": "PRICE YOU PAY",
+        "price": 12.99
+      },
+      {
+        "item": "RAY PAEM CHIPS",
+        "quantity": 1,
+        "price": 4.99,
+        "type": "F"
+      },
+      {
+        "item": "STUFF HOL SHTBRD",
+        "quantity": 1,
+        "deal": "2/5.00",
+        "price": 2.60,
+        "type": "F"
+      }
+    ],
+    "Meat": [
+      {
+        "item": "UQ WAGYU CRAFT BUR",
+        "price": 13.99,
+        "type": "F"
+      },
+      {
+        "item": "PK TURK BRST CUTLE",
+        "price": 8.25,
+        "type": "F"
+      },
+      {
+        "item": "MARKDOWN COUPON",
+        "discount": 2.06,
+        "type": "F"
+      },
+      {
+        "label": "PRICE YOU PAY",
+        "price": 6.19
+      }
+    ],
+    "Produce": [
+      {
+        "item": "4011 BANANAS",
+        "quantity": "2.21 lb",
+        "unit_price": "0.59/lb",
+        "price": 1.30,
+        "type": "F"
+      }
+    ],
+    "Frozen Food": [
+      {
+        "item": "EGGO MINI PANCK",
+        "price": 3.69,
+        "type": "F"
+      },
+      {
+        "item": "EGGO MINI PANCK",
+        "price": 3.69,
+        "type": "F"
+      },
+      {
+        "item": "EGGO MINI PANCK",
+        "price": 3.69,
+        "type": "F"
+      },
+      {
+        "item": "EGGO MINI PANCK",
+        "price": 3.69,
+        "type": "F"
+      }
+    ],
+    "Dairy": [
+      {
+        "item": "CHOBANI FLIP YOG",
+        "quantity": 1,
+        "deal": "2/3.00",
+        "price": 1.50,
+        "type": "F"
+      },
+      {
+        "item": "WEIS SIGN CHOC WHLNP",
+        "price": 2.99,
+        "type": "F"
+      }
+    ],
+    "Bakery": [
+      {
+        "item": "9939 MUFFINS",
+        "quantity": 1,
+        "price": 1.79,
+        "deal": "BUY 4/6.00 SAVE 1.16",
+        "type": "F"
+      }
+    ],
+    "General Merchandise": [
+      {
+        "item": "GE 40W APP BULB",
+        "price": 2.99,
+        "type": "T"
+      }
+    ],
+    "Other Sales": [
+      {
+        "item": "FIGHT HUNGER DONATNP",
+        "price": 0.06
+      }
+    ]
+  }
+}

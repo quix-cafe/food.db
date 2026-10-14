@@ -1,0 +1,307 @@
+{
+  "store": {
+    "name": "Target",
+    "slogan": "EXPECT MORE. PAY LESS."
+  },
+  "transaction": {
+    "date": "03/06/2016",
+    "time": "05:25 PM",
+    "expires": "06/04/16"
+  },
+  "items": [
+    {
+      "section": "CLEANING SUPPLIES",
+      "entries": [
+        {
+          "sku": "003050132",
+          "description": "UPUP HOUSEH",
+          "tax_code": "T",
+          "price": 1.94
+        }
+      ]
+    },
+    {
+      "section": "GROCERY",
+      "entries": [
+        {
+          "sku": "071090012",
+          "description": "OREO COOKIE",
+          "tax_code": "FC",
+          "price": 5.98,
+          "quantity_detail": "2 @ $2.99 ea"
+        },
+        {
+          "sku": "071200113",
+          "description": "NATVAL ENER",
+          "tax_code": "FC",
+          "price": 5.89
+        },
+        {
+          "sku": "071201388",
+          "description": "MOTTS FRTSN",
+          "tax_code": "FC",
+          "price": 1.50
+        },
+        {
+          "sku": "19273023",
+          "description": "Cartwheel MfrCpn",
+          "price": -0.50
+        },
+        {
+          "sku": "071201388",
+          "description": "MOTTS FRTSN",
+          "tax_code": "FC",
+          "price": 4.50,
+          "quantity_detail": "3 @ $1.50 ea"
+        },
+        {
+          "description": "Saved $1.71 off $6.21",
+          "type": "savings_summary"
+        },
+        {
+          "sku": "203140116",
+          "description": "V8",
+          "tax_code": "FC",
+          "price": 4.19
+        },
+        {
+          "sku": "210110240",
+          "description": "OSCAR MAYER",
+          "tax_code": "FC",
+          "price": 2.50
+        },
+        {
+          "sku": "210110375",
+          "description": "OSCAR MAYER",
+          "tax_code": "FC",
+          "price": 3.07
+        },
+        {
+          "description": "Cartwheel 15% off $3.62",
+          "type": "discount_info"
+        },
+        {
+          "sku": "211080156",
+          "description": "NAKED",
+          "tax_code": "FC",
+          "price": 2.50
+        },
+        {
+          "sku": "211124798",
+          "description": "TOMATO",
+          "tax_code": "FC",
+          "price": 0.99
+        },
+        {
+          "sku": "211214061",
+          "description": "LETTUCE",
+          "tax_code": "FC",
+          "price": 1.49
+        },
+        {
+          "sku": "212040401",
+          "description": "KC MASTERPC",
+          "tax_code": "FC",
+          "price": 3.39
+        },
+        {
+          "sku": "212080427",
+          "description": "MARKET PANT",
+          "tax_code": "FC",
+          "price": 3.29
+        },
+        {
+          "sku": "212140031",
+          "description": "BC SDNLY SL",
+          "tax_code": "FC",
+          "price": 1.72
+        },
+        {
+          "description": "Cartwheel 10% off $1.92",
+          "type": "discount_info"
+        },
+        {
+          "sku": "261011548",
+          "description": "PEPPERIDGE",
+          "tax_code": "FC",
+          "price": 2.99
+        },
+        {
+          "sku": "261090048",
+          "description": "SMUCKERS",
+          "tax_code": "FC",
+          "price": 2.09
+        },
+        {
+          "sku": "268050036",
+          "description": "JENNIE-O",
+          "tax_code": "FC",
+          "price": 2.99
+        },
+        {
+          "sku": "270020350",
+          "description": "LEAN CUISIN",
+          "tax_code": "FC",
+          "price": 2.45
+        },
+        {
+          "description": "Cartwheel 15% off $2.89",
+          "type": "discount_info"
+        },
+        {
+          "sku": "270021296",
+          "description": "LEAN CUISIN",
+          "tax_code": "FC",
+          "price": 2.14
+        },
+        {
+          "sku": "270021326",
+          "description": "LEAN CUISIN",
+          "tax_code": "FC",
+          "price": 2.89
+        },
+        {
+          "sku": "270021477",
+          "description": "LEAN CUISIN",
+          "tax_code": "FC",
+          "price": 2.45
+        },
+        {
+          "description": "Cartwheel 15% off $2.89",
+          "type": "discount_info"
+        },
+        {
+          "sku": "270110029",
+          "description": "EVOL",
+          "tax_code": "FC",
+          "price": 5.59
+        },
+        {
+          "description": "Cartwheel 30% off $7.99",
+          "type": "discount_info"
+        },
+        {
+          "sku": "270110217",
+          "description": "BIRD SUBB H",
+          "tax_code": "FC",
+          "price": 4.09
+        },
+        {
+          "sku": "284031157",
+          "description": "MP EGGS",
+          "tax_code": "FC",
+          "price": 1.89
+        },
+        {
+          "description": "Cartwheel 5% off $1.99",
+          "type": "discount_info"
+        },
+        {
+          "sku": "284050033",
+          "description": "REDDI WIP",
+          "tax_code": "FC",
+          "price": 3.72
+        },
+        {
+          "sku": "284062204",
+          "description": "MP H AND H",
+          "tax_code": "FC",
+          "price": 1.41
+        },
+        {
+          "description": "Cartwheel 5% off $1.49",
+          "type": "discount_info"
+        },
+        {
+          "sku": "284101094",
+          "description": "CHOBANI",
+          "tax_code": "FC",
+          "price": 1.00
+        },
+        {
+          "sku": "284101095",
+          "description": "CHOBANI",
+          "tax_code": "FC",
+          "price": 1.00
+        },
+        {
+          "sku": "284101157",
+          "description": "CHOBANI",
+          "tax_code": "FC",
+          "price": 1.00
+        },
+        {
+          "sku": "284101488",
+          "description": "CHOBANI",
+          "tax_code": "FC",
+          "price": 2.00,
+          "quantity_detail": "2 @ $1.00 ea"
+        },
+        {
+          "sku": "288070759",
+          "description": "BREYERS",
+          "tax_code": "FC",
+          "price": 3.49,
+          "savings": "Saved $0.60 off $4.09"
+        },
+        {
+          "sku": "288070788",
+          "description": "BREYERS",
+          "tax_code": "FC",
+          "price": 3.49,
+          "savings": "Saved $0.60 off $4.09"
+        }
+      ]
+    },
+    {
+      "section": "HEALTH-BEAUTY-COSMETICS",
+      "entries": [
+        {
+          "sku": "049090323",
+          "description": "AQUAF 2PK",
+          "tax_code": "T",
+          "price": 4.89
+        },
+        {
+          "sku": "049110079",
+          "description": "SONICARE",
+          "tax_code": "T",
+          "price": 21.99
+        }
+      ]
+    },
+    {
+      "section": "HOME",
+      "entries": [
+        {
+          "sku": "072071302",
+          "description": "BISSELL",
+          "tax_code": "T",
+          "price": 129.99,
+          "savings": "Saved $20.00 off $149.99"
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "subtotal": 246.00,
+    "redcard_savings": 11.55,
+    "tax_details": [
+      {
+        "code": "T",
+        "description": "MO TAX",
+        "rate": "8.4750%",
+        "base_amount": 151.37,
+        "tax_amount": 12.83
+      },
+      {
+        "code": "C",
+        "description": "MO TAX",
+        "rate": "5.4750%",
+        "base_amount": 83.08,
+        "tax_amount": 4.55
+      }
+    ],
+    "total": 251.83
+  }
+}
