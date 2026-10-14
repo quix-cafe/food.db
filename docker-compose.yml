@@ -23,8 +23,12 @@ services:
     environment:
       DATABASE_URL: postgres://kitchen:kitchen@db:5432/kitchen
       PORT: 3000
+      UPLOAD_DIR: /app/data/uploads
+    volumes:
+      - uploads:/app/data/uploads
     ports:
       - "3000:3000"
 
 volumes:
   pgdata:
+  uploads:

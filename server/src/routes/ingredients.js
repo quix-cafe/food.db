@@ -3,6 +3,7 @@ import { completePurchaseCosts, percentChange, CalcError } from '@kitchen/shared
 import { query, tx } from '../db.js';
 import { LATEST_PURCHASE, INGREDIENT_COLUMNS } from '../sql.js';
 import { normalizeReceipt } from '../services/receipt.js';
+import { resolveName, matchItems } from '../matching.js';
 import { HttpError, badRequest, notFound, text, number, date, uuid, array, today } from '../validate.js';
 
 const router = Router();
@@ -39,14 +40,14 @@ function purchaseFields(p) {
   };
 }
 
-async function insertPurchase(client, ingredientId, p) {
+async function insertPurchase(client, ingredientId, p, receiptId = null) {
   const { rows } = await client.query(
     `INSERT INTO ingredient_purchases
-       (ingredient_id, purchase_date, vendor, quantity, weight, unit, unit_cost, total_cost)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       (ingredient_id, purchase_date, vendor, quantity, weight, unit, unit_cost, total_cost, receipt_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
      RETURNING id, ingredient_id AS "ingredientId", purchase_date AS "date", vendor, quantity, weight, unit,
-               unit_cost AS "unitCost", total_cost AS "totalCost", created_at AS "createdAt"`,
-    [ingredientId, p.date, p.vendor, p.quantity, p.weight, p.unit, p.unitCost, p.totalCost],
+               unit_cost AS "unitCost", total_cost AS "totalCost", receipt_id AS "receiptId", created_at AS "createdAt"`,
+    [ingredientId, p.date, p.vendor, p.quantity, p.weight, p.unit, p.unitCost, p.totalCost, receiptId],
   );
   return rows[0];
 }
@@ -65,7 +66,8 @@ router.get('/', async (req, res) => {
   const where = [];
   if (req.query.q) {
     params.push(`%${String(req.query.q).trim()}%`);
-    where.push(`i.name ILIKE $${params.length}`);
+    where.push(`(i.name ILIKE $${params.length}
+      OR EXISTS (SELECT 1 FROM ingredient_aliases a WHERE a.ingredient_id = i.id AND a.alias ILIKE $${params.length}))`);
   }
   if (req.query.category) {
     params.push(String(req.query.category));
@@ -107,18 +109,23 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Commit reviewed purchases (from the OCR grid or a manual form). Items are matched
-// to an existing ingredient by id or case-insensitive name; unknown names are created.
+// Commit reviewed purchases (from the receipt grid or a manual form). Items are matched
+// to an existing ingredient by id, saved alias or case-insensitive name; unknown names
+// are created. `alias` (the name as the receipt printed it) is remembered for next time
+// when it differs from the ingredient's name.
 router.post('/purchase', async (req, res) => {
   const items = array(req.body?.items, 'items');
   if (!items.length) throw badRequest('Add at least one item to save');
   const shared = { date: req.body?.date, vendor: req.body?.vendor };
+  const receiptId = uuid(req.body?.receiptId, 'Receipt', { required: false });
 
   const prepared = items.map((item, i) => {
     try {
       return {
         ingredientId: uuid(item.ingredientId, 'Ingredient', { required: false }),
         name: text(item.name, 'Item name'),
+        alias: text(item.alias, 'Receipt name'),
+        receiptLine: number(item.receiptLine, 'Receipt line', { integer: true, min: 0 }),
         category: text(item.category, 'Category', { max: 80 }),
         purchase: purchaseFields({ ...shared, ...Object.fromEntries(Object.entries(item).filter(([, v]) => v !== undefined && v !== null && v !== '')) }),
       };
@@ -129,29 +136,63 @@ router.post('/purchase', async (req, res) => {
   });
   prepared.forEach((p, i) => {
     if (!p.ingredientId && !p.name) throw badRequest(`Row ${i + 1}: Item name is required`);
+    if (p.receiptLine !== null && !receiptId) throw badRequest(`Row ${i + 1}: a receipt line needs a receiptId`);
   });
 
   const result = await tx(async (c) => {
+    if (receiptId) {
+      const { rowCount } = await c.query('SELECT 1 FROM receipts WHERE id = $1', [receiptId]);
+      if (!rowCount) throw notFound('Receipt');
+    }
     const purchases = [];
     const created = [];
+    const aliases = [];
     for (const item of prepared) {
       let id = item.ingredientId;
+      let name;
       if (id) {
-        const { rowCount } = await c.query('SELECT 1 FROM ingredients WHERE id = $1', [id]);
-        if (!rowCount) throw notFound('Ingredient');
+        const { rows } = await c.query('SELECT name FROM ingredients WHERE id = $1', [id]);
+        if (!rows[0]) throw notFound('Ingredient');
+        name = rows[0].name;
       } else {
-        const { rows } = await c.query(
-          `INSERT INTO ingredients (name, category) VALUES ($1, $2)
-           ON CONFLICT ((lower(name))) DO UPDATE SET name = ingredients.name
-           RETURNING id, (xmax = 0) AS inserted`,
-          [item.name, item.category],
-        );
-        id = rows[0].id;
-        if (rows[0].inserted) created.push({ id, name: item.name });
+        const known = await resolveName(c, item.name);
+        if (known) {
+          ({ id, name } = known);
+        } else {
+          const { rows } = await c.query(
+            `INSERT INTO ingredients (name, category) VALUES ($1, $2) RETURNING id`,
+            [item.name, item.category],
+          );
+          ({ id } = rows[0]);
+          name = item.name;
+          created.push({ id, name });
+        }
       }
-      purchases.push(await insertPurchase(c, id, item.purchase));
+      if (item.alias && item.alias.toLowerCase() !== name.toLowerCase()) {
+        // Re-pointing an existing alias is deliberate: the reviewer chose this ingredient.
+        await c.query(
+          `INSERT INTO ingredient_aliases (ingredient_id, alias) VALUES ($1, $2)
+           ON CONFLICT ((lower(alias))) DO UPDATE SET ingredient_id = EXCLUDED.ingredient_id`,
+          [id, item.alias],
+        );
+        aliases.push({ alias: item.alias, ingredientId: id, ingredient: name });
+      }
+      const purchase = await insertPurchase(c, id, item.purchase, receiptId);
+      if (item.receiptLine !== null) {
+        const { rowCount } = await c.query(
+          `UPDATE receipt_lines SET purchase_id = $1 WHERE receipt_id = $2 AND position = $3 AND purchase_id IS NULL`,
+          [purchase.id, receiptId, item.receiptLine],
+        );
+        if (!rowCount) {
+          const { rowCount: exists } = await c.query('SELECT 1 FROM receipt_lines WHERE receipt_id = $1 AND position = $2', [receiptId, item.receiptLine]);
+          if (!exists) throw notFound('Receipt line');
+          throw new HttpError(409, `“${item.alias ?? item.name ?? name}” was already saved from this receipt. Reload to see its current state.`);
+        }
+        purchase.receiptLine = item.receiptLine;
+      }
+      purchases.push(purchase);
     }
-    return { purchases, createdIngredients: created };
+    return { purchases, createdIngredients: created, aliasesSaved: aliases };
   });
   res.status(201).json(result);
 });
@@ -160,18 +201,8 @@ router.post('/purchase', async (req, res) => {
 router.post('/import-receipt', async (req, res) => {
   const receipt = normalizeReceipt(req.body);
 
-  // Suggest an existing ingredient for each line (exact name first, then trigram similarity).
-  for (const item of receipt.items) {
-    const { rows } = await query(
-      `SELECT id, name, category, similarity(name, $1) AS score
-       FROM ingredients
-       WHERE lower(name) = lower($1) OR similarity(name, $1) > 0.3
-       ORDER BY (lower(name) = lower($1)) DESC, score DESC
-       LIMIT 1`,
-      [item.name],
-    );
-    item.match = rows[0] ? { id: rows[0].id, name: rows[0].name, category: rows[0].category, score: Number(rows[0].score) } : null;
-  }
+  // `match`: resolved without asking; `suggestion`: offered to the reviewer, never applied.
+  await matchItems({ query }, receipt.items);
   res.json(receipt);
 });
 
@@ -228,13 +259,22 @@ router.delete('/:id/purchases/:purchaseId', async (req, res) => {
   res.status(204).end();
 });
 
+router.delete('/:id/aliases/:aliasId', async (req, res) => {
+  const { rowCount } = await query('DELETE FROM ingredient_aliases WHERE id = $1 AND ingredient_id = $2', [
+    uuid(req.params.aliasId, 'aliasId'),
+    uuid(req.params.id, 'id'),
+  ]);
+  if (!rowCount) throw notFound('Alias');
+  res.status(204).end();
+});
+
 // Time series of every purchase, with per-vendor price-hike flags.
 router.get('/:id/history', async (req, res) => {
   const id = uuid(req.params.id, 'id');
   const ingredient = await getIngredient(id);
   const { rows } = await query(
     `SELECT id, purchase_date AS "date", vendor, quantity, weight, unit,
-            unit_cost AS "unitCost", total_cost AS "totalCost", created_at AS "createdAt"
+            unit_cost AS "unitCost", total_cost AS "totalCost", receipt_id AS "receiptId", created_at AS "createdAt"
      FROM ingredient_purchases WHERE ingredient_id = $1
      ORDER BY purchase_date, created_at`,
     [id],
@@ -267,8 +307,14 @@ router.get('/:id/history', async (req, res) => {
     vendors.set(name, v);
   }
 
+  const { rows: aliases } = await query(
+    `SELECT id, alias, created_at AS "createdAt" FROM ingredient_aliases WHERE ingredient_id = $1 ORDER BY lower(alias)`,
+    [id],
+  );
+
   res.json({
     ingredient,
+    aliases,
     priceHikeThreshold: PRICE_HIKE_THRESHOLD,
     purchases: purchases.reverse(),
     vendors: [...vendors.values()],

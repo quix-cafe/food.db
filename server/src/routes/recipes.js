@@ -3,6 +3,7 @@ import { calculateRecipe } from '@kitchen/shared';
 import { query, tx } from '../db.js';
 import { LATEST_PURCHASE, RECIPE_COLUMNS, RECIPE_LINES } from '../sql.js';
 import { badRequest, notFound, text, number, uuid, array } from '../validate.js';
+import { uploadImages, attachImages, listImages, copyImages, ownedFilenames, removeFiles, reorderImages } from '../images.js';
 
 const router = Router();
 
@@ -14,7 +15,8 @@ export async function loadRecipes(ids, client = { query }) {
     client.query(RECIPE_LINES, [ids]),
   ]);
   const byRecipe = Map.groupBy(lines, (l) => l.recipeId);
-  return recipes.map((r) => ({ ...r, lines: byRecipe.get(r.id) ?? [] }));
+  const images = await listImages(client, 'recipe', ids);
+  return recipes.map((r) => ({ ...r, lines: byRecipe.get(r.id) ?? [], images: images.get(r.id) ?? [] }));
 }
 
 function withCosting(recipe, expectedServings) {
@@ -86,9 +88,11 @@ router.get('/', async (req, res) => {
     recipes
       .sort((a, b) => order.get(a.id) - order.get(b.id))
       .map((r) => {
-        const { lines, costing, ...rest } = withCosting(r);
+        const { lines, costing, images, ...rest } = withCosting(r);
         return {
           ...rest,
+          coverImage: images[0] ?? null,
+          imageCount: images.length,
           ingredientCount: lines.length,
           missingPrices: lines.filter((l) => l.unitCost === null).length,
           costPerServing: costing.costPerServing,
@@ -200,15 +204,42 @@ router.post('/:id/duplicate', async (req, res) => {
        SELECT $2, position, ingredient_id, use_percent, base_quantity FROM recipe_ingredients WHERE recipe_id = $1`,
       [id, rows[0].id],
     );
+    await copyImages(c, 'recipe', id, rows[0].id);
     return rows[0].id;
   });
   res.status(201).json(await getOne(newId));
 });
 
 router.delete('/:id', async (req, res) => {
-  const { rowCount } = await query('DELETE FROM recipes WHERE id = $1', [uuid(req.params.id, 'id')]);
-  if (!rowCount) throw notFound('Recipe');
+  const id = uuid(req.params.id, 'id');
+  const files = await tx(async (c) => {
+    const names = await ownedFilenames(c, 'recipe', id);
+    const { rowCount } = await c.query('DELETE FROM recipes WHERE id = $1', [id]);
+    if (!rowCount) throw notFound('Recipe');
+    return names;
+  });
+  await removeFiles(files);
   res.status(204).end();
+});
+
+// Photos: multipart `images` (up to 20 per request), appended after existing ones.
+router.post('/:id/images', uploadImages, async (req, res) => {
+  const id = uuid(req.params.id, 'id');
+  if (!req.files?.length) throw badRequest('Attach at least one image in the "images" field');
+  const added = await tx(async (c) => {
+    const { rowCount } = await c.query('SELECT 1 FROM recipes WHERE id = $1', [id]);
+    if (!rowCount) throw notFound('Recipe');
+    return attachImages(c, 'recipe', id, req.files);
+  });
+  res.status(201).json(added);
+});
+
+// The first image is the recipe's cover.
+router.put('/:id/images/order', async (req, res) => {
+  const id = uuid(req.params.id, 'id');
+  const ids = array(req.body?.imageIds, 'imageIds').map((v, i) => uuid(v, `Image ${i + 1}`));
+  await tx((c) => reorderImages(c, 'recipe', id, ids));
+  res.json((await listImages({ query }, 'recipe', [id])).get(id));
 });
 
 export default router;

@@ -8,8 +8,10 @@ import { unitMoney } from '../format.js';
  * - `value` / `onInput`: the typed text (controlled)
  * - `onPick(ingredient)`: called when an existing ingredient is chosen
  * - `exclude`: ingredient ids to hide (e.g. already on the recipe)
+ * - `autoHighlight`: pre-select the first option so Enter picks it; when false, Enter with
+ *   nothing highlighted calls `onCommit` (keep the typed text) and Escape calls `onCancel`
  */
-export default function IngredientCombobox({ value, onInput, onPick, exclude = [], placeholder = 'Search ingredients…', ariaLabel, autoFocus, footer }) {
+export default function IngredientCombobox({ value, onInput, onPick, exclude = [], placeholder = 'Search ingredients…', ariaLabel, autoFocus, footer, autoHighlight = true, onCommit, onCancel, onBlur, selectOnFocus }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const [options, setOptions] = useState([]);
@@ -27,7 +29,8 @@ export default function IngredientCombobox({ value, onInput, onPick, exclude = [
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, open, exclude.join()]);
 
-  useEffect(() => setActive(0), [options]);
+  const first = autoHighlight ? 0 : -1;
+  useEffect(() => setActive(first), [options, first]);
 
   useEffect(() => {
     const close = (e) => !ref.current?.contains(e.target) && setOpen(false);
@@ -42,9 +45,10 @@ export default function IngredientCombobox({ value, onInput, onPick, exclude = [
 
   const onKeyDown = (e) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setActive((a) => Math.min(a + 1, options.length - 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(a - 1, first)); }
     else if (e.key === 'Enter' && open && options[active]) { e.preventDefault(); pick(options[active]); }
-    else if (e.key === 'Escape') setOpen(false);
+    else if (e.key === 'Enter' && onCommit) { e.preventDefault(); onCommit(); }
+    else if (e.key === 'Escape') { setOpen(false); onCancel?.(); }
   };
 
   return (
@@ -61,7 +65,8 @@ export default function IngredientCombobox({ value, onInput, onPick, exclude = [
         placeholder={placeholder}
         autoFocus={autoFocus}
         onChange={(e) => { onInput(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
+        onFocus={(e) => { setOpen(true); if (selectOnFocus) e.target.select(); }}
+        onBlur={onBlur}
         onKeyDown={onKeyDown}
       />
       {open && (options.length > 0 || footer) && (

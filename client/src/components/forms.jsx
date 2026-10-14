@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
+import { saveDraftPhotos } from '../receiptDraft.js';
 import { useApi } from '../hooks.js';
 import { todayIso, toDecimal, money } from '../format.js';
 import { Field, Notice, Spinner, useToast } from './ui.jsx';
@@ -90,11 +91,11 @@ export function NewIngredientForm({ onDone }) {
 /**
  * Takes receipt JSON produced outside the app (e.g. by qwen), asks the server to
  * normalise it and suggest matching ingredients, then opens the review grid.
- * An optional receipt photo stays in the browser, shown beside the grid for checking.
+ * Optional receipt photos are shown beside the grid and stored with the receipt on save.
  */
 export function ReceiptImportForm({ onDone }) {
   const [text, setText] = useState('');
-  const [photo, setPhoto] = useState(null);
+  const [photos, setPhotos] = useState([]);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [over, setOver] = useState(false);
@@ -102,7 +103,7 @@ export function ReceiptImportForm({ onDone }) {
 
   const readFile = async (file) => {
     if (!file) return;
-    if (file.type.startsWith('image/')) return setPhoto(file);
+    if (file.type.startsWith('image/')) return setPhotos((p) => [...p, file]);
     setText(await file.text());
   };
 
@@ -119,7 +120,7 @@ export function ReceiptImportForm({ onDone }) {
     try {
       const receipt = await api('/ingredients/import-receipt', { method: 'POST', body: parsed });
       navigate('/ingredients/review', {
-        state: { receipt, source: JSON.stringify(parsed, null, 2), photoUrl: photo ? URL.createObjectURL(photo) : null },
+        state: { receipt, source: JSON.stringify(parsed, null, 2), draftId: saveDraftPhotos(photos) },
       });
       onDone?.();
     } catch (err) {
@@ -137,7 +138,7 @@ export function ReceiptImportForm({ onDone }) {
         onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); [...e.dataTransfer.files].forEach(readFile); }}
       >
-        Drop a receipt <b>.json</b> file (and the photo, if you have it) here, or{' '}
+        Drop a receipt <b>.json</b> file and its photos here, or{' '}
         <label style={{ color: 'var(--basil)', fontWeight: 650, cursor: 'pointer' }}>
           choose files
           <input type="file" accept=".json,application/json,image/*" multiple className="visually-hidden" onChange={(e) => [...e.target.files].forEach(readFile)} />
@@ -147,7 +148,12 @@ export function ReceiptImportForm({ onDone }) {
         <textarea className="input" rows={9} value={text} onChange={(e) => setText(e.target.value)} spellCheck={false}
           placeholder={'{\n  "vendor": "Restaurant Depot",\n  "date": "2026-10-14",\n  "items": [{ "name": "Flour 50 lb", "quantity": 1, "total": 28.90 }]\n}'} />
       </Field>
-      {photo && <p className="muted">Photo attached: {photo.name} (stays on this device)</p>}
+      {photos.length > 0 && (
+        <p className="muted">
+          {photos.length} photo{photos.length === 1 ? '' : 's'} attached ({photos.map((p) => p.name).join(', ')}).{' '}
+          <button type="button" className="link-btn" onClick={() => setPhotos([])}>Remove</button>
+        </p>
+      )}
       {error && <Notice kind="error">{error}</Notice>}
       <div className="form-actions">
         <button className="btn primary" disabled={busy || !text.trim()}>{busy ? <Spinner /> : null} Review items</button>

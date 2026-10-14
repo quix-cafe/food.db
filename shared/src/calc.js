@@ -131,6 +131,7 @@ export function calculateRecipe({
     scaledCost: cost(scaledCost),
     costPerServing: cost(costPerServing),
     recommendedPrice: money(price),
+    profitPerServing: money(price.minus(costPerServing)),
     revenue: money(revenue),
     profit: money(profit),
     scaledYield: yieldD ? yieldD.times(scale).toDecimalPlaces(COST_DP).toString() : null,

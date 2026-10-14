@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node --env-file-if-exists=../.env src/index.js",
     "dev": "node --env-file-if-exists=../.env --watch src/index.js",
     "migrate": "node --env-file-if-exists=../.env src/migrate.js",
     "seed": "node --env-file-if-exists=../.env src/seed.js",
@@ -13,6 +13,7 @@
   "dependencies": {
     "@kitchen/shared": "*",
     "express": "^5.1.0",
+    "multer": "^2.4.0",
     "pg": "^8.13.0"
   }
 }

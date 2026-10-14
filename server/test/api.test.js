@@ -150,3 +150,45 @@ test('receipt JSON import suggests existing ingredients and saves nothing', { sk
   const afterList = await api('GET', '/ingredients');
   assert.equal(afterList.data.length, before.data.length);
 });
+
+test('receipt names become aliases and auto-resolve on the next import', { skip }, async () => {
+  const receipt = { vendor: 'Depot', items: [{ name: 'AP FLR 50#', price: 27 }, { name: 'LMN JUICE', price: 4 }] };
+
+  const first = await api('POST', '/ingredients/import-receipt', receipt);
+  assert.equal(first.data.items[0].match, null);
+
+  // Row 1 mapped to an existing ingredient; row 2 typed as a new name.
+  const saved = await api('POST', '/ingredients/purchase', {
+    vendor: 'Depot',
+    items: [
+      { ingredientId: ids.flour, alias: 'AP FLR 50#', quantity: 1, totalCost: 27 },
+      { name: 'Lemon juice', category: 'Produce', alias: 'LMN JUICE', quantity: 1, totalCost: 4 },
+    ],
+  });
+  assert.equal(saved.status, 201);
+  assert.deepEqual(saved.data.aliasesSaved.map((a) => [a.alias, a.ingredient]), [['AP FLR 50#', 'Flour'], ['LMN JUICE', 'Lemon juice']]);
+  assert.deepEqual(saved.data.createdIngredients.map((c) => c.name), ['Lemon juice']);
+
+  const again = await api('POST', '/ingredients/import-receipt', { items: [{ name: 'ap flr 50#', price: 28 }, { name: 'LMN JUICE', price: 4 }] });
+  assert.deepEqual(again.data.items.map((i) => [i.match?.name, i.match?.via]), [['Flour', 'alias'], ['Lemon juice', 'alias']]);
+
+  // Committing by the receipt name alone also resolves through the alias.
+  const byAlias = await api('POST', '/ingredients/purchase', { items: [{ name: 'AP FLR 50#', quantity: 1, totalCost: 28 }] });
+  assert.equal(byAlias.data.createdIngredients.length, 0);
+  assert.equal(byAlias.data.purchases[0].ingredientId, ids.flour);
+
+  // Search finds an ingredient by alias; the drawer lists and removes aliases.
+  const search = await api('GET', '/ingredients?q=flr');
+  assert.deepEqual(search.data.map((i) => i.name), ['Flour']);
+  const hist = await api('GET', `/ingredients/${ids.flour}/history`);
+  assert.deepEqual(hist.data.aliases.map((a) => a.alias), ['AP FLR 50#']);
+  const del = await api('DELETE', `/ingredients/${ids.flour}/aliases/${hist.data.aliases[0].id}`);
+  assert.equal(del.status, 204);
+  const after = await api('POST', '/ingredients/import-receipt', { items: [{ name: 'AP FLR 50#', price: 28 }] });
+  assert.equal(after.data.items[0].match, null);
+});
+
+test('an alias equal to the ingredient name is not stored', { skip }, async () => {
+  const r = await api('POST', '/ingredients/purchase', { items: [{ ingredientId: ids.flour, alias: 'FLOUR', quantity: 1, totalCost: 1 }] });
+  assert.deepEqual(r.data.aliasesSaved, []);
+});

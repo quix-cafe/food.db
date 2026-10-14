@@ -9,6 +9,7 @@ import RecipeGallery from './pages/RecipeGallery.jsx';
 import RecipeBuilder from './pages/RecipeBuilder.jsx';
 import EventsPage from './pages/EventsPage.jsx';
 import EventPlanner from './pages/EventPlanner.jsx';
+import ReceiptsPage, { ReceiptDetailPage } from './pages/ReceiptsPage.jsx';
 
 function QuickAdd({ onClose }) {
   const [tab, setTab] = useState('receipt');
@@ -39,6 +40,7 @@ export default function App() {
           </Link>
           <div className="nav">
             <NavLink to="/ingredients"><Icon.database /> Database</NavLink>
+            <NavLink to="/receipts"><Icon.receipt /> Receipts</NavLink>
             <NavLink to="/recipes"><Icon.recipe /> Recipes</NavLink>
             <NavLink to="/events"><Icon.calendar /> Events</NavLink>
           </div>
@@ -47,13 +49,15 @@ export default function App() {
           <header className="topbar">
             <UniversalSearch />
             <button className="btn primary" onClick={() => setQuickAdd(true)}>
-              <Icon.receipt /> Quick add
+              <Icon.plus /> Quick add
             </button>
           </header>
           <Routes>
             <Route path="/" element={<Navigate to="/ingredients" replace />} />
             <Route path="/ingredients" element={<IngredientsPage />} />
             <Route path="/ingredients/review" element={<ReceiptReviewPage />} />
+            <Route path="/receipts" element={<ReceiptsPage />} />
+            <Route path="/receipts/:id" element={<ReceiptDetailPage />} />
             <Route path="/recipes" element={<RecipeGallery />} />
             <Route path="/recipes/new" element={<RecipeBuilder />} />
             <Route path="/recipes/:id" element={<RecipeBuilder />} />

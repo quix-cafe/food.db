@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
 import { useApi, useDebounced } from '../hooks.js';
 import { date, money, percent, qty, signedPercent, unitMoney, toDecimal } from '../format.js';
@@ -165,6 +165,7 @@ function IngredientDrawer({ id, onClose }) {
     if (await run(() => api(`/ingredients/${id}`, { method: 'DELETE' }), `Deleted ${ing.name}`)) onClose();
   };
 
+  const removeAlias = (a) => run(() => api(`/ingredients/${id}/aliases/${a.id}`, { method: 'DELETE' }), `Forgot “${a.alias}”`).then(reload);
   const removePurchase = (pid) => run(() => api(`/ingredients/${id}/purchases/${pid}`, { method: 'DELETE' }), 'Purchase removed').then(reload);
 
   const hikes = data?.vendors.filter((v) => v.priceHike) ?? [];
@@ -228,6 +229,25 @@ function IngredientDrawer({ id, onClose }) {
             </div>
           </form>
 
+          <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <h3>Receipt names</h3>
+            {data.aliases.length ? (
+              <>
+                <div className="alias-list">
+                  {data.aliases.map((a) => (
+                    <span key={a.id} className="badge">
+                      {a.alias}
+                      <button aria-label={`Forget receipt name ${a.alias}`} title="Forget this receipt name" onClick={() => removeAlias(a)}><Icon.close /></button>
+                    </span>
+                  ))}
+                </div>
+                <small className="muted">Receipt lines with these names are matched to {ing.name} automatically.</small>
+              </>
+            ) : (
+              <small className="muted">None yet. When you rename a receipt line to {ing.name}, the receipt’s wording is remembered here.</small>
+            )}
+          </section>
+
           <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3>Purchases</h3>
@@ -249,7 +269,7 @@ function IngredientDrawer({ id, onClose }) {
                   {data.purchases.map((p) => (
                     <tr key={p.id}>
                       <td className="nowrap">{date(p.date)}</td>
-                      <td>{p.vendor ?? '—'}</td>
+                      <td>{p.vendor ?? '—'}{p.receiptId && <> <Link to={`/receipts/${p.receiptId}`} className="muted" style={{ fontSize: '0.85rem' }}>Receipt</Link></>}</td>
                       <td className="num">{qty(p.quantity)} {p.unit}</td>
                       <td className="num">{unitMoney(p.unitCost)}</td>
                       <td className="num">{money(p.totalCost)}</td>

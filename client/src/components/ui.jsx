@@ -12,6 +12,7 @@ export const Icon = {
   dots: () => <svg {...s}><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></svg>,
   grip: () => <svg {...s} strokeWidth="2.5"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" /></svg>,
   trash: () => <svg {...s}><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>,
+  pencil: () => <svg {...s} width="14" height="14"><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="m13.5 6.5 4 4" /></svg>,
   receipt: () => <svg {...s}><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6" /></svg>,
   up: () => <svg {...s} width="14" height="14"><path d="m6 15 6-6 6 6" /></svg>,
   down: () => <svg {...s} width="14" height="14"><path d="m6 9 6 6 6-6" /></svg>,

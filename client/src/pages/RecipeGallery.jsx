@@ -56,6 +56,9 @@ export default function RecipeGallery() {
       <div className="gallery">
         {(data ?? []).map((r) => (
           <article key={r.id} className="panel recipe-card">
+            {r.coverImage && (
+              <div className="card-cover"><img src={r.coverImage.url} alt="" loading="lazy" /></div>
+            )}
             <h3><Link to={`/recipes/${r.id}`}>{r.name}</Link></h3>
             <Menu
               label={`Actions for ${r.name}`}
@@ -76,7 +79,7 @@ export default function RecipeGallery() {
               {r.missingPrices > 0 && <span className="badge warn">{r.missingPrices} unpriced</span>}
             </div>
             <div className="card-meta">
-              <span>{r.ingredientCount} ingredients</span>
+              <span>{r.ingredientCount} ingredients{r.imageCount > 1 ? `, ${r.imageCount} photos` : ''}</span>
               <span title={r.lastPriceSync ?? ''}>{r.lastPriceSync ? `Prices from ${dateTime(r.lastPriceSync)}` : 'No prices yet'}</span>
             </div>
           </article>

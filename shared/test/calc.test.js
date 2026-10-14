@@ -41,6 +41,7 @@ test('recipe scaling leaves base cost unchanged and scales cost/quantity', () =>
   assert.equal(r.scaledCost, '10.0000');
   assert.equal(r.costPerServing, '1.0000');
   assert.equal(r.recommendedPrice, '3.33');
+  assert.equal(r.profitPerServing, '2.33');
   assert.equal(r.revenue, '33.30');
   assert.equal(r.profit, '23.30');
   assert.equal(r.scaledYield, '5');

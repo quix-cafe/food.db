@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { calculateRecipe, DEFAULT_MARGIN } from '@kitchen/shared';
-import { api, notifyDataChanged } from '../api.js';
+import { api, imageForm, notifyDataChanged } from '../api.js';
+import ImageGallery, { useLocalImages } from '../components/ImageGallery.jsx';
 import { date, money, qty, unitMoney, toDecimal } from '../format.js';
 import IngredientCombobox from '../components/IngredientCombobox.jsx';
 import { Field, Icon, Notice, Spinner, useToast } from '../components/ui.jsx';
@@ -41,6 +42,11 @@ export default function RecipeBuilder() {
   const [search, setSearch] = useState('');
   const [drag, setDrag] = useState({ from: null, over: null });
   const [addToEvent, setAddToEvent] = useState(false);
+  const [images, setImages] = useState([]); // saved photos (existing recipe)
+  const [pendingPhotos, setPendingPhotos] = useState([]); // chosen before a new recipe is created
+  const pendingImages = useLocalImages(pendingPhotos);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState(null);
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -48,6 +54,7 @@ export default function RecipeBuilder() {
     if (!id) {
       setForm(blank);
       setSaved(savedShape(blank));
+      setImages([]);
       setExpected(blank.baseServings);
       return;
     }
@@ -59,6 +66,7 @@ export default function RecipeBuilder() {
         setForm(f);
         setSaved(savedShape(f));
         setExpected(f.baseServings);
+        setImages(r.images);
       })
       .catch((err) => !stale && setLoadError(err.message));
     return () => { stale = true; };
@@ -129,6 +137,14 @@ export default function RecipeBuilder() {
       const f = fromServer(r);
       setForm(f);
       setSaved(savedShape(f));
+      if (!id && pendingPhotos.length) {
+        try {
+          await api(`/recipes/${r.id}/images`, { method: 'POST', body: imageForm(pendingPhotos) });
+          setPendingPhotos([]);
+        } catch (err) {
+          toast(`Recipe created, but the photos didn’t upload: ${err.message}`);
+        }
+      }
       notifyDataChanged();
       toast(id ? 'Recipe saved' : 'Recipe created');
       if (!id) navigate(`/recipes/${r.id}`, { replace: true });
@@ -138,6 +154,29 @@ export default function RecipeBuilder() {
       setSaving(false);
     }
   };
+
+  // Photos on a saved recipe are stored as soon as they're added; on a new recipe they wait for Create.
+  const photoAction = async (fn) => {
+    setPhotoBusy(true);
+    setPhotoError(null);
+    try {
+      setImages(await fn());
+      notifyDataChanged();
+    } catch (err) {
+      setPhotoError(err.message);
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+  const addPhotos = (files) => (id
+    ? photoAction(async () => [...images, ...(await api(`/recipes/${id}/images`, { method: 'POST', body: imageForm(files) }))])
+    : setPendingPhotos((p) => [...p, ...files]));
+  const removePhoto = (img) => (id
+    ? photoAction(async () => { await api(`/images/${img.id}`, { method: 'DELETE' }); return images.filter((i) => i.id !== img.id); })
+    : setPendingPhotos((p) => p.filter((f) => f !== img.file)));
+  const makeCover = (img) => (id
+    ? photoAction(() => api(`/recipes/${id}/images/order`, { method: 'PUT', body: { imageIds: [img.id, ...images.filter((i) => i.id !== img.id).map((i) => i.id)] } }))
+    : setPendingPhotos((p) => [img.file, ...p.filter((f) => f !== img.file)]));
 
   const lineById = new Map((costing?.lines ?? []).map((l) => [l.key, l]));
   const scaled = costing && costing.scale !== '1';
@@ -166,7 +205,6 @@ export default function RecipeBuilder() {
               <Field label="Base servings" hint="What the recipe makes as written"><input className="input num" inputMode="numeric" value={form.baseServings} onChange={set('baseServings')} /></Field>
               <Field label="Total yield"><input className="input num" inputMode="decimal" value={form.totalYield} onChange={set('totalYield')} placeholder="Optional" /></Field>
               <Field label="Yield unit"><input className="input" value={form.yieldUnit} onChange={set('yieldUnit')} placeholder="qt, portions…" /></Field>
-              <Field label="Target margin %"><input className="input num" inputMode="decimal" value={form.targetMargin} onChange={set('targetMargin')} /></Field>
             </div>
           </section>
 
@@ -223,8 +261,8 @@ export default function RecipeBuilder() {
                             : <small className="muted">per {l.unit ?? 'unit'}, bought {date(l.priceDate)}</small>}
                         </td>
                         <td className="num">{l.unitCost ? unitMoney(l.unitCost) : '—'}</td>
-                        <td><input className="input num" style={{ width: 80 }} inputMode="decimal" value={l.baseQuantity} aria-label={`${l.name} quantity`} aria-invalid={!toDecimal(l.baseQuantity)} onChange={(e) => setLine(l.key, { baseQuantity: e.target.value })} /></td>
-                        <td><input className="input num" style={{ width: 72 }} inputMode="decimal" value={l.usePercent} aria-label={`${l.name} use percent`} aria-invalid={!toDecimal(l.usePercent)} onChange={(e) => setLine(l.key, { usePercent: e.target.value })} /></td>
+                        <td className="num"><input className="input num" style={{ width: 80 }} inputMode="decimal" value={l.baseQuantity} aria-label={`${l.name} quantity`} aria-invalid={!toDecimal(l.baseQuantity)} onChange={(e) => setLine(l.key, { baseQuantity: e.target.value })} /></td>
+                        <td className="num"><input className="input num" style={{ width: 72 }} inputMode="decimal" value={l.usePercent} aria-label={`${l.name} use percent`} aria-invalid={!toDecimal(l.usePercent)} onChange={(e) => setLine(l.key, { usePercent: e.target.value })} /></td>
                         <td className="num">{c ? money(c.baseCost) : '—'}</td>
                         {scaled && <td className="num scaled">{c ? `${qty(c.scaledQuantity)}` : '—'}</td>}
                         {scaled && <td className="num scaled">{c ? money(c.scaledCost) : '—'}</td>}
@@ -252,6 +290,23 @@ export default function RecipeBuilder() {
               />
             </div>
           </section>
+
+          <section className="panel">
+            <div className="panel-head">
+              <h2>Photos</h2>
+              <span className="muted">{id ? 'Saved as soon as you add them. The first photo is the cover.' : 'Uploaded when you create the recipe.'}</span>
+            </div>
+            <div className="panel-pad" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <ImageGallery
+                images={id ? images : pendingImages}
+                onAdd={addPhotos}
+                onRemove={removePhoto}
+                onMakeCover={makeCover}
+                busy={photoBusy}
+              />
+              {photoError && <Notice kind="error">{photoError}</Notice>}
+            </div>
+          </section>
         </div>
 
         <aside className="ticket-rail" aria-label="Financials">
@@ -264,12 +319,35 @@ export default function RecipeBuilder() {
               <label htmlFor="expected">Expected servings</label>
               <input id="expected" className="input" inputMode="numeric" value={expected} onChange={(e) => setExpected(e.target.value)} />
             </div>
+            <div className="margin-slider">
+              <div className="margin-slider-head">
+                <label htmlFor="margin">Target margin</label>
+                <output htmlFor="margin">{toDecimal(form.targetMargin)?.toString() ?? '—'}%</output>
+              </div>
+              <input
+                id="margin"
+                type="range"
+                min="0"
+                max="95"
+                step="1"
+                value={toDecimal(form.targetMargin)?.toNumber() ?? 70}
+                onChange={set('targetMargin')}
+                style={{ '--fill': `${((toDecimal(form.targetMargin)?.toNumber() ?? 70) / 95) * 100}%` }}
+              />
+              <small>Saved with the recipe</small>
+            </div>
             {calcError && <Notice kind="error">{calcError}</Notice>}
             {costing && (
               <>
                 <div className="ticket-hero">
-                  <span>Cost per serving</span>
-                  <b>{money(costing.costPerServing)}</b>
+                  <div>
+                    <span>Cost per serving</span>
+                    <b>{money(costing.costPerServing)}</b>
+                  </div>
+                  <div className={`hero-profit ${toDecimal(costing.profitPerServing).lt(0) ? 'loss' : ''}`}>
+                    <span>Profit per serving</span>
+                    <b>{money(costing.profitPerServing)}</b>
+                  </div>
                 </div>
                 <dl className="ticket-rows">
                   <div><dt>Total cost, {costing.expectedServings} servings</dt><span className="leader" /><dd className={scaled ? 'scaled' : ''}>{money(costing.scaledCost)}</dd></div>
