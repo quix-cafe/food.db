@@ -1,0 +1,288 @@
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router';
+import { api, notifyDataChanged } from '../api.js';
+import { useApi, useDebounced } from '../hooks.js';
+import { date, money, percent, qty, signedPercent, unitMoney, toDecimal } from '../format.js';
+import { CategoryInput, PurchaseFields, emptyPurchase } from '../components/forms.jsx';
+import PriceChart from '../components/PriceChart.jsx';
+import { Drawer, Field, Icon, Notice, Spinner, useToast } from '../components/ui.jsx';
+
+const COLUMNS = [
+  { key: 'name', label: 'Ingredient' },
+  { key: 'category', label: 'Category' },
+  { key: 'latestUnitCost', label: 'Latest unit cost', num: true },
+  { key: 'latestUnit', label: 'Unit' },
+  { key: 'latestVendor', label: 'Vendor' },
+  { key: 'latestPurchaseDate', label: 'Last bought' },
+  { key: 'defaultYieldPercent', label: 'Yield', num: true },
+];
+
+function compare(a, b, key, num) {
+  const av = a[key];
+  const bv = b[key];
+  if (av == null && bv == null) return 0;
+  if (av == null) return 1;
+  if (bv == null) return -1;
+  if (num) return toDecimal(av).cmp(toDecimal(bv));
+  return String(av).localeCompare(String(bv), undefined, { sensitivity: 'base' });
+}
+
+export default function IngredientsPage() {
+  const [params, setParams] = useSearchParams();
+  const [filter, setFilter] = useState('');
+  const [category, setCategory] = useState(null);
+  const [sort, setSort] = useState({ key: 'name', dir: 1 });
+  const q = useDebounced(filter, 200);
+  const { data, error, loading } = useApi(`/ingredients${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+  const { data: categories } = useApi('/ingredients/categories');
+  const openId = params.get('open');
+
+  const rows = useMemo(() => {
+    const col = COLUMNS.find((c) => c.key === sort.key);
+    return (data ?? [])
+      .filter((r) => !category || r.category === category)
+      .slice()
+      .sort((a, b) => sort.dir * compare(a, b, sort.key, col?.num));
+  }, [data, category, sort]);
+
+  const toggleSort = (key) => setSort((s) => ({ key, dir: s.key === key ? -s.dir : 1 }));
+  const open = (id) => setParams(id ? { open: id } : {}, { replace: !id });
+
+  return (
+    <main className="page">
+      <div className="page-head">
+        <div>
+          <h1>Ingredient database</h1>
+          <p>Every ingredient with its most recent purchase price. Open one to see its price history by vendor.</p>
+        </div>
+      </div>
+
+      <section className="panel">
+        <div className="toolbar">
+          <div className="chips" role="group" aria-label="Filter by category">
+            <button className="chip" aria-pressed={!category} onClick={() => setCategory(null)}>All</button>
+            {(categories ?? []).map((c) => (
+              <button key={c} className="chip" aria-pressed={category === c} onClick={() => setCategory(category === c ? null : c)}>{c}</button>
+            ))}
+          </div>
+          <input className="input" style={{ maxWidth: 260 }} type="search" placeholder="Filter by name" aria-label="Filter ingredients by name" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        </div>
+
+        {error && <div className="panel-pad"><Notice kind="error">{error.message}</Notice></div>}
+
+        {!loading && rows.length === 0 && !error ? (
+          <div className="empty">
+            <h2>{data?.length || q || category ? 'No ingredients match' : 'No ingredients yet'}</h2>
+            <p>{data?.length || q || category ? 'Clear the filters to see everything.' : 'Use Quick add to import a receipt or enter an ingredient by hand.'}</p>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="grid">
+              <thead>
+                <tr>
+                  {COLUMNS.map((c) => (
+                    <th key={c.key} className={c.num ? 'num' : ''} aria-sort={sort.key === c.key ? (sort.dir > 0 ? 'ascending' : 'descending') : 'none'}>
+                      <button className="sort-btn" onClick={() => toggleSort(c.key)}>
+                        {c.label}
+                        {sort.key === c.key && (sort.dir > 0 ? <Icon.up /> : <Icon.down />)}
+                      </button>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className={`clickable ${openId === r.id ? 'selected' : ''}`} onClick={() => open(r.id)}>
+                    <td>
+                      <button className="sort-btn" style={{ fontWeight: 650 }} onClick={(e) => { e.stopPropagation(); open(r.id); }}>{r.name}</button>
+                    </td>
+                    <td>{r.category ?? <span className="muted">—</span>}</td>
+                    <td className="num">{r.latestUnitCost ? unitMoney(r.latestUnitCost) : <span className="badge">No price</span>}</td>
+                    <td>{r.latestUnit ?? '—'}</td>
+                    <td>{r.latestVendor ?? '—'}</td>
+                    <td className="nowrap">{date(r.latestPurchaseDate)}</td>
+                    <td className="num">{percent(r.defaultYieldPercent, 1)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {openId && <IngredientDrawer id={openId} onClose={() => open(null)} />}
+    </main>
+  );
+}
+
+function IngredientDrawer({ id, onClose }) {
+  const { data, error, reload } = useApi(`/ingredients/${id}/history`);
+  const [form, setForm] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [purchase, setPurchase] = useState(emptyPurchase);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const toast = useToast();
+
+  const ing = data?.ingredient;
+  useEffect(() => {
+    if (ing) setForm({ name: ing.name, category: ing.category ?? '', defaultYieldPercent: toDecimal(ing.defaultYieldPercent).toString() });
+  }, [ing?.id, ing?.name, ing?.category, ing?.defaultYieldPercent]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const dirty = form && ing && (form.name !== ing.name || form.category !== (ing.category ?? '') || !toDecimal(form.defaultYieldPercent)?.eq(ing.defaultYieldPercent));
+
+  const run = async (fn, ok) => {
+    setSaving(true);
+    setFormError(null);
+    try {
+      await fn();
+      notifyDataChanged();
+      if (ok) toast(ok);
+      return true;
+    } catch (err) {
+      setFormError(err.message);
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const save = (e) => {
+    e.preventDefault();
+    run(() => api(`/ingredients/${id}`, { method: 'PATCH', body: form }), 'Ingredient saved');
+  };
+
+  const addPurchase = async (e) => {
+    e.preventDefault();
+    if (await run(() => api(`/ingredients/${id}/purchases`, { method: 'POST', body: purchase }), 'Purchase recorded')) {
+      setAdding(false);
+      setPurchase(emptyPurchase());
+    }
+  };
+
+  const remove = async () => {
+    if (await run(() => api(`/ingredients/${id}`, { method: 'DELETE' }), `Deleted ${ing.name}`)) onClose();
+  };
+
+  const removePurchase = (pid) => run(() => api(`/ingredients/${id}/purchases/${pid}`, { method: 'DELETE' }), 'Purchase removed').then(reload);
+
+  const hikes = data?.vendors.filter((v) => v.priceHike) ?? [];
+
+  return (
+    <Drawer title={ing?.name ?? 'Loading…'} subtitle={ing && `Asset ID ${ing.id}`} onClose={onClose}>
+      {error && <Notice kind="error">{error.message}</Notice>}
+      {!data && !error && <Spinner />}
+      {data && form && (
+        <>
+          <div className="stat-row">
+            <div className="stat"><b>{ing.latestUnitCost ? unitMoney(ing.latestUnitCost) : '—'}</b><span>Latest per {ing.latestUnit ?? 'unit'}</span></div>
+            <div className="stat"><b>{data.purchases.length}</b><span>Purchases</span></div>
+            <div className="stat"><b>{data.vendors.length}</b><span>Vendors</span></div>
+          </div>
+
+          {hikes.length > 0 && (
+            <Notice>
+              {hikes.map((v) => (
+                <div key={v.vendor}><b>{v.vendor}</b> raised the price {signedPercent(v.latestChangePercent)} on {date(v.latestDate)}.</div>
+              ))}
+            </Notice>
+          )}
+
+          <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <h3>Price history</h3>
+            <PriceChart key={id} purchases={data.purchases} />
+          </section>
+
+          <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <h3>Vendors</h3>
+            <div className="panel table-wrap">
+              <table className="grid">
+                <thead><tr><th>Vendor</th><th className="num">Latest</th><th className="num">Change</th><th>Last bought</th></tr></thead>
+                <tbody>
+                  {data.vendors.map((v) => (
+                    <tr key={v.vendor}>
+                      <td>{v.vendor}</td>
+                      <td className="num">{unitMoney(v.latestUnitCost)} <span className="muted">/ {v.latestUnit ?? 'unit'}</span></td>
+                      <td className="num"><Change value={v.latestChangePercent} hike={v.priceHike} /></td>
+                      <td className="nowrap">{date(v.latestDate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <h3>Details</h3>
+            <div className="form-grid">
+              <Field label="Name" className="span-2"><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
+              <Field label="Category"><CategoryInput id="drawer-categories" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></Field>
+              <Field label="Usable yield %" hint="After trim loss; new recipe lines start at this Use %">
+                <input className="input num" inputMode="decimal" value={form.defaultYieldPercent} onChange={(e) => setForm({ ...form, defaultYieldPercent: e.target.value })} />
+              </Field>
+            </div>
+            {formError && <Notice kind="error">{formError}</Notice>}
+            <div className="form-actions">
+              <button className="btn primary" disabled={!dirty || saving}>Save changes</button>
+            </div>
+          </form>
+
+          <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3>Purchases</h3>
+              {!adding && <button className="btn small" onClick={() => setAdding(true)}><Icon.plus /> Add purchase</button>}
+            </div>
+            {adding && (
+              <form className="panel panel-pad" onSubmit={addPurchase} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <PurchaseFields value={purchase} onChange={setPurchase} />
+                <div className="form-actions">
+                  <button type="button" className="btn ghost" onClick={() => setAdding(false)}>Cancel</button>
+                  <button className="btn primary" disabled={saving}>Record purchase</button>
+                </div>
+              </form>
+            )}
+            <div className="panel table-wrap">
+              <table className="grid">
+                <thead><tr><th>Date</th><th>Vendor</th><th className="num">Qty</th><th className="num">Unit cost</th><th className="num">Total</th><th className="num">Change</th><th><span className="visually-hidden">Actions</span></th></tr></thead>
+                <tbody>
+                  {data.purchases.map((p) => (
+                    <tr key={p.id}>
+                      <td className="nowrap">{date(p.date)}</td>
+                      <td>{p.vendor ?? '—'}</td>
+                      <td className="num">{qty(p.quantity)} {p.unit}</td>
+                      <td className="num">{unitMoney(p.unitCost)}</td>
+                      <td className="num">{money(p.totalCost)}</td>
+                      <td className="num"><Change value={p.changePercent} hike={p.priceHike} /></td>
+                      <td><button className="icon-btn" aria-label={`Remove purchase from ${date(p.date)}`} onClick={() => removePurchase(p.id)}><Icon.trash /></button></td>
+                    </tr>
+                  ))}
+                  {!data.purchases.length && <tr><td colSpan={7} className="muted">No purchases yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="form-actions" style={{ justifyContent: 'flex-start' }}>
+            {confirmDelete ? (
+              <>
+                <span>Delete {ing.name} and all {data.purchases.length} purchases?</span>
+                <button className="btn danger" onClick={remove} disabled={saving}>Delete</button>
+                <button className="btn ghost" onClick={() => setConfirmDelete(false)}>Keep it</button>
+              </>
+            ) : (
+              <button className="btn danger" onClick={() => setConfirmDelete(true)}><Icon.trash /> Delete ingredient</button>
+            )}
+          </section>
+        </>
+      )}
+    </Drawer>
+  );
+}
+
+function Change({ value, hike }) {
+  if (value == null) return <span className="muted">—</span>;
+  const d = toDecimal(value);
+  const cls = hike ? 'price-up' : d.lt(0) ? 'price-down' : '';
+  return <span className={cls}>{signedPercent(value)}{hike && <span className="visually-hidden"> (price hike)</span>}</span>;
+}

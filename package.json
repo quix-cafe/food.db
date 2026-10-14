@@ -1,0 +1,15 @@
+{
+  "name": "kitchen-cost",
+  "private": true,
+  "type": "module",
+  "workspaces": ["shared", "server", "client"],
+  "scripts": {
+    "dev": "npm run dev -w server & npm run dev -w client; wait",
+    "build": "npm run build -w client",
+    "start": "npm start -w server",
+    "migrate": "npm run migrate -w server",
+    "seed": "npm run seed -w server",
+    "test": "npm test -w shared && npm test -w server",
+    "db:up": "docker compose up -d db"
+  }
+}

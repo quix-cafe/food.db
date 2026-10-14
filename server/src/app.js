@@ -1,0 +1,38 @@
+import express from 'express';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { CalcError } from '@kitchen/shared';
+import ingredients from './routes/ingredients.js';
+import recipes from './routes/recipes.js';
+import events from './routes/events.js';
+import search from './routes/search.js';
+import { HttpError } from './validate.js';
+
+const clientDist = fileURLToPath(new URL('../../client/dist/', import.meta.url));
+
+export function createApp() {
+  const app = express();
+  app.use(express.json({ limit: '1mb' }));
+
+  app.get('/api/health', (_req, res) => res.json({ ok: true }));
+  app.use('/api/ingredients', ingredients);
+  app.use('/api/recipes', recipes);
+  app.use('/api/events', events);
+  app.use('/api/search', search);
+  app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
+
+  // In production the built SPA is served from here; in dev Vite proxies /api instead.
+  if (existsSync(clientDist)) {
+    app.use(express.static(clientDist));
+    app.get('/{*path}', (_req, res) => res.sendFile(clientDist + 'index.html'));
+  }
+
+  app.use((err, _req, res, _next) => {
+    if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
+    if (err instanceof CalcError) return res.status(400).json({ error: err.message });
+    if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Request body is not valid JSON' });
+    console.error(err);
+    res.status(500).json({ error: 'Something went wrong on the server. Check the server log for details.' });
+  });
+  return app;
+}
