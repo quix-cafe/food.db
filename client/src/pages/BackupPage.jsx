@@ -9,6 +9,7 @@ const ROWS = [
   ['ingredient_purchases', 'Purchases'],
   ['ingredient_aliases', 'Receipt names'],
   ['receipts', 'Receipts'],
+  ['spice_blends', 'Spice blends'],
   ['recipes', 'Recipes'],
   ['events', 'Events'],
   ['images', 'Photos'],

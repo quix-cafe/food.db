@@ -1,17 +1,18 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useDebounced } from '../hooks.js';
-import { perUnit } from '../format.js';
+import { perUnit, qty } from '../format.js';
 
 /**
  * Searchable combobox over the master ingredient list.
  * - `value` / `onInput`: the typed text (controlled)
  * - `onPick(ingredient)`: called when an existing ingredient is chosen
  * - `exclude`: ingredient ids to hide (e.g. already on the recipe)
+ * - `includeBlends`: also offer spice blends (picked with `kind: 'blend'`), after the ingredients
  * - `autoHighlight`: pre-select the first option so Enter picks it; when false, Enter with
  *   nothing highlighted calls `onCommit` (keep the typed text) and Escape calls `onCancel`
  */
-export default function IngredientCombobox({ value, onInput, onPick, exclude = [], placeholder = 'Search ingredients…', ariaLabel, autoFocus, footer, autoHighlight = true, onCommit, onCancel, onBlur, selectOnFocus }) {
+export default function IngredientCombobox({ value, onInput, onPick, exclude = [], placeholder = 'Search ingredients…', ariaLabel, autoFocus, footer, autoHighlight = true, onCommit, onCancel, onBlur, selectOnFocus, includeBlends = false }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const [options, setOptions] = useState([]);
@@ -22,8 +23,19 @@ export default function IngredientCombobox({ value, onInput, onPick, exclude = [
   useEffect(() => {
     if (!open) return;
     let stale = false;
-    api(`/ingredients${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`)
-      .then((rows) => !stale && setOptions(rows.filter((r) => !exclude.includes(r.id)).slice(0, 12)))
+    const search = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
+    Promise.all([
+      api(`/ingredients${search}`),
+      includeBlends ? api(`/blends${search}`) : [],
+    ])
+      .then(([ingredients, blends]) => {
+        if (stale) return;
+        const keep = (r) => !exclude.includes(r.id);
+        setOptions([
+          ...ingredients.filter(keep).slice(0, 12),
+          ...blends.filter(keep).slice(0, 6).map((b) => ({ ...b, kind: 'blend' })),
+        ]);
+      })
       .catch(() => !stale && setOptions([]));
     return () => { stale = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -72,8 +84,9 @@ export default function IngredientCombobox({ value, onInput, onPick, exclude = [
       {open && (options.length > 0 || footer) && (
         <div className="popover" role="listbox" id={listId}>
           {options.map((o, i) => (
+            <Fragment key={o.id}>
+            {o.kind === 'blend' && options[i - 1]?.kind !== 'blend' && <div className="popover-group">Spice blends</div>}
             <div
-              key={o.id}
               id={`${listId}-${i}`}
               role="option"
               aria-selected={i === active}
@@ -82,8 +95,13 @@ export default function IngredientCombobox({ value, onInput, onPick, exclude = [
               onMouseEnter={() => setActive(i)}
             >
               <span>{o.name}</span>
-              <small>{o.latestUnitPrice ? perUnit(o.latestUnitPrice, o.uom) : 'no price yet'}</small>
+              <small>
+                {o.kind === 'blend'
+                  ? `${qty(o.totalTsp)} tsp batch${o.costPerTsp ? `, ${perUnit(o.costPerTsp, 'tsp')}` : ''}`
+                  : o.latestUnitPrice ? perUnit(o.latestUnitPrice, o.uom) : 'no price yet'}
+              </small>
             </div>
+            </Fragment>
           ))}
           {footer && footer(q, () => setOpen(false))}
         </div>

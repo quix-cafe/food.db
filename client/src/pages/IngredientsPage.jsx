@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
 import { isLabor, laborLast } from '@kitchen/shared';
 import { useApi, useDebounced } from '../hooks.js';
-import { date, money, pack, perUnit, qty, signedPercent, toDecimal, unitMoney } from '../format.js';
+import { Decimal, date, money, pack, perUnit, qty, signedPercent, toDecimal, todayIso, unitMoney } from '../format.js';
 import { CategoryInput, PurchaseFields, UomInput, emptyPurchase } from '../components/forms.jsx';
 import PriceChart from '../components/PriceChart.jsx';
 import { Drawer, Field, Icon, Notice, Spinner, useToast } from '../components/ui.jsx';
@@ -11,9 +11,9 @@ import { Drawer, Field, Icon, Notice, Spinner, useToast } from '../components/ui
 const COLUMNS = [
   { key: 'name', label: 'Ingredient' },
   { key: 'category', label: 'Category' },
-  { key: 'latestPackSize', label: 'Store pack size', num: true },
+  { key: 'latestUnitPrice', label: 'Unit cost', num: true },
+  { key: 'latestPackSize', label: 'Pack size', num: true },
   { key: 'latestPackPrice', label: 'Store price', num: true },
-  { key: 'latestUnitPrice', label: 'Price per unit', num: true },
   { key: 'latestVendor', label: 'Vendor' },
   { key: 'latestPurchaseDate', label: 'Last bought' },
 ];
@@ -62,7 +62,7 @@ export default function IngredientsPage() {
         <div className="toolbar">
           <div className="chips" role="group" aria-label="Filter by category">
             <button className="chip" aria-pressed={!category} onClick={() => setCategory(null)}>All</button>
-            {(categories ?? []).map((c) => (
+            {(categories ?? []).filter((c) => !isLabor({ category: c })).map((c) => (
               <button key={c} className="chip" aria-pressed={category === c} onClick={() => setCategory(category === c ? null : c)}>{c}</button>
             ))}
           </div>
@@ -98,11 +98,11 @@ export default function IngredientsPage() {
                       <button className="sort-btn" style={{ fontWeight: 650 }} onClick={(e) => { e.stopPropagation(); open(r.id); }}>{r.name}</button>
                     </td>
                     <td>{r.category ?? <span className="muted">—</span>}</td>
-                    <td className="num">{r.latestPackSize ? pack(r.latestPackSize, r.uom) : '—'}</td>
-                    <td className="num">{r.latestPackPrice ? unitMoney(r.latestPackPrice) : <span className="badge">No price</span>}</td>
-                    <td className="num nowrap" style={{ fontWeight: 650 }}>{r.latestUnitPrice ? perUnit(r.latestUnitPrice, r.uom) : '—'}</td>
+                    <td className="num nowrap" style={{ fontWeight: 650 }}>{r.latestUnitPrice ? perUnit(r.latestUnitPrice, r.uom) : <span className="badge">No price</span>}</td>
+                    <td className="num">{!isLabor(r) && r.latestPackSize ? pack(r.latestPackSize, r.uom) : '—'}</td>
+                    <td className="num">{!isLabor(r) && r.latestPackPrice ? unitMoney(r.latestPackPrice) : '—'}</td>
                     <td>{r.latestVendor ?? '—'}</td>
-                    <td className="nowrap">{date(r.latestPurchaseDate)}</td>
+                    <td className="nowrap">{isLabor(r) ? <span className="muted">Service rate</span> : date(r.latestPurchaseDate)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -169,6 +169,7 @@ function IngredientDrawer({ id, onClose }) {
   const removeAlias = (a) => run(() => api(`/ingredients/${id}/aliases/${a.id}`, { method: 'DELETE' }), `Forgot “${a.alias}”`).then(reload);
   const removePurchase = (pid) => run(() => api(`/ingredients/${id}/purchases/${pid}`, { method: 'DELETE' }), 'Purchase removed').then(reload);
 
+  const labor = isLabor(ing);
   const latest = data?.purchases[0]; // newest first
   const hike = latest?.priceHike ? latest : null;
 
@@ -178,8 +179,15 @@ function IngredientDrawer({ id, onClose }) {
       {!data && !error && <Spinner />}
       {data && form && (
         <>
+          {labor && <LaborRate ingredient={ing} purchases={data.purchases} run={run} saving={saving} />}
+          {!labor && (<>
           <div className="stat-row">
-            <div className="stat"><b>{ing.latestUnitPrice ? unitMoney(ing.latestUnitPrice) : '—'}</b><span>Latest per {ing.uom ?? 'unit'}{ing.latestPackSize ? ` (${pack(ing.latestPackSize, ing.uom)} for ${unitMoney(ing.latestPackPrice)})` : ''}</span></div>
+            <div className="stat"><b>{ing.latestUnitPrice ? money(ing.latestUnitPrice) : '—'}</b><span>Latest per {ing.uom ?? 'unit'}{ing.latestPackSize ? ` (${pack(ing.latestPackSize, ing.uom)} for ${unitMoney(ing.latestPackPrice)})` : ''}</span></div>
+            {data.purchases.length > 1 && (
+              <div className="stat" title="The mean of every purchase's price per unit, from any store">
+                <b>{money(averageUnitPrice(data.purchases))}</b><span>Average per {ing.uom ?? 'unit'} ({data.purchases.length} purchases)</span>
+              </div>
+            )}
             <div className="stat"><b>{data.purchases.length}</b><span>Purchases</span></div>
             <div className="stat"><b>{data.vendors.length}</b><span>Vendors</span></div>
           </div>
@@ -214,6 +222,7 @@ function IngredientDrawer({ id, onClose }) {
               </table>
             </div>
           </section>
+          </>)}
 
           <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <h3>Details</h3>
@@ -230,6 +239,7 @@ function IngredientDrawer({ id, onClose }) {
             </div>
           </form>
 
+          {!labor && (<>
           <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <h3>Receipt names</h3>
             {data.aliases.length ? (
@@ -272,7 +282,7 @@ function IngredientDrawer({ id, onClose }) {
                       <td className="nowrap">{date(p.date)}</td>
                       <td>{p.vendor ?? '—'}{p.receiptId && <> <Link to={`/purchases/${p.receiptId}`} className="muted" style={{ fontSize: '0.85rem' }}>Receipt</Link></>}</td>
                       <td className="num">{qty(p.quantity)}</td>
-                      <td className="num nowrap">{pack(p.packSize, ing.uom)}</td>
+                      <td className="num nowrap"><PackSizeInput purchase={p} uom={ing.uom} ingredientId={id} run={run} /></td>
                       <td className="num">{unitMoney(p.unitCost)}</td>
                       <td className="num nowrap">{perUnit(p.unitPrice, ing.uom)}</td>
                       <td className="num">{money(p.totalCost)}</td>
@@ -285,6 +295,7 @@ function IngredientDrawer({ id, onClose }) {
               </table>
             </div>
           </section>
+          </>)}
 
           <section className="form-actions" style={{ justifyContent: 'flex-start' }}>
             {confirmDelete ? (
@@ -302,6 +313,82 @@ function IngredientDrawer({ id, onClose }) {
     </Drawer>
   );
 }
+
+/**
+ * A purchase's pack size, editable in place to fix a mis-entered size (saved on Enter or
+ * when leaving the field; Escape undoes). The price paid isn't touched.
+ */
+function PackSizeInput({ purchase, uom, ingredientId, run }) {
+  const saved = toDecimal(purchase.packSize).toString();
+  const [value, setValue] = useState(saved);
+  useEffect(() => setValue(saved), [saved]);
+  const d = toDecimal(value);
+  const valid = d && d.gt(0);
+  const commit = () => {
+    if (!valid) return setValue(saved);
+    if (d.eq(saved)) return;
+    run(() => api(`/ingredients/${ingredientId}/purchases/${purchase.id}`, { method: 'PATCH', body: { packSize: d.toString() } }),
+      `Pack size changed to ${pack(d, uom)}`);
+  };
+  return (
+    <span className="pack-size-edit">
+      <input className="input num" inputMode="decimal" value={value} aria-label={`Pack size for the purchase on ${date(purchase.date)}, in ${uom ?? 'units'}`}
+        aria-invalid={!valid} onChange={(e) => setValue(e.target.value)} onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setValue(saved); }} />
+      {' '}{uom}
+    </span>
+  );
+}
+
+/**
+ * Labor is a service, not something bought from a vendor: its price is a rate you set here.
+ * Each change is stored as a price record (1 × 1 unit at the new rate), so recipe costs pick
+ * up the latest rate the same way they pick up an ingredient's latest purchase.
+ */
+function LaborRate({ ingredient, purchases, run, saving }) {
+  const unit = ingredient.uom ?? 'hour';
+  const current = ingredient.latestUnitPrice ? toDecimal(ingredient.latestUnitPrice).toFixed(2) : '';
+  const [rate, setRate] = useState(current);
+  useEffect(() => setRate(current), [current]);
+  const d = toDecimal(rate);
+  const valid = d && d.gte(0);
+  const changed = valid && (!current || !d.eq(current));
+  const save = (e) => {
+    e.preventDefault();
+    run(() => api(`/ingredients/${ingredient.id}/purchases`, {
+      method: 'POST',
+      body: { date: todayIso(), quantity: 1, packSize: 1, unitCost: d.toString() },
+    }), `Rate set to ${perUnit(d, unit)}`);
+  };
+  return (
+    <>
+      <form onSubmit={save} className="panel panel-pad labor-rate" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <h3>Rate</h3>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <Field label={`Price per ${unit}`}>
+            <span className="money-input" style={{ width: 140 }}>
+              <span aria-hidden="true">$</span>
+              <input className="input num" inputMode="decimal" value={rate} aria-invalid={!valid && rate !== ''} onChange={(e) => setRate(e.target.value)} />
+            </span>
+          </Field>
+          <button className="btn primary" disabled={!changed || saving}>Save rate</button>
+        </div>
+        <small className="muted">A service cost, not a purchase: recipes use the current rate × the hours on each line.</small>
+      </form>
+      {purchases.length > 0 && (
+        <section style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <h3>Rate history</h3>
+          <ul className="rate-history">
+            {purchases.map((p) => <li key={p.id}><span>{date(p.date)}</span><b>{perUnit(p.unitPrice, unit)}</b></li>)}
+          </ul>
+        </section>
+      )}
+    </>
+  );
+}
+
+const averageUnitPrice = (purchases) =>
+  purchases.reduce((sum, p) => sum.plus(p.unitPrice), new Decimal(0)).div(purchases.length);
 
 function Change({ value, hike }) {
   if (value == null) return <span className="muted">—</span>;

@@ -27,7 +27,7 @@ const MIN_MIGRATION = '007_drop_legacy_columns.sql';
 /** Insert order respects foreign keys; TRUNCATE takes them all at once. */
 export const TABLES = [
   'ingredients', 'ingredient_aliases', 'receipts', 'ingredient_purchases', 'receipt_lines',
-  'recipes', 'recipe_ingredients', 'events', 'event_recipes', 'event_amounts', 'images',
+  'spice_blends', 'spice_blend_items', 'recipes', 'recipe_ingredients', 'events', 'event_recipes', 'event_amounts', 'images',
 ];
 
 const IMAGE_FILE = /^[A-Za-z0-9-]+\.(jpg|png|webp|gif)$/;

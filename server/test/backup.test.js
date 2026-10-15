@@ -87,7 +87,7 @@ test('backup → change everything → restore brings it all back', { skip }, as
 
   const summary = (await api('GET', '/backup/summary')).data;
   assert.deepEqual(summary.counts, {
-    ingredients: 1, ingredient_aliases: 1, receipts: 1, ingredient_purchases: 2, receipt_lines: 2,
+    ingredients: 1, ingredient_aliases: 1, receipts: 1, ingredient_purchases: 2, receipt_lines: 2, spice_blends: 0, spice_blend_items: 0,
     recipes: 1, recipe_ingredients: 1, events: 1, event_recipes: 1, event_amounts: 0, images: 2,
   });
 

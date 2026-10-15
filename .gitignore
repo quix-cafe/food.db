@@ -3,3 +3,5 @@ client/dist/
 .env
 *.log
 data/
+dist/
+server/src/embedded.gen.js

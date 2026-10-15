@@ -1,0 +1,48 @@
+# Push a tag like v1.0.0 (matching "version" in package.json) to build the standalone
+# executables for every target and publish them as a GitHub Release.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Check the tag matches package.json
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match package.json version $version"
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - name: Test (shared, and the server on PGlite)
+        run: npm test -w shared && npm test -w server
+        env:
+          TEST_DATABASE_URL: pglite://memory
+
+      - name: Build the executables
+        run: node scripts/build-binary.js
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.tar.xz --title "food.db $GITHUB_REF_NAME" --generate-notes

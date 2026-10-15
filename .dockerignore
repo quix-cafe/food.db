@@ -4,3 +4,4 @@ client/dist
 tests
 .env
 data
+dist

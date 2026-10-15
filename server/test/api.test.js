@@ -224,6 +224,13 @@ test('price movement compares against the previous purchase from any store', { s
   assert.equal(mart.priceHike, true);
   assert.deepEqual(mart.previous, { vendor: 'Depot', unitPrice: '0.5000', packSize: '50.0000', date: '2026-02-10' });
 
+  // A mis-entered pack size can be corrected; the price paid stays.
+  const fixed = await api('PATCH', `/ingredients/${ids.flour}/purchases/${mart.id}`, { packSize: 30 });
+  assert.deepEqual([fixed.data.packSize, fixed.data.unitCost, fixed.data.unitPrice], ['30.0000', '15.0000', '0.5000']);
+  assert.equal((await api('PATCH', `/ingredients/${ids.flour}/purchases/${mart.id}`, { packSize: 0 })).status, 400);
+  assert.equal((await api('PATCH', `/ingredients/${ids.eggs}/purchases/${mart.id}`, { packSize: 5 })).status, 404);
+  await api('PATCH', `/ingredients/${ids.flour}/purchases/${mart.id}`, { packSize: 25 });
+
   // Pack sizes are in the ingredient's unit; another unit is refused.
   const wrong = await api('POST', '/ingredients/purchase', { items: [{ ingredientId: ids.flour, uom: 'kg', quantity: 1, packSize: 10, unitCost: 9 }] });
   assert.equal(wrong.status, 400);
@@ -248,4 +255,38 @@ test('recipe amounts can exceed a pack and margins keep 6 decimals', { skip }, a
   assert.equal(r.data.lines[0].amount, '120.0000');
   assert.equal(r.data.targetMargin, '70.833333');
   assert.equal((await api('POST', '/recipes', { name: 'Neg', baseServings: 1, lines: [{ ingredientId: ids.flour, amount: '-1' }] })).status, 400);
+});
+
+test('spice blends: breakdown, use in a recipe as tsp, and an event batch line', { skip }, async () => {
+  const paprika = (await api('POST', '/ingredients', { name: 'Paprika', category: 'Spices', uom: 'oz', purchase: { quantity: 1, packSize: 4, totalCost: 8 } })).data;
+  const blend = await api('POST', '/blends', {
+    name: 'House rub', notes: 'For chicken', servings: 4,
+    items: [{ ingredientId: paprika.id, amount: '2', unit: 'Tablespoons' }, { name: 'Salt', amount: '1 1/2', unit: 'tsp' }, { name: 'Cayenne', amount: '8', unit: 'pinch' }],
+  });
+  assert.equal(blend.status, 201);
+  assert.equal(blend.data.totalTsp, '8.0000'); // 6 + 1.5 + 0.5
+  assert.equal(blend.data.servings, 4);
+  assert.equal((await api('POST', '/blends', { name: 'X', servings: 0, items: [] })).status, 400);
+  assert.deepEqual(blend.data.items.map((i) => [i.name, i.unit, i.share]), [['Paprika', 'tbsp', '75.0'], ['Salt', 'tsp', '18.8'], ['Cayenne', 'pinch', '6.3']]);
+  assert.equal(blend.data.cost, '1.0582'); // 15 g of paprika at $2/oz
+  assert.equal(blend.data.costComplete, false);
+
+  const bad = await api('POST', '/blends', { name: 'X', items: [{ name: 'Salt', amount: 1, unit: 'handful' }] });
+  assert.equal(bad.status, 400);
+  assert.match(bad.data.error, /isn’t a unit/);
+
+  const recipe = await api('POST', '/recipes', { name: 'Rubbed chicken', baseServings: 2, lines: [{ blendId: blend.data.id, amount: 4 }] });
+  assert.equal(recipe.status, 201);
+  const line = recipe.data.costing.lines[0];
+  assert.deepEqual([line.name, line.uom, line.packSize, line.packPrice, line.unitPrice, line.baseCost], ['House rub', 'tsp', '8.0000', '1.0582', '0.1323', '0.5291']);
+
+  const ev = (await api('POST', '/events', { name: 'Cookout', date: '2026-12-01', recipes: [{ recipeId: recipe.data.id, expectedServings: 6 }] })).data;
+  const shop = (await api('GET', `/events/${ev.id}/summary`)).data.shoppingList;
+  const rub = shop.find((l) => l.blendId === blend.data.id);
+  assert.deepEqual([rub.amount, rub.packsToBuy, rub.leftover], ['12.0000', '2', '4.0000']); // 12 tsp in 8 tsp batches
+
+  assert.equal((await api('DELETE', `/blends/${blend.data.id}`)).status, 409); // used by the recipe
+  assert.equal((await api('DELETE', `/ingredients/${paprika.id}`)).status, 409); // used by the blend
+  const list = (await api('GET', '/blends?q=house')).data;
+  assert.deepEqual(list.map((b) => b.name), ['House rub']);
 });

@@ -1,0 +1,43 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { calculateBlend, convertUnits, normalizeUnit, parseAmount } from '../src/calc.js';
+
+test('kitchen units normalise and convert to teaspoons', () => {
+  assert.equal(normalizeUnit('Tablespoons'), 'tbsp');
+  assert.equal(normalizeUnit('pinches'), 'pinch');
+  assert.equal(normalizeUnit('tsp.'), 'tsp');
+  assert.equal(normalizeUnit('handful'), null);
+  assert.equal(convertUnits(1, 'tbsp', 'tsp').toString(), '3');
+  assert.equal(convertUnits(2, 'dash', 'tsp').toString(), '0.25');
+  assert.equal(convertUnits(16, 'pinch', 'tsp').toString(), '1');
+  assert.equal(convertUnits(1, 'cup', 'tbsp').toString(), '16');
+  assert.equal(convertUnits(5, 'g', 'tsp').toString(), '2'); // 2.5 g per tsp
+  assert.equal(convertUnits(1, 'oz', 'g').toFixed(4), '28.3495');
+  assert.equal(convertUnits(1, 'tsp', 'each'), null);
+});
+
+test('amounts accept fractions', () => {
+  assert.equal(parseAmount('1 1/2').toString(), '1.5');
+  assert.equal(parseAmount('3/4').toString(), '0.75');
+  assert.equal(parseAmount('½').toString(), '0.5');
+  assert.equal(parseAmount('2½').toString(), '2.5');
+  assert.equal(parseAmount('0.25').toString(), '0.25');
+  assert.equal(parseAmount('1/0'), null);
+  assert.equal(parseAmount('salt'), null);
+});
+
+test('a blend breaks down by volume and costs what it can', () => {
+  const b = calculateBlend([
+    { name: 'Paprika', amount: '2', unit: 'tbsp', packPrice: '6', packSize: '3', uom: 'oz' }, // 6 tsp
+    { name: 'Salt', amount: '1', unit: 'tsp' }, // no price
+    { name: 'Cayenne', amount: '8', unit: 'pinch' }, // 0.5 tsp
+    { name: 'Garlic powder', amount: '5', unit: 'g', packPrice: '4', packSize: '1', uom: 'jar' }, // 2 tsp, uom can't convert
+  ]);
+  assert.equal(b.totalTsp, '9.5000');
+  assert.deepEqual(b.items.map((i) => i.share), ['63.2', '10.5', '5.3', '21.1']);
+  // Paprika: 6 tsp × 2.5 g = 15 g = 0.5291 oz × $2/oz
+  assert.equal(b.items[0].cost, '1.0582');
+  assert.equal(b.cost, '1.0582');
+  assert.equal(b.costComplete, false);
+  assert.equal(calculateBlend([]).cost, null);
+});

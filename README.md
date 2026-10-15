@@ -2,9 +2,33 @@
 
 food.db is a recipe costing and kitchen purchasing app. It keeps the price history of every ingredient you buy, costs recipes from the latest prices, and scales them to any number of servings. It also plans events with combined shopping lists, and imports receipts that you have already turned into JSON (for example with qwen).
 
-It runs in Docker and opens in your browser. Everything stays on your machine.
+It runs on your computer and opens in your browser. Everything stays on your machine.
 
-## Install
+## Download and run (no Docker)
+
+Download the archive for your computer from the [releases page](https://github.com/quix-cafe/food.db/releases/latest):
+
+| Computer | File |
+|---|---|
+| Mac with Apple silicon (M1 and later) | `food.db-<version>-darwin-arm64.tar.xz` |
+| Mac with Intel | `food.db-<version>-darwin-x64.tar.xz` |
+| Linux, x86-64 | `food.db-<version>-linux-x64.tar.xz` |
+| Linux, ARM (e.g. Raspberry Pi 4/5, 64-bit) | `food.db-<version>-linux-arm64.tar.xz` |
+
+Unpack it and run the one `food.db` file inside:
+
+```bash
+tar -xf food.db-*.tar.xz
+./food.db
+```
+
+It opens **http://localhost:3000** in your browser; press Ctrl+C in the terminal to stop it. On a Mac, the first run of a downloaded file is blocked as "from an unidentified developer". Clear that once with `xattr -d com.apple.quarantine food.db`, or allow it under System Settings → Privacy & Security.
+
+The database is built in, so there's nothing else to install. Your data is kept in `~/Library/Application Support/food.db` (Mac) or `~/.local/share/food.db` (Linux). To update, replace the `food.db` file with the new one; your data stays put and any database changes are applied when it starts. Run `./food.db --help` for the options (port, data folder, not opening the browser).
+
+The standalone version and the Docker version keep separate data. To move from one to the other, download a backup in one and restore it in the other (see [Backups](#backups)).
+
+## Install with Docker
 
 ### Linux
 
@@ -43,9 +67,13 @@ From the `food.db` folder:
 ```bash
 git pull
 docker compose up -d --build
+docker image prune -f
+docker builder prune -af
 ```
 
 Your data is kept. Any database changes in the new version are applied automatically when the app starts. It's a good idea to download a backup first (see [Backups](#backups)).
+
+Each rebuild leaves the previous app image and a build cache behind, which add up to hundreds of megabytes over a few updates. The last two commands clear them. They don't touch your data. Avoid `docker system prune --volumes` and `docker compose down -v`: those delete the volumes that hold your data.
 
 ## Day to day
 
@@ -90,3 +118,7 @@ A backup from an older version of the app restores into a newer one. A backup fr
 ## Development
 
 To change the code, see `CLAUDE.md` for the development setup, commands and architecture.
+
+To build the standalone downloads, install [Bun](https://bun.sh) and run `npm run build:binary`. It builds all four targets from any machine into `dist/`; `npm run build:binary -- linux-x64` builds just one.
+
+To publish a release, set `"version"` in `package.json`, commit, then tag and push it (`git tag v1.0.1 && git push origin v1.0.1`). The Release workflow (`.github/workflows/release.yml`) runs the tests, builds all four archives and attaches them to a new GitHub Release.

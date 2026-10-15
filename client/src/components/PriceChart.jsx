@@ -1,10 +1,7 @@
 import { useMemo } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { date, perUnit } from '../format.js';
-
-// Categorical slots in fixed order; a vendor keeps its slot by first appearance.
-const SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
-const OTHER = '#8a969c';
+import { OTHER, SERIES } from '../palette.js';
 
 function ChartTooltip({ active, payload, unit }) {
   if (!active || !payload?.length) return null;

@@ -252,7 +252,7 @@ function printShoppingList() {
 function NeededInput({ line, eventId }) {
   const [draft, setDraft] = useState(null);
   const [error, setError] = useState(null);
-  const value = draft ?? toDecimal(line.amount).toString();
+  const value = draft ?? toDecimal(line.amount).toDecimalPlaces(2).toString();
   const save = async () => {
     if (draft === null) return;
     const d = toDecimal(draft);
@@ -281,7 +281,7 @@ function NeededInput({ line, eventId }) {
       {error && <small style={{ color: 'var(--tomato)' }}>{error}</small>}
       {line.amountSet && (
         <small className="muted no-print nowrap">
-          Recipes: {qty(line.calculatedAmount)} · <button type="button" className="link-btn" onClick={reset}>Use recipes</button>
+          Recipes: {qty(line.calculatedAmount, 2)} · <button type="button" className="link-btn" onClick={reset}>Use recipes</button>
         </small>
       )}
     </div>
@@ -311,14 +311,17 @@ function ShoppingList({ s, eventId, title, date: day }) {
         </thead>
         <tbody>
           {s.shoppingList.map((l) => (
-            <tr key={l.ingredientId} className={isLabor(l) ? 'labor-row' : ''}>
-              <td style={{ fontWeight: 600 }}>{l.name}{l.missingPrice && <> <span className="badge warn">No price</span></>}</td>
-              <td className="num nowrap">{isLabor(l) ? <NeededInput key={`${l.ingredientId}:${l.amount}`} line={l} eventId={eventId} /> : `${qty(l.amount)} ${l.uom}`}</td>
+            <tr key={l.ingredientId ?? l.blendId} className={isLabor(l) ? 'labor-row' : ''}>
+              <td style={{ fontWeight: 600 }}>
+                {l.name}{l.missingPrice && <> <span className="badge warn">No price</span></>}
+                {l.blendId && <div><small className="muted" style={{ fontWeight: 400 }}>Spice blend: make {l.packsToBuy} batch{l.packsToBuy === '1' ? '' : 'es'}</small></div>}
+              </td>
+              <td className="num nowrap">{isLabor(l) ? <NeededInput key={`${l.ingredientId}:${l.amount}`} line={l} eventId={eventId} /> : `${qty(l.amount, 2)} ${l.uom}`}</td>
               <td className="num" style={{ fontWeight: 700 }}>{l.packsToBuy}</td>
-              <td className="nowrap">{l.packSize ? pack(l.packSize, l.uom) : '—'}</td>
+              <td className="nowrap">{l.packSize ? `${pack(l.packSize, l.uom, 2)}${l.blendId ? ' batch' : ''}` : '—'}</td>
               <td className="num" style={{ fontWeight: 650 }}>{l.purchaseCost ? money(l.purchaseCost) : '—'}</td>
               <td className="num">{money(l.usedCost)}</td>
-              <td className="num nowrap muted">{qty(l.leftover)} {l.uom}</td>
+              <td className="num nowrap muted">{qty(l.leftover, 2)} {l.uom}</td>
               <td className="muted">{l.recipes.join(', ')}</td>
             </tr>
           ))}

@@ -1,11 +1,13 @@
 {
   "name": "food-db",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "workspaces": ["shared", "server", "client"],
   "scripts": {
     "dev": "npm run dev -w server & npm run dev -w client; wait",
     "build": "npm run build -w client",
+    "build:binary": "node scripts/build-binary.js",
     "start": "npm start -w server",
     "migrate": "npm run migrate -w server",
     "seed": "npm run seed -w server",

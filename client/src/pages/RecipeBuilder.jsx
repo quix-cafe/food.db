@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useBlocker, useNavigate, useParams } from 'react-router';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
 import { calculateRecipe, DEFAULT_MARGIN, isLabor, laborLast } from '@kitchen/shared';
 import { api, imageForm, notifyDataChanged } from '../api.js';
+import { useLeaveGuard, useRowReorder } from '../hooks.js';
 import ImageGallery, { useLocalImages } from '../components/ImageGallery.jsx';
 import { date, money, pack, percent, perUnit, qty, unitMoney, toDecimal } from '../format.js';
 import IngredientCombobox from '../components/IngredientCombobox.jsx';
-import { Field, Icon, Modal, Notice, Spinner, useToast } from '../components/ui.jsx';
+import { Field, Icon, LeaveModal, Notice, Spinner, useToast } from '../components/ui.jsx';
 import { AddToEventModal } from './RecipeGallery.jsx';
 
 let nextKey = 1;
@@ -20,6 +21,7 @@ const fromServer = (r) => ({
   lines: laborLast(r.lines).map((l) => ({
     key: nextKey++,
     ingredientId: l.ingredientId,
+    blendId: l.blendId,
     name: l.name,
     category: l.category,
     uom: l.uom,
@@ -32,8 +34,9 @@ const fromServer = (r) => ({
 });
 
 // Each line's amount is in the ingredient's unit of measure (lb, oz, each…), priced from
-// its latest purchase: price per unit = store price / store pack size.
-const apiLines = (lines) => lines.map(({ ingredientId, amount }) => ({ ingredientId, amount }));
+// its latest purchase: price per unit = store price / store pack size. A spice blend line is
+// measured in tsp, its "pack" being one batch of the blend.
+const apiLines = (lines) => lines.map(({ ingredientId, blendId, amount }) => (blendId ? { blendId, amount } : { ingredientId, amount }));
 const amountProblem = (lines) => lines.some((l) => { const a = toDecimal(l.amount); return !a || a.lt(0); });
 
 const savedShape = (f) => JSON.stringify({ ...f, lines: apiLines(f.lines) });
@@ -47,7 +50,13 @@ export default function RecipeBuilder() {
   const [saveError, setSaveError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
-  const [drag, setDrag] = useState({ from: null, over: null });
+  const { rowProps, handleProps } = useRowReorder((from, to) => setForm((f) => {
+    if (to < 0 || to >= f.lines.length || from === to) return f;
+    const lines = f.lines.slice();
+    const [item] = lines.splice(from, 1);
+    lines.splice(to, 0, item);
+    return { ...f, lines: laborLast(lines) };
+  }));
   const [addToEvent, setAddToEvent] = useState(false);
   const [images, setImages] = useState([]); // saved photos (existing recipe)
   const [pendingPhotos, setPendingPhotos] = useState([]); // chosen before a new recipe is created
@@ -81,17 +90,7 @@ export default function RecipeBuilder() {
   }, [id]);
 
   const dirty = !!form && (saved !== savedShape(form) || pendingPhotos.length > 0);
-  // Leaving the page in the app asks first; closing the tab or reloading gets the browser's prompt.
-  const leavingAfterSave = useRef(false);
-  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
-    dirty && !leavingAfterSave.current && currentLocation.pathname !== nextLocation.pathname);
-  useEffect(() => { leavingAfterSave.current = false; }, [id]); // arrived at the saved recipe
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (e) => e.preventDefault();
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty]);
+  const { blocker, allowLeave } = useLeaveGuard(dirty, id);
 
   // Instant, client-side costing with the same decimal math the API uses.
   const { costing, calcError } = useMemo(() => {
@@ -133,17 +132,13 @@ export default function RecipeBuilder() {
   };
   const setLine = (key, patch) => setForm((f) => ({ ...f, lines: f.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) }));
   const removeLine = (key) => setForm((f) => ({ ...f, lines: f.lines.filter((l) => l.key !== key) }));
-  const move = (from, to) => setForm((f) => {
-    if (to < 0 || to >= f.lines.length || from === to) return f;
-    const lines = f.lines.slice();
-    const [item] = lines.splice(from, 1);
-    lines.splice(to, 0, item);
-    return { ...f, lines: laborLast(lines) };
-  });
   const addIngredient = (ing) => {
+    const line = ing.kind === 'blend'
+      ? { key: nextKey++, blendId: ing.id, name: ing.name, category: 'Spice blend', uom: 'tsp', packSize: ing.totalTsp, packPrice: ing.cost, amount: '1' }
+      : null;
     setForm((f) => ({
       ...f,
-      lines: laborLast([...f.lines, {
+      lines: laborLast([...f.lines, line ?? {
         key: nextKey++,
         ingredientId: ing.id,
         name: ing.name,
@@ -179,7 +174,7 @@ export default function RecipeBuilder() {
       notifyDataChanged();
       toast(id ? 'Recipe saved' : 'Recipe created');
       if (!id) {
-        leavingAfterSave.current = true; // this render's blocker still sees the old, dirty form
+        allowLeave();
         navigate(`/recipes/${r.id}`, { replace: true });
       }
       return true;
@@ -247,7 +242,7 @@ export default function RecipeBuilder() {
           <section className="panel">
             <div className="panel-head">
               <h2>Ingredients</h2>
-              <span className="muted">Total cost = store price ÷ pack size × amount used</span>
+              <span className="muted">Total cost = unit price × amount used</span>
             </div>
             <div className="table-wrap">
               <table className="grid builder-lines">
@@ -255,9 +250,9 @@ export default function RecipeBuilder() {
                   <tr>
                     <th style={{ width: 28 }}><span className="visually-hidden">Reorder</span></th>
                     <th style={{ minWidth: 180 }}>Ingredient</th>
-                    <th className="num">Store pack size</th>
-                    <th className="num">Total store price</th>
-                    <th className="num">Price per unit</th>
+                    <th className="num">Unit price</th>
+                    <th className="num">Pack size</th>
+                    <th className="num">Store price</th>
                     <th className="num" title="How many units of measurement the recipe uses, e.g. 0.25 or 2">Amount used</th>
                     <th className="num">Total cost</th>
                     {scaled && <th className="num">Scaled amount</th>}
@@ -269,38 +264,29 @@ export default function RecipeBuilder() {
                   {form.lines.map((l, i) => {
                     const c = lineById.get(l.key);
                     return (
-                      <tr
-                        key={l.key}
-                        className={`${isLabor(l) ? 'labor-row' : ''} ${drag.from === i ? 'dragging' : ''} ${drag.over === i && drag.from !== i ? 'drop-target' : ''}`}
-                        onDragOver={(e) => { if (drag.from !== null) { e.preventDefault(); setDrag((d) => ({ ...d, over: i })); } }}
-                        onDrop={(e) => { e.preventDefault(); move(drag.from, i); setDrag({ from: null, over: null }); }}
-                      >
+                      <tr key={l.key} {...rowProps(i)} className={`${isLabor(l) ? 'labor-row' : ''} ${rowProps(i).className}`}>
                         <td>
-                          <button
-                            className="icon-btn drag-handle"
-                            draggable
-                            aria-label={`Move ${l.name} (use arrow keys)`}
-                            onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; setDrag({ from: i, over: i }); }}
-                            onDragEnd={() => setDrag({ from: null, over: null })}
-                            onKeyDown={(e) => {
-                              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                                e.preventDefault();
-                                move(i, i + (e.key === 'ArrowUp' ? -1 : 1));
-                                requestAnimationFrame(() => e.target.focus());
-                              }
-                            }}
-                          ><Icon.grip /></button>
+                          <button className="icon-btn drag-handle" aria-label={`Move ${l.name} (drag, or use arrow keys)`} {...handleProps(i)}><Icon.grip /></button>
                         </td>
                         <td>
                           <div style={{ fontWeight: 600 }}>{l.name}</div>
-                          {c?.missingPrice
-                            ? <span className="badge warn">No purchase price</span>
-                            : <small className="muted">{l.vendor ? `${l.vendor}, ` : ''}bought {date(l.priceDate)}</small>}
+                          {l.blendId
+                            ? <small><Link to={`/spice-lab/${l.blendId}`} className="muted"><Icon.starburst /> Spice blend, batch of {qty(l.packSize)} tsp</Link>{c?.missingPrice && <> <span className="badge warn">No prices</span></>}</small>
+                            : c?.missingPrice
+                              ? <span className="badge warn">No purchase price</span>
+                              : isLabor(l)
+                                ? <small className="muted">Service rate</small>
+                                : <small className="muted">{l.vendor ? `${l.vendor}, ` : ''}bought {date(l.priceDate)}</small>}
                         </td>
-                        <td className="num nowrap">{l.packPrice ? pack(l.packSize, l.uom) : '—'}</td>
-                        <td className="num">{l.packPrice ? unitMoney(l.packPrice) : '—'}</td>
-                        <td className="num nowrap">{c?.unitPrice ? perUnit(c.unitPrice, l.uom) : '—'}</td>
-                        <td className="num"><input className="input num" style={{ width: 84 }} inputMode="decimal" value={l.amount} aria-label={`${l.name} amount used, in ${l.uom ?? 'each'}`} aria-invalid={amountProblem([l])} onChange={(e) => setLine(l.key, { amount: e.target.value })} /></td>
+                        <td className="num nowrap">{c?.unitPrice ? (l.blendId ? `${money(c.unitPrice)} / ${l.uom}` : perUnit(c.unitPrice, l.uom)) : '—'}</td>
+                        <td className="num nowrap">{l.packPrice && !isLabor(l) ? pack(l.packSize, l.uom) : '—'}</td>
+                        <td className="num">{l.packPrice && !isLabor(l) ? (l.blendId ? money(l.packPrice) : unitMoney(l.packPrice)) : '—'}</td>
+                        <td className="num">
+                          <span className="unit-input">
+                            <input className="input num" inputMode="decimal" value={l.amount} aria-label={`${l.name} amount used, in ${l.uom ?? 'each'}`} aria-invalid={amountProblem([l])} onChange={(e) => setLine(l.key, { amount: e.target.value })} />
+                            <span aria-hidden="true">{l.uom ?? 'each'}</span>
+                          </span>
+                        </td>
                         <td className="num" style={{ fontWeight: 650 }}>{c ? money(c.baseCost) : '—'}</td>
                         {scaled && <td className="num scaled nowrap">{c ? `${qty(c.scaledAmount)} ${l.uom ?? ''}` : '—'}</td>}
                         {scaled && <td className="num scaled">{c ? money(c.scaledCost) : '—'}</td>}
@@ -320,8 +306,9 @@ export default function RecipeBuilder() {
                 value={search}
                 onInput={setSearch}
                 onPick={addIngredient}
-                exclude={form.lines.map((l) => l.ingredientId)}
-                placeholder="Add an ingredient…"
+                exclude={form.lines.map((l) => l.ingredientId ?? l.blendId)}
+                includeBlends
+                placeholder="Add an ingredient or spice blend…"
                 footer={(q) => q.trim() && (
                   <div className="option muted" style={{ cursor: 'default' }}>Not listed? Add “{q.trim()}” to the database with Quick add first.</div>
                 )}
@@ -350,7 +337,7 @@ export default function RecipeBuilder() {
         <aside className="ticket-rail" aria-label="Financials">
           <div className="ticket">
             <div className="ticket-title">
-              <h2>Cost</h2>
+              <h2>Cost Calculator</h2>
               {costing && <span className={scaled ? 'scaled' : 'muted'}>×{toDecimal(costing.scale).toDecimalPlaces(2).toString()}</span>}
             </div>
             <div className="servings-input">
@@ -423,21 +410,9 @@ export default function RecipeBuilder() {
         </aside>
       </div>
 
-      {blocker.state === 'blocked' && (
-        <Modal title="Leave without saving?" onClose={() => blocker.reset()}>
-          <p>Your changes to {form.name || 'this recipe'} haven’t been saved. If you leave now, they’re lost.</p>
-          {saveError && <Notice kind="error">{saveError}</Notice>}
-          <div className="form-actions">
-            <button className="btn ghost" onClick={() => blocker.reset()}>Keep editing</button>
-            <button className="btn danger" onClick={() => blocker.proceed()}>Discard changes</button>
-            {id && (
-              <button className="btn primary" disabled={saving} onClick={async () => { if (await save()) blocker.proceed(); }}>
-                {saving && <Spinner />} Save and leave
-              </button>
-            )}
-          </div>
-        </Modal>
-      )}
+      <LeaveModal blocker={blocker} error={saveError} onSave={id ? save : undefined} saving={saving}>
+        Your changes to {form.name || 'this recipe'} haven’t been saved. If you leave now, they’re lost.
+      </LeaveModal>
       {addToEvent && <AddToEventModal recipe={{ id, name: form.name, baseServings: form.baseServings }} onClose={() => setAddToEvent(false)} />}
     </main>
   );

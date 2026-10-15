@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { completePurchaseCosts, percentChange, CalcError } from '@kitchen/shared';
-import { query, tx } from '../db.js';
+import { query, tx, fkViolation } from '../db.js';
 import { LATEST_PURCHASE, INGREDIENT_COLUMNS } from '../sql.js';
 import { normalizeReceipt } from '../services/receipt.js';
 import { resolveName, matchItems } from '../matching.js';
@@ -253,7 +253,7 @@ router.delete('/:id', async (req, res) => {
     const { rowCount } = await query('DELETE FROM ingredients WHERE id = $1', [id]);
     if (!rowCount) throw notFound('Ingredient');
   } catch (err) {
-    if (err.code === '23503') throw new HttpError(409, 'This ingredient is used in a recipe. Remove it from those recipes first.');
+    if (fkViolation(err)) throw new HttpError(409, 'This ingredient is used in a recipe or spice blend. Remove it from those first.');
     throw err;
   }
   res.status(204).end();
@@ -265,6 +265,18 @@ router.post('/:id/purchases', async (req, res) => {
   await getIngredient(id);
   const purchase = await insertPurchase({ query }, id, purchaseFields(req.body ?? {}));
   res.status(201).json(purchase);
+});
+
+// Correct a purchase's pack size (a mis-entered "case 36 lb"). The one field that can change:
+// the price paid stays as recorded, so the price history remains append-only.
+router.patch('/:id/purchases/:purchaseId', async (req, res) => {
+  const packSize = number(req.body?.packSize, 'Pack size', { required: true, min: 0, minExclusive: true });
+  const { rows } = await query(
+    `UPDATE ingredient_purchases SET pack_size = $3 WHERE id = $1 AND ingredient_id = $2 RETURNING ${PURCHASE_COLUMNS}`,
+    [uuid(req.params.purchaseId, 'purchaseId'), uuid(req.params.id, 'id'), packSize],
+  );
+  if (!rows[0]) throw notFound('Purchase');
+  res.json(rows[0]);
 });
 
 router.delete('/:id/purchases/:purchaseId', async (req, res) => {

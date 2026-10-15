@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api, imageForm, notifyDataChanged } from '../api.js';
-import { useApi } from '../hooks.js';
-import { date, dateTime, money, pack, qty, unitMoney } from '../format.js';
+import { useApi, useLeaveGuard } from '../hooks.js';
+import { date, dateTime, money, pack, perUnit, qty, toDecimal, unitMoney } from '../format.js';
 import ImageGallery from '../components/ImageGallery.jsx';
-import ReviewLinesTable, { toRow, toPurchaseItem, savedMessage } from '../components/ReviewLines.jsx';
-import { Modal, Notice, Spinner, useToast } from '../components/ui.jsx';
+import ReviewLinesTable, { rowsSnapshot, toRow, toPurchaseItem, savedMessage } from '../components/ReviewLines.jsx';
+import { LeaveModal, Modal, Notice, Spinner, useToast } from '../components/ui.jsx';
 
 export default function PurchasesPage() {
   const { data, error, loading } = useApi('/receipts');
@@ -125,22 +125,23 @@ export function ReceiptDetailPage() {
         <div className="table-wrap">
         <table className="grid">
           <thead>
-            <tr><th>Ingredient</th><th>Category</th><th className="num">Qty</th><th className="num">Pack size</th><th className="num">Pack price</th><th className="num">Total</th></tr>
+            <tr><th>Ingredient</th><th>Category</th><th className="num" title="Pack price ÷ pack size">Unit price</th><th className="num">Qty</th><th className="num">Pack size</th><th className="num">Pack price</th><th className="num">Total</th></tr>
           </thead>
           <tbody>
             {r.purchases.map((p) => (
               <tr key={p.id}>
                 <td><Link to={`/ingredients?open=${p.ingredientId}`} style={{ color: 'inherit', fontWeight: 600 }}>{p.ingredientName}</Link></td>
                 <td>{p.category ?? '—'}</td>
+                <td className="num nowrap" style={{ fontWeight: 650 }}>{perUnit(toDecimal(p.unitCost).div(p.packSize), p.uom)}</td>
                 <td className="num">{qty(p.quantity)}</td>
                 <td className="num nowrap">{pack(p.packSize, p.uom)}</td>
                 <td className="num">{unitMoney(p.unitCost)}</td>
                 <td className="num">{money(p.totalCost)}</td>
               </tr>
             ))}
-            {!r.purchases.length && <tr><td colSpan={6} className="muted">Nothing from this receipt has been saved yet.</td></tr>}
+            {!r.purchases.length && <tr><td colSpan={7} className="muted">Nothing from this receipt has been saved yet.</td></tr>}
           </tbody>
-          {r.purchases.length > 0 && <tfoot><tr><td colSpan={5}>Total</td><td className="num">{money(r.savedTotal)}</td></tr></tfoot>}
+          {r.purchases.length > 0 && <tfoot><tr><td colSpan={6}>Total</td><td className="num">{money(r.savedTotal)}</td></tr></tfoot>}
         </table>
         </div>
       </section>
@@ -181,6 +182,8 @@ function PendingLines({ receipt }) {
   }, [receipt.pendingLines]);
 
   const ticked = rows.filter((r) => r.confirmed);
+  const fresh = useMemo(() => rowsSnapshot(receipt.pendingLines.map((l) => toRow(l))), [receipt.pendingLines]);
+  const { blocker } = useLeaveGuard(rowsSnapshot(rows) !== fresh);
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -198,6 +201,12 @@ function PendingLines({ receipt }) {
     }
   };
 
+  const saveButton = (className) => (
+    <button className={`btn primary ${className}`} disabled={!ticked.length || busy} onClick={save}>
+      {busy && <Spinner />} Save {ticked.length || ''} {ticked.length === 1 ? 'line' : 'lines'}
+    </button>
+  );
+
   return (
     <section className="panel" aria-label="Lines not saved yet">
       <div className="panel-head">
@@ -205,11 +214,12 @@ function PendingLines({ receipt }) {
           <h2>Not saved yet</h2>
           <p className="muted">Lines from the receipt that were skipped during review. Rename or adjust them, tick the ones to add, and save.</p>
         </div>
-        <button className="btn primary" disabled={!ticked.length || busy} onClick={save}>
-          {busy && <Spinner />} Save {ticked.length || ''} {ticked.length === 1 ? 'line' : 'lines'}
-        </button>
+        {saveButton('')}
       </div>
-      <ReviewLinesTable rows={rows} setRows={setRows} pending allowAdd={false} />
+      <ReviewLinesTable rows={rows} setRows={setRows} pending allowAdd={false} saveButton={saveButton} />
+      <LeaveModal blocker={blocker}>
+        Your changes to the lines that aren’t saved yet will be lost. The lines stay on the receipt.
+      </LeaveModal>
       {error && <div className="panel-pad" style={{ paddingTop: 0 }}><Notice kind="error">{error}</Notice></div>}
     </section>
   );

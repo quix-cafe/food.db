@@ -2,7 +2,6 @@ import { Decimal, toDecimal } from '@kitchen/shared';
 
 const CURRENCY = 'USD';
 const moneyFmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: CURRENCY });
-const qtyFmt = new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 });
 
 /** Format a decimal string as currency without passing through a float. */
 export function money(value, dp = 2) {
@@ -20,19 +19,26 @@ export function unitMoney(value) {
   return money(d.toDecimalPlaces(dp), dp);
 }
 
-export function qty(value) {
+/** A measurement with at most `dp` decimal places, e.g. "1,250.5". */
+export function qty(value, dp = 3) {
   const d = toDecimal(value);
-  return d ? qtyFmt.format(d.toDecimalPlaces(3).toString()) : '—';
+  return d ? new Intl.NumberFormat('en-US', { maximumFractionDigits: dp }).format(d.toDecimalPlaces(dp).toString()) : '—';
 }
 
 /** A store pack in the ingredient's unit of measure, e.g. "36 lb". */
-export function pack(size, uom) {
-  return `${qty(size ?? 1)} ${uom ?? 'each'}`;
+export function pack(size, uom, dp) {
+  return `${qty(size ?? 1, dp)} ${uom ?? 'each'}`;
 }
 
-/** Price per unit of measure, to the nearest cent, e.g. "$3.13 / lb". Costing keeps full precision. */
+/**
+ * Price per unit of measure, to the nearest cent, e.g. "$3.13 / lb". A price too small to
+ * show in cents (a pinch of salt) keeps its decimals rather than reading "$0.00". Costing
+ * always keeps full precision.
+ */
 export function perUnit(price, uom) {
-  return `${money(price)} / ${uom ?? 'each'}`;
+  const d = toDecimal(price);
+  const tiny = d && d.gt(0) && d.toDecimalPlaces(2).isZero();
+  return `${tiny ? unitMoney(d) : money(price)} / ${uom ?? 'each'}`;
 }
 
 export function percent(value, dp = 1) {

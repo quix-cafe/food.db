@@ -73,6 +73,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .nav a:hover { background: #26363f; color: #fff; }
 .nav a.active { background: #fff; color: var(--ink); }
 .nav svg { flex: none; }
+.sidebar .menu-toggle, .menu-scrim { display: none; } /* .sidebar: outranks .icon-btn's display */
 
 .main { min-width: 0; display: flex; flex-direction: column; }
 
@@ -251,7 +252,7 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 .toolbar { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 14px 18px; border-bottom: 1px solid var(--line-soft); }
 .price-up { color: var(--tomato); font-weight: 650; }
 .price-down { color: var(--basil); font-weight: 650; }
-.stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; }
 .stat { padding: 12px; border: 1px solid var(--line-soft); border-radius: var(--radius); }
 .stat b { display: block; font-size: 1.25rem; font-stretch: 85%; }
 .stat span { font-size: 0.82rem; color: var(--muted); }
@@ -263,7 +264,7 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 
 /* ---------- Receipt review (split screen) ---------- */
 
-.split { display: grid; grid-template-columns: minmax(280px, 2fr) 3fr; gap: 16px; align-items: start; }
+.split { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr); gap: 16px; align-items: start; }
 .source-pane { position: sticky; top: 76px; display: flex; flex-direction: column; max-height: calc(100vh - 100px); }
 .source-view { overflow: auto; background: #2b3a43; border-radius: 0 0 var(--radius) var(--radius); min-height: 360px; flex: 1; }
 .source-view img { display: block; max-width: none; transform-origin: top left; }
@@ -357,11 +358,48 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 .builder-lines td, .builder-lines th { padding-left: 8px; padding-right: 8px; }
 .builder-lines td { padding-top: 6px; padding-bottom: 6px; }
 .builder-lines .input { padding: 5px 7px; }
-.builder-lines tr.dragging td { opacity: 0.4; }
-.builder-lines tr.drop-target td { box-shadow: inset 0 2px 0 var(--basil); }
-.drag-handle { cursor: grab; color: var(--muted); display: grid; place-items: center; }
+.builder-lines tr.dragging td, .blend-grid tr.dragging td { opacity: 0.4; }
+.builder-lines tr.drop-target td, .blend-grid tr.drop-target td { box-shadow: inset 0 2px 0 var(--basil); }
+.drag-handle { cursor: grab; color: var(--muted); display: grid; place-items: center; touch-action: none; user-select: none; -webkit-user-select: none; }
+.drag-handle:active { cursor: grabbing; }
 .scaled { color: var(--saffron); font-weight: 650; }
 .combo { position: relative; }
+
+/* Spice Lab */
+.blend-pie { position: relative; flex: none; }
+.blend-pie-center { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; }
+.blend-pie-center b { font-family: var(--font-heading); font-size: 1.6rem; line-height: 1; }
+.blend-pie-center span { font-size: 0.8rem; color: var(--muted); }
+.blend-pie-empty { flex: none; display: grid; place-items: center; text-align: center; padding: 24px; border-radius: 50%; border: 2px dashed var(--line); color: var(--muted); font-size: 0.85rem; }
+.blend-summary { display: flex; gap: 28px; align-items: center; padding: 20px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; }
+.blend-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 14px 28px; align-content: center; flex: 1 1 240px; min-width: 0; }
+.blend-unit { min-width: 84px; }
+.blend-facts > div { display: flex; flex-direction: column; gap: 2px; }
+.blend-facts span { font-size: 0.82rem; color: var(--muted); }
+.blend-facts b { font-size: 1.35rem; }
+.blend-facts small { font-size: 0.78rem; color: var(--muted); }
+.blend-facts p { grid-column: 1 / -1; margin: 0; font-size: 0.8rem; }
+.blend-scale { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line-soft); max-width: 640px; }
+.spice-name { display: flex; align-items: center; gap: 10px; }
+.spice-name > i, .blend-swatches i { flex: none; width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.blend-card { flex-direction: row; align-items: center; }
+.blend-card .blend-pie-empty { width: 84px !important; height: 84px !important; padding: 8px; font-size: 0.7rem; }
+.blend-swatches { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 0.8rem; color: var(--ink-2); }
+.blend-swatches span { display: inline-flex; align-items: center; gap: 5px; }
+@media (max-width: 640px) { .blend-facts { grid-template-columns: 1fr 1fr; } }
+
+/* An amount box with its unit of measure shown inside, at the right. */
+.unit-input { position: relative; display: inline-block; width: 104px; }
+.unit-input .input { padding-right: 42px; }
+.unit-input > span { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); width: 32px; text-align: left; font-size: 0.82rem; color: var(--muted); pointer-events: none; overflow: hidden; text-overflow: ellipsis; }
+
+/* The review grid's save button, kept in reach while scrolling a long receipt. */
+.floating-save {
+  position: fixed; z-index: 30;
+  right: max(20px, env(safe-area-inset-right, 0px));
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+}
+.floating-save .btn { box-shadow: 0 8px 22px rgba(28, 42, 51, 0.28); padding: 12px 18px; }
 
 .prompt-tip {
   display: flex; gap: 12px; align-items: center; justify-content: space-between;
@@ -386,6 +424,10 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 
 /* Labor lines: costed like ingredients, always last, tinted so they read as a different kind of cost. */
 tr.labor-row > td { background: var(--basil-wash); }
+.labor-rate { background: var(--basil-wash); border-color: #c5ddcf; }
+.pack-size-edit .input { width: 72px; padding: 4px 6px; }
+.rate-history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
+.rate-history li { display: flex; justify-content: space-between; max-width: 320px; border-bottom: 1px dashed var(--line); padding: 3px 0; }
 tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 
 /* The ticket: the recipe's financials clipped to a kitchen ticket rail. */
@@ -485,12 +527,36 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
   .source-pane { max-height: 60vh; }
 }
 
+/* Narrower screens give the sidebar's width to wide tables: first the labels tighten,
+   then (also on phones held sideways) the sidebar shrinks to an icon rail. */
+@media (min-width: 1101px) and (max-width: 1400px) {
+  .shell { --sidebar: 152px; }
+  .sidebar { padding: 18px 8px; }
+  .brand { padding: 0 6px; }
+  .nav a { padding: 9px 8px; gap: 8px; }
+}
+
+@media (min-width: 801px) and (max-width: 1100px) {
+  .shell { --sidebar: 64px; }
+  .sidebar { padding: 14px 8px; gap: 18px; }
+  .brand { justify-content: center; padding: 0; }
+  .brand-name, .nav a > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .nav a { justify-content: center; padding: 10px 0; }
+}
+
 @media (max-width: 800px) {
-  .shell { grid-template-columns: minmax(0, 1fr); }
-  .sidebar { position: sticky; z-index: 30; height: auto; flex-direction: row; align-items: center; padding: 8px 12px; gap: 12px; }
-  .brand-name { display: none; }
-  .nav { flex-direction: row; overflow-x: auto; min-width: 0; scrollbar-width: none; }
-  .nav a { padding: 7px 10px; }
+  .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .sidebar { position: sticky; z-index: 30; height: auto; flex-direction: row; align-items: center; padding: 8px 12px; padding-top: calc(8px + env(safe-area-inset-top, 0px)); gap: 12px; }
+  .sidebar .menu-toggle { display: grid; margin-left: auto; color: #fff; width: 40px; height: 40px; background: transparent; }
+  .sidebar .menu-toggle:hover, .sidebar .menu-toggle:active, .sidebar .menu-toggle[aria-expanded='true'] { background: #26363f; color: #fff; }
+  .menu-toggle svg { width: 22px; height: 22px; }
+  .nav { display: none; }
+  .menu-open .nav {
+    display: flex; position: absolute; top: 100%; left: 0; right: 0; z-index: 2;
+    background: var(--ink); padding: 6px 12px 14px; box-shadow: 0 12px 24px rgba(28, 42, 51, 0.35);
+  }
+  .menu-open .menu-scrim { display: block; position: fixed; inset: 0; z-index: 1; background: rgba(28, 42, 51, 0.25); }
+  .nav a { padding: 12px 12px; font-size: 1.05rem; }
   .topbar { position: static; padding: 10px 16px; flex-wrap: wrap; }
   .page { padding: 18px 16px; }
   .stat-row { grid-template-columns: 1fr 1fr; }

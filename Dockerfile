@@ -1,4 +1,4 @@
-FROM node:22-slim AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY shared/package.json shared/
@@ -9,7 +9,7 @@ COPY shared shared
 COPY client client
 RUN npm run build -w client
 
-FROM node:22-slim
+FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./

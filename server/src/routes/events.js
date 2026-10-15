@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { summarizeEvent } from '@kitchen/shared';
-import { query, tx } from '../db.js';
+import { query, tx, fkViolation } from '../db.js';
 import { loadRecipes } from './recipes.js';
 import { badRequest, notFound, text, number, date, uuid, array } from '../validate.js';
 
@@ -48,7 +48,6 @@ async function getEvent(id) {
   return { ...rows[0], recipes };
 }
 
-const fkViolation = (err) => err.code === '23503';
 
 // GET /api/events?date=YYYY-MM-DD
 router.get('/', async (req, res) => {

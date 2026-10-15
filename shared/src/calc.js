@@ -184,11 +184,13 @@ export function summarizeEvent(recipes = [], amounts = {}) {
     for (const w of calc.warnings) warnings.push(`${r.name}: ${w}`);
 
     for (const line of calc.lines) {
-      const key = line.ingredientId;
+      // A spice blend line is its own entry (packs = batches to make), never merged with another.
+      const key = line.ingredientId ?? `blend:${line.blendId}`;
       let entry = shopping.get(key);
       if (!entry) {
         entry = {
-          ingredientId: line.ingredientId,
+          ingredientId: line.ingredientId ?? null,
+          blendId: line.blendId ?? null,
           name: line.name,
           category: line.category ?? null,
           uom: line.uom ?? null,
@@ -262,3 +264,4 @@ export function summarizeEvent(recipes = [], amounts = {}) {
     warnings,
   };
 }
+export * from './units.js';

@@ -1,4 +1,4 @@
-import { toDecimal } from '../format.js';
+import { perUnit, toDecimal } from '../format.js';
 import CategoryCombobox from './CategoryCombobox.jsx';
 import { UomInput } from './forms.jsx';
 import ReceiptNameCell, { rowTarget } from './ReceiptNameCell.jsx';
@@ -35,6 +35,17 @@ function normalizeUom(unit) {
   const u = (unit ?? '').trim();
   return /^(ea|ct|pc|pcs)$/i.test(u) ? 'each' : u;
 }
+
+/** Price per unit of measure for a row: pack price (or total ÷ qty) ÷ pack size; null if incomplete. */
+export function rowUnitPrice(r) {
+  const q = toDecimal(r.quantity);
+  const size = toDecimal(r.packSize);
+  const packPrice = toDecimal(r.unitCost) ?? (q && !q.isZero() ? toDecimal(r.totalCost)?.div(q) : null);
+  return packPrice && size && size.gt(0) ? packPrice.div(size) : null;
+}
+
+/** Comparable form of the rows (minus React keys), to tell whether anything was edited. */
+export const rowsSnapshot = (rows) => JSON.stringify(rows.map(({ key, ...r }) => r));
 
 export function rowProblem(r) {
   if (!rowTarget(r).name) return r.source ? 'Type a name or keep the receipt name' : 'Needs a name';
@@ -75,8 +86,10 @@ export function savedMessage(res) {
 /**
  * pending: rows from a saved receipt that were never added; shown grayed out until ticked,
  * and can't be removed (they stay on the receipt).
+ * saveButton(className): the page's save button, repeated under the table and floating in
+ * the bottom-right corner while any line is ticked. The page puts its own above the table.
  */
-export default function ReviewLinesTable({ rows, setRows, pending = false, allowAdd = true }) {
+export default function ReviewLinesTable({ rows, setRows, pending = false, allowAdd = true, saveButton }) {
   const update = (key, patch) => setRows((rs) => rs.map((r) => {
     if (r.key !== key) return r;
     const next = { ...r, ...patch };
@@ -93,6 +106,7 @@ export default function ReviewLinesTable({ rows, setRows, pending = false, allow
               <th className="check" title="Tick to save this line">Save</th>
               <th style={{ minWidth: 200 }}>Ingredient <span className="muted" style={{ fontWeight: 500 }}>(click a name to rename)</span></th>
               <th>Category</th>
+              <th className="num" title="Pack price ÷ pack size (from the total when there's no pack price)">Unit price</th>
               <th className="num" title="How many packs were bought">Qty</th>
               <th className="num" title="How many units of measurement in one pack">Pack size</th>
               <th title="Unit of measurement. An existing ingredient keeps its own.">UOM</th>
@@ -115,6 +129,7 @@ export default function ReviewLinesTable({ rows, setRows, pending = false, allow
                     {problem && <div className="name-status" style={{ color: 'var(--tomato)' }}>{problem}</div>}
                   </td>
                   <td><CategoryCombobox style={{ minWidth: 140 }} value={r.category} disabled={rowTarget(r).kind === 'existing'} ariaLabel={`Line ${i + 1} category`} placeholder="" onChange={(category) => update(r.key, { category })} /></td>
+                  <td className="num nowrap" style={{ fontWeight: 650 }}>{rowUnitPrice(r) ? perUnit(rowUnitPrice(r), rowTarget(r).uom) : '—'}</td>
                   <td className="num"><input className="input num" style={{ width: 72 }} inputMode="decimal" value={r.quantity} aria-label={`Line ${i + 1} quantity`} aria-invalid={!toDecimal(r.quantity) || toDecimal(r.quantity).lte(0)} onChange={(e) => update(r.key, { quantity: e.target.value })} /></td>
                   <td className="num"><input className="input num" style={{ width: 72 }} inputMode="decimal" value={r.packSize} aria-label={`Line ${i + 1} pack size`} aria-invalid={!toDecimal(r.packSize) || toDecimal(r.packSize).lte(0)} onChange={(e) => update(r.key, { packSize: e.target.value })} /></td>
                   <td>{rowTarget(r).kind === 'existing'
@@ -131,8 +146,12 @@ export default function ReviewLinesTable({ rows, setRows, pending = false, allow
       </div>
       <div className="panel-pad" style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         {allowAdd ? <button className="btn small" onClick={() => setRows((rs) => [...rs, toRow({ quantity: '1' }, null)])}><Icon.plus /> Add line</button> : <span />}
-        <span className="muted">{confirmed} of {rows.length} lines ticked</span>
+        <span style={{ display: 'flex', gap: 12, alignItems: 'center', marginLeft: 'auto' }}>
+          <span className="muted">{confirmed} of {rows.length} lines ticked</span>
+          {saveButton?.('')}
+        </span>
       </div>
+      {saveButton && confirmed > 0 && <div className="floating-save">{saveButton('floating')}</div>}
     </>
   );
 }

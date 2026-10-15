@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { NavLink, Navigate, Route, Routes, Link, useParams } from 'react-router';
+import { useEffect, useState } from 'react';
+import { NavLink, Navigate, Route, Routes, Link, useLocation, useParams } from 'react-router';
 import UniversalSearch from './components/UniversalSearch.jsx';
 import { NewIngredientForm, ReceiptImportForm } from './components/forms.jsx';
 import { Icon, Modal, Tabs, ToastProvider } from './components/ui.jsx';
@@ -11,6 +11,7 @@ import EventsPage from './pages/EventsPage.jsx';
 import EventPlanner from './pages/EventPlanner.jsx';
 import PurchasesPage, { ReceiptDetailPage } from './pages/PurchasesPage.jsx';
 import BackupPage from './pages/BackupPage.jsx';
+import SpiceLabPage, { BlendEditor } from './pages/SpiceLabPage.jsx';
 
 function QuickAdd({ onClose }) {
   const [tab, setTab] = useState('receipt');
@@ -26,6 +27,7 @@ function QuickAdd({ onClose }) {
           ]}
         />
         <Link to="/recipes/new" className="tab" onClick={onClose}>New recipe</Link>
+        <Link to="/spice-lab/new" className="tab" onClick={onClose}>New spice blend</Link>
       </div>
       {tab === 'manual' ? <NewIngredientForm onDone={onClose} /> : <ReceiptImportForm onDone={onClose} />}
     </Modal>
@@ -39,20 +41,35 @@ function OldReceiptRedirect() {
 
 export default function App() {
   const [quickAdd, setQuickAdd] = useState(false);
+  // On phones the menu collapses behind a button; it closes on navigation, Escape or a tap outside.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const { pathname } = useLocation();
+  useEffect(() => setMenuOpen(false), [pathname]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e) => e.key === 'Escape' && setMenuOpen(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
   return (
     <ToastProvider>
       <div className="shell">
-        <nav className="sidebar" aria-label="Main">
+        <nav className={`sidebar ${menuOpen ? 'menu-open' : ''}`} aria-label="Main">
           <Link to="/" className="brand">
             <img src="/favicon.svg" width="28" height="28" alt="" />
             <span className="brand-name">food.db</span>
           </Link>
-          <div className="nav">
-            <NavLink to="/ingredients"><Icon.carrot /> Ingredients</NavLink>
-            <NavLink to="/recipes"><Icon.chefHat /> Recipes</NavLink>
-            <NavLink to="/events"><Icon.glass /> Events</NavLink>
-            <NavLink to="/purchases"><Icon.cart /> Purchases</NavLink>
-            <NavLink to="/backup"><Icon.history /> Backup</NavLink>
+          <button className="icon-btn menu-toggle" aria-expanded={menuOpen} aria-controls="main-menu" aria-label={menuOpen ? 'Close menu' : 'Open menu'} onClick={() => setMenuOpen((o) => !o)}>
+            {menuOpen ? <Icon.close /> : <Icon.menu />}
+          </button>
+          {menuOpen && <div className="menu-scrim" onClick={() => setMenuOpen(false)} />}
+          <div className="nav" id="main-menu">
+            <NavLink to="/ingredients" title="Ingredients"><Icon.carrot /> <span>Ingredients</span></NavLink>
+            <NavLink to="/recipes" title="Recipes"><Icon.chefHat /> <span>Recipes</span></NavLink>
+            <NavLink to="/purchases" title="Purchases"><Icon.cart /> <span>Purchases</span></NavLink>
+            <NavLink to="/events" title="Events"><Icon.calendar /> <span>Events</span></NavLink>
+            <NavLink to="/backup" title="Backup"><Icon.history /> <span>Backup</span></NavLink>
+            <NavLink to="/spice-lab" title="Spice Lab"><Icon.starburst /> <span>Spice Lab</span></NavLink>
           </div>
         </nav>
         <div className="main">
@@ -77,6 +94,9 @@ export default function App() {
             <Route path="/events" element={<EventsPage />} />
             <Route path="/events/:id" element={<EventPlanner />} />
             <Route path="/backup" element={<BackupPage />} />
+            <Route path="/spice-lab" element={<SpiceLabPage />} />
+            <Route path="/spice-lab/new" element={<BlendEditor />} />
+            <Route path="/spice-lab/:id" element={<BlendEditor />} />
             <Route path="*" element={<main className="page"><div className="panel empty"><h2>Page not found</h2><Link className="btn" to="/ingredients">Go to ingredients</Link></div></main>} />
           </Routes>
         </div>

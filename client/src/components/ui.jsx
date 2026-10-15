@@ -7,8 +7,11 @@ export const Icon = {
   carrot: () => <svg {...s}><path d="M3 21 10.6 8.6a4.6 4.6 0 0 1 6.8 6.8z" /><path d="M8.2 14.6l1.5 1.5M10.9 11.4l1.3 1.3" /><path d="M15 8c-.4-2.3.3-4.4 2-6M16.3 9.3 20.6 5M17.6 10.6c2.2-.6 4-.3 5.4.7" /></svg>,
   chefHat: () => <svg {...s}><path d="M6 13.9V20h12v-6.1a4 4 0 1 0-1.7-7.6 4.5 4.5 0 0 0-8.6 0A4 4 0 1 0 6 13.9z" /><path d="M6 16.5h12" /></svg>,
   glass: () => <svg {...s}><path d="M7.5 3h9l-.4 5.5a4.1 4.1 0 0 1-8.2 0z" /><path d="M12 12.6V20M8 21h8" /><path d="M19.5 2.5v3M18 4h3" /></svg>,
+  calendar: () => <svg {...s}><rect x="3.5" y="5" width="17" height="15.5" rx="2" /><path d="M3.5 10h17M8 3v4M16 3v4" /><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.5h.01M12 17.5h.01" /></svg>,
   cart: () => <svg {...s}><circle cx="9" cy="20" r="1.4" /><circle cx="17.5" cy="20" r="1.4" /><path d="M2 3h2.8l2.6 12a1.6 1.6 0 0 0 1.6 1.3h8.4a1.6 1.6 0 0 0 1.5-1.2L21 7H5.7" /></svg>,
   history: () => <svg {...s}><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5" /><path d="M3.5 3.5v5h5" /><path d="M12 7.5V12l3 2" /></svg>,
+  starburst: () => <svg {...s}><path d="M12.0 1.5 L13.4 8.7 L19.4 4.6 L15.3 10.6 L22.5 12.0 L15.3 13.4 L19.4 19.4 L13.4 15.3 L12.0 22.5 L10.6 15.3 L4.6 19.4 L8.7 13.4 L1.5 12.0 L8.7 10.6 L4.6 4.6 L10.6 8.7z" /></svg>,
+  menu: () => <svg {...s}><path d="M4 6h16M4 12h16M4 18h16" /></svg>,
   print: () => <svg {...s}><path d="M6.5 9V3h11v6" /><rect x="3" y="9" width="18" height="8" rx="2" /><path d="M6.5 14h11v7h-11z" /></svg>,
   search: () => <svg {...s}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>,
   plus: () => <svg {...s}><path d="M12 5v14M5 12h14" /></svg>,
@@ -39,6 +42,26 @@ function useInitialFocus(ref) {
     first?.focus();
     return () => prev?.focus?.();
   }, [ref]);
+}
+
+/** Confirmation for useLeaveGuard's blocker; `onSave` (returns true on success) adds "Save and leave". */
+export function LeaveModal({ blocker, children, error, onSave, saving }) {
+  if (blocker.state !== 'blocked') return null;
+  return (
+    <Modal title="Leave without saving?" onClose={() => blocker.reset()}>
+      <p>{children}</p>
+      {error && <Notice kind="error">{error}</Notice>}
+      <div className="form-actions">
+        <button className="btn ghost" onClick={() => blocker.reset()}>Keep editing</button>
+        <button className="btn danger" onClick={() => blocker.proceed()}>Discard changes</button>
+        {onSave && (
+          <button className="btn primary" disabled={saving} onClick={async () => { if (await onSave()) blocker.proceed(); }}>
+            {saving && <Spinner />} Save and leave
+          </button>
+        )}
+      </div>
+    </Modal>
+  );
 }
 
 export function Modal({ title, onClose, children }) {

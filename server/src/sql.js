@@ -21,13 +21,13 @@ export const INGREDIENT_COLUMNS = `
 
 /** Recipe lines with the ingredient's latest price, for the given recipe ids ($1 uuid[]). */
 export const RECIPE_LINES = `
-  SELECT ri.recipe_id AS "recipeId", ri.position,
+  SELECT ri.recipe_id AS "recipeId", ri.position, ri.blend_id AS "blendId",
          i.id AS "ingredientId", i.name, i.category,
          i.uom, ri.amount,
          lp.unit_cost AS "packPrice", lp.pack_size AS "packSize", lp.vendor, lp.purchase_date AS "priceDate",
          lp.created_at AS "priceSyncedAt"
   FROM recipe_ingredients ri
-  JOIN ingredients i ON i.id = ri.ingredient_id
+  LEFT JOIN ingredients i ON i.id = ri.ingredient_id -- null for a blend line (filled in by loadRecipes)
   ${LATEST_PURCHASE}
   WHERE ri.recipe_id = ANY($1::uuid[])
   ORDER BY ri.recipe_id, ri.position`;

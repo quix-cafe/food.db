@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { calculateRecipe } from '@kitchen/shared';
-import { query, tx } from '../db.js';
+import { query, tx, fkViolation } from '../db.js';
 import { LATEST_PURCHASE, RECIPE_COLUMNS, RECIPE_LINES } from '../sql.js';
+import { blendAsLine, loadBlends } from '../blends.js';
 import { badRequest, notFound, text, number, uuid, array } from '../validate.js';
 import { uploadImages, attachImages, listImages, copyImages, ownedFilenames, removeFiles, reorderImages } from '../images.js';
 
@@ -14,6 +15,11 @@ export async function loadRecipes(ids, client = { query }) {
     client.query(`SELECT ${RECIPE_COLUMNS} FROM recipes r WHERE r.id = ANY($1::uuid[])`, [ids]),
     client.query(RECIPE_LINES, [ids]),
   ]);
+  const blendIds = [...new Set(lines.filter((l) => l.blendId).map((l) => l.blendId))];
+  if (blendIds.length) {
+    const blends = new Map((await loadBlends(blendIds, client)).map((b) => [b.id, b]));
+    for (const l of lines) if (l.blendId) Object.assign(l, blendAsLine(blends.get(l.blendId)));
+  }
   const byRecipe = Map.groupBy(lines, (l) => l.recipeId);
   const images = await listImages(client, 'recipe', ids);
   return recipes.map((r) => ({ ...r, lines: byRecipe.get(r.id) ?? [], images: images.get(r.id) ?? [] }));
@@ -38,8 +44,10 @@ function withCosting(recipe, expectedServings) {
 function recipeFields(body) {
   const lines = array(body.lines, 'lines').map((l, i) => {
     const row = `Line ${i + 1}`;
+    const blendId = uuid(l.blendId, `${row}: spice blend`, { required: false });
     return {
-      ingredientId: uuid(l.ingredientId, `${row}: ingredient`),
+      ingredientId: blendId ? null : uuid(l.ingredientId, `${row}: ingredient`),
+      blendId,
       amount: number(l.amount, `${row}: amount used`, { required: true, min: 0 }),
     };
   });
@@ -57,8 +65,8 @@ async function writeLines(c, recipeId, lines) {
   await c.query('DELETE FROM recipe_ingredients WHERE recipe_id = $1', [recipeId]);
   for (const [position, l] of lines.entries()) {
     await c.query(
-      `INSERT INTO recipe_ingredients (recipe_id, position, ingredient_id, amount) VALUES ($1,$2,$3,$4)`,
-      [recipeId, position, l.ingredientId, l.amount],
+      `INSERT INTO recipe_ingredients (recipe_id, position, ingredient_id, blend_id, amount) VALUES ($1,$2,$3,$4,$5)`,
+      [recipeId, position, l.ingredientId, l.blendId, l.amount],
     );
   }
 }
@@ -69,7 +77,6 @@ async function getOne(id) {
   return withCosting(recipe);
 }
 
-const fkViolation = (err) => err.code === '23503';
 
 // Gallery: every recipe with cost per serving at base servings.
 router.get('/', async (req, res) => {
@@ -162,7 +169,7 @@ router.post('/', async (req, res) => {
     });
     res.status(201).json(await getOne(id));
   } catch (err) {
-    if (fkViolation(err)) throw badRequest('One of the ingredients no longer exists');
+    if (fkViolation(err)) throw badRequest('One of the ingredients or spice blends no longer exists');
     throw err;
   }
 });
@@ -181,7 +188,7 @@ router.put('/:id', async (req, res) => {
       await writeLines(c, id, f.lines);
     });
   } catch (err) {
-    if (fkViolation(err)) throw badRequest('One of the ingredients no longer exists');
+    if (fkViolation(err)) throw badRequest('One of the ingredients or spice blends no longer exists');
     throw err;
   }
   res.json(await getOne(id));
@@ -198,8 +205,8 @@ router.post('/:id/duplicate', async (req, res) => {
     );
     if (!rows[0]) throw notFound('Recipe');
     await c.query(
-      `INSERT INTO recipe_ingredients (recipe_id, position, ingredient_id, amount)
-       SELECT $2, position, ingredient_id, amount FROM recipe_ingredients WHERE recipe_id = $1`,
+      `INSERT INTO recipe_ingredients (recipe_id, position, ingredient_id, blend_id, amount)
+       SELECT $2, position, ingredient_id, blend_id, amount FROM recipe_ingredients WHERE recipe_id = $1`,
       [id, rows[0].id],
     );
     await copyImages(c, 'recipe', id, rows[0].id);
