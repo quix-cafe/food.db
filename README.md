@@ -25,10 +25,10 @@ It runs in Docker and opens in your browser. Everything stays on your machine.
 ```bash
 git clone https://github.com/quix-cafe/food.db.git
 cd food.db
-docker compose up -d
+docker compose up -d --build
 ```
 
-Open **http://localhost:3000**. The first start downloads the app (a ready-made image from `ghcr.io/quix-cafe/food.db`) and the database.
+Open **http://localhost:3000**. The first start takes a few minutes to build.
 
 To try it with sample ingredients, recipes and an event (only works on an empty database):
 
@@ -42,20 +42,10 @@ From the `food.db` folder:
 
 ```bash
 git pull
-docker compose pull
-docker compose up -d
+docker compose up -d --build
 ```
 
 Your data is kept. Any database changes in the new version are applied automatically when the app starts. It's a good idea to download a backup first (see [Backups](#backups)).
-
-### Automatic updates with tugtainer
-
-[tugtainer](https://github.com/Quenary/tugtainer) can apply new versions for you. Every push to `main` publishes a new `ghcr.io/quix-cafe/food.db:latest`, and tugtainer notices it by comparing image digests.
-
-1. In tugtainer, find the **fooddb-app** container and set it to **auto-update** (or check only, if you'd rather click Update yourself).
-2. Leave **fooddb-db** on check only. It gets PostgreSQL 17 bug-fix releases; tugtainer stops the app first and restarts it after.
-
-The app has a health check (`/api/health`, which also checks the database), so if a new version doesn't start properly tugtainer rolls back to the previous one. `git pull` is still worth running now and then, for changes to `docker-compose.yml` itself.
 
 ## Day to day
 

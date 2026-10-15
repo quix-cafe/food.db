@@ -10,8 +10,6 @@ COPY client client
 RUN npm run build -w client
 
 FROM node:22-slim
-LABEL org.opencontainers.image.source=https://github.com/quix-cafe/food.db
-LABEL org.opencontainers.image.description="food.db: kitchen costing, recipes and purchasing"
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
@@ -23,8 +21,7 @@ COPY shared shared
 COPY server server
 COPY --from=build /app/client/dist client/dist
 EXPOSE 3000
-# Healthy once the API answers and the database is reachable; tugtainer rolls an update
-# back if the new container doesn't become healthy.
+# Healthy once the API answers and the database is reachable.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
   CMD ["node", "-e", "fetch('http://localhost:' + (process.env.PORT || 3000) + '/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 CMD ["node", "server/src/index.js"]

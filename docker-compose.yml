@@ -17,9 +17,7 @@ services:
       retries: 20
 
   app:
-    # Published by .github/workflows/publish.yml on every push to main. Pulling it (rather
-    # than building here) lets tugtainer or `docker compose pull` see new versions.
-    image: ghcr.io/quix-cafe/food.db:latest
+    build: .
     restart: unless-stopped
     depends_on:
       db:

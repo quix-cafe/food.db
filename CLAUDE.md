@@ -14,15 +14,14 @@ npm run seed             # sample data; no-op if ingredients exist
 npm run dev              # API :3000 (node --watch) + Vite :5173 (proxies /api)
 npm test                 # shared unit tests + server integration tests
 npm run build            # client → client/dist, served by the API in production
-docker compose up -d        # full stack on :3000, pulling ghcr.io/quix-cafe/food.db:latest
-docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build   # same, built from this checkout
+docker compose up -d --build   # full stack on :3000
 ```
 
 Single test file / test: `node --test shared/test/calc.test.js`, or from `server/`: `node --env-file=../.env --test --test-name-pattern="event summary" test/api.test.js`. The server integration tests **drop and recreate the `public` schema of `TEST_DATABASE_URL`**; they skip if it is unset. Migrations (`server/migrations/*.sql`, applied in filename order, tracked in `schema_migrations`) run automatically on server start, or via `npm run migrate`.
 
 ## Deployment
 
-`.github/workflows/publish.yml` runs the tests on every push to `main`, then builds and pushes `ghcr.io/quix-cafe/food.db:latest` (amd64 + arm64). `docker-compose.yml` uses that image so tugtainer can detect updates by digest; locally built images are invisible to it. The image's `HEALTHCHECK` hits `/api/health`, which also runs `SELECT 1`. The pool has an `error` handler, so a database restart drops idle connections instead of crashing the app.
+The image's `HEALTHCHECK` hits `/api/health`, which also runs `SELECT 1`. The pool has an `error` handler, so a database restart drops idle connections instead of crashing the app.
 
 ## Architecture
 
