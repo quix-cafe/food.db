@@ -3,7 +3,7 @@
 /** Joins `lp` = the most recent purchase of ingredient alias `i`. */
 export const LATEST_PURCHASE = `
   LEFT JOIN LATERAL (
-    SELECT p.id, p.unit_cost, coalesce(p.pack_size, 1) AS pack_size, p.vendor, p.purchase_date, p.created_at
+    SELECT p.id, p.unit_cost, p.pack_size, p.vendor, p.purchase_date, p.created_at
     FROM ingredient_purchases p
     WHERE p.ingredient_id = i.id
     ORDER BY p.purchase_date DESC, p.created_at DESC

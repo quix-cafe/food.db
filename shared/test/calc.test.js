@@ -75,6 +75,7 @@ test('event shopping list sums amounts per ingredient and rounds up to whole pac
   const line = s.shoppingList[0];
   assert.equal(line.amount, '55.0000'); // 25×2 + 5×1 lb
   assert.equal(line.packsToBuy, '2'); // 55 lb in 50 lb bags
+  assert.equal(line.leftover, '45.0000'); // 100 lb bought − 55 lb used
   assert.equal(line.uom, 'lb');
   assert.equal(line.usedCost, '22.0000'); // 55 × 0.40
   assert.equal(line.purchaseCost, '40.0000'); // two whole $20 bags
@@ -112,4 +113,22 @@ test('labor is recognised by category or name and listed last', async () => {
     { ingredientId: 'z', name: 'Zest', packPrice: '1', amount: '1' },
   ] }]);
   assert.deepEqual(s.shoppingList.map((l) => l.name), ['Zest', 'Aaa labor']);
+});
+
+test('an amount set for the event replaces the scaled total and adjusts the event cost', () => {
+  const recipe = { recipeId: 'a', name: 'Cookies', baseServings: 48, expectedServings: 90, targetMargin: 70,
+    lines: [{ ingredientId: 'l', name: 'Labor', category: 'Labor', uom: 'hours', packPrice: '20', packSize: '1', amount: '0.5' }] };
+  const scaled = summarizeEvent([recipe]);
+  assert.equal(scaled.shoppingList[0].amount, '0.9375');
+  assert.equal(scaled.totalCost, '18.7500');
+  const set = summarizeEvent([recipe], { l: '0.5' });
+  const line = set.shoppingList[0];
+  assert.equal(line.amount, '0.5000');
+  assert.equal(line.calculatedAmount, '0.9375');
+  assert.equal(line.amountSet, true);
+  assert.equal(line.usedCost, '10.0000');
+  assert.equal(line.packsToBuy, '1');
+  assert.equal(set.adjustment, '-8.7500');
+  assert.equal(set.totalCost, '10.0000');
+  assert.equal(set.recipes[0].scaledCost, '18.7500'); // per-recipe figures stay as the recipes say
 });

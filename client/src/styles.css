@@ -1,4 +1,4 @@
-/* Kitchen Cost — prep-station palette: steel work surface, slate ink, basil for
+/* food.db — prep-station palette: steel work surface, slate ink, basil for
    actions, saffron for scaled/what-if values, tomato reserved for warnings. */
 
 :root {
@@ -19,6 +19,7 @@
   --tomato: #c03c2b;
   --tomato-wash: #f9e2dd;
 
+  --font-heading: 'Roboto Slab Variable', 'Roboto Slab', Rockwell, Georgia, serif;
   --font: 'Archivo Variable', 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --radius: 6px;
   --sidebar: 212px;
@@ -33,10 +34,10 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--steel); }
-h1, h2, h3 { margin: 0; line-height: 1.15; font-stretch: 82%; }
-h1 { font-size: 1.85rem; font-weight: 750; letter-spacing: -0.01em; }
-h2 { font-size: 1.25rem; font-weight: 700; }
-h3 { font-size: 1rem; font-weight: 700; }
+h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--font-heading); }
+h1 { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 1.2rem; font-weight: 650; }
+h3 { font-size: 1rem; font-weight: 600; }
 p { margin: 0; }
 a { color: var(--basil); }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -62,7 +63,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   gap: 28px;
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; color: #fff; text-decoration: none; }
-.brand-name { font-weight: 780; font-stretch: 75%; font-size: 1.3rem; letter-spacing: 0.01em; }
+.brand-name { font-family: var(--font-heading); font-weight: 700; font-size: 1.25rem; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav a {
   display: flex; align-items: center; gap: 10px;
@@ -362,6 +363,27 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 .scaled { color: var(--saffron); font-weight: 650; }
 .combo { position: relative; }
 
+.prompt-tip {
+  display: flex; gap: 12px; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-radius: var(--radius); background: var(--basil-wash); color: var(--ink);
+}
+.prompt-tip q { font-weight: 700; }
+
+/* Printing the event shopping list: only .print-target shows. */
+.print-only { display: none; }
+@media print {
+  body.printing * { visibility: hidden; }
+  body.printing .print-target, body.printing .print-target * { visibility: visible; }
+  body.printing .print-target { position: absolute; inset: 0 auto auto 0; width: 100%; }
+  body.printing .print-only { display: block; }
+  html:has(body.printing), body.printing { background: #fff; }
+  body.printing .print-target { padding: 0 4px; }
+  body.printing .no-print { display: none; }
+  body.printing .panel { box-shadow: none; border-color: #999; }
+  body.printing .table-wrap { overflow: visible; }
+  body.printing tr.labor-row > td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
 /* Labor lines: costed like ingredients, always last, tinted so they read as a different kind of cost. */
 tr.labor-row > td { background: var(--basil-wash); }
 tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
@@ -385,7 +407,7 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
   display: flex; flex-direction: column; gap: 14px;
 }
 .ticket-title { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; border-bottom: 2px solid var(--ink); padding-bottom: 8px; }
-.ticket-title h2 { font-stretch: 70%; font-size: 1.35rem; font-weight: 800; }
+.ticket-title h2 { font-size: 1.3rem; font-weight: 700; }
 .servings-input { display: grid; grid-template-columns: 1fr 96px; gap: 10px; align-items: center; }
 .servings-input label { font-weight: 650; }
 .servings-input .input { font-size: 1.3rem; font-weight: 750; text-align: right; font-stretch: 80%; border-width: 2px; border-color: var(--saffron); background: var(--saffron-wash); }

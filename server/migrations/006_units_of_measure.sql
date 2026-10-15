@@ -1,10 +1,6 @@
--- rerun-on-restore
 -- Units of measure. An ingredient is measured in one UOM (lb, oz, each…); each purchase
 -- records its store pack size in that UOM, so price per unit = unit_cost / pack_size; a
--- recipe line records the amount used, in that UOM.
---
--- Idempotent on purpose: restoring a backup made before this migration inserts rows with
--- these columns NULL, and the restore runs this file again to convert them.
+-- recipe line records the amount used, in that UOM. The old columns are dropped in 007.
 
 ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS uom text;
 ALTER TABLE ingredient_purchases ADD COLUMN IF NOT EXISTS pack_size numeric(14,4) CHECK (pack_size > 0);

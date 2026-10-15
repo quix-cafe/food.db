@@ -138,6 +138,20 @@ test('event summary aggregates cost, revenue and shopping list', { skip }, async
   assert.equal(flour.usedCost, '5.0000'); // 10 lb × 0.50
 });
 
+test('a needed amount set on the shopping list replaces the scaled total', { skip }, async () => {
+  const ev = (await api('GET', '/events')).data.find((e) => e.name === 'Gala');
+  const before = (await api('GET', `/events/${ev.id}/summary`)).data;
+  assert.equal((await api('PUT', `/events/${ev.id}/amounts/${ids.eggs}`, { amount: 3 })).status, 204);
+  const set = (await api('GET', `/events/${ev.id}/summary`)).data;
+  const eggs = set.shoppingList.find((l) => l.name === 'Eggs');
+  assert.deepEqual([eggs.amount, eggs.calculatedAmount, eggs.amountSet], ['3.0000', '10.0000', true]);
+  assert.equal(set.adjustment, '-2.1000'); // 7 fewer eggs × 0.30
+  assert.equal(set.totalCost, '5.9000');
+  assert.equal((await api('PUT', `/events/${ev.id}/amounts/${ids.eggs}`, { amount: -1 })).status, 400);
+  assert.equal((await api('DELETE', `/events/${ev.id}/amounts/${ids.eggs}`)).status, 204);
+  assert.equal((await api('GET', `/events/${ev.id}/summary`)).data.totalCost, before.totalCost);
+});
+
 test('validation errors are 400s with readable messages', { skip }, async () => {
   const r = await api('POST', '/recipes', { name: 'Bad', baseServings: 0 });
   assert.equal(r.status, 400);

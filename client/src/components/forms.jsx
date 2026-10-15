@@ -106,8 +106,20 @@ export function NewIngredientForm({ onDone }) {
  * normalise it and suggest matching ingredients, then opens the review grid.
  * Optional receipt photos are shown beside the grid and stored with the receipt on save.
  */
+const RECEIPT_PROMPT = 'return this as JSON';
+
 export function ReceiptImportForm({ onDone }) {
   const [text, setText] = useState('');
+  const [copied, setCopied] = useState(false);
+  const copyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(RECEIPT_PROMPT);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard needs a secure context (localhost or https); the prompt is on screen anyway.
+    }
+  };
   const [photos, setPhotos] = useState([]);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -145,6 +157,10 @@ export function ReceiptImportForm({ onDone }) {
 
   return (
     <form onSubmit={submit} className="modal-body" style={{ padding: 0 }}>
+      <div className="prompt-tip">
+        <span>Give the receipt photo to your model (e.g. qwen) and ask it to <q>{RECEIPT_PROMPT}</q>, then paste its reply below.</span>
+        <button type="button" className="btn small" onClick={copyPrompt}>{copied ? 'Copied' : 'Copy prompt'}</button>
+      </div>
       <div
         className={`dropzone ${over ? 'over' : ''}`}
         onDragOver={(e) => { e.preventDefault(); setOver(true); }}

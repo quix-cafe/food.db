@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, Navigate, Route, Routes, Link } from 'react-router';
+import { NavLink, Navigate, Route, Routes, Link, useParams } from 'react-router';
 import UniversalSearch from './components/UniversalSearch.jsx';
 import { NewIngredientForm, ReceiptImportForm } from './components/forms.jsx';
 import { Icon, Modal, Tabs, ToastProvider } from './components/ui.jsx';
@@ -9,7 +9,7 @@ import RecipeGallery from './pages/RecipeGallery.jsx';
 import RecipeBuilder from './pages/RecipeBuilder.jsx';
 import EventsPage from './pages/EventsPage.jsx';
 import EventPlanner from './pages/EventPlanner.jsx';
-import ReceiptsPage, { ReceiptDetailPage } from './pages/ReceiptsPage.jsx';
+import PurchasesPage, { ReceiptDetailPage } from './pages/PurchasesPage.jsx';
 import BackupPage from './pages/BackupPage.jsx';
 
 function QuickAdd({ onClose }) {
@@ -32,6 +32,11 @@ function QuickAdd({ onClose }) {
   );
 }
 
+function OldReceiptRedirect() {
+  const { id } = useParams();
+  return <Navigate to={`/purchases/${id}`} replace />;
+}
+
 export default function App() {
   const [quickAdd, setQuickAdd] = useState(false);
   return (
@@ -40,14 +45,14 @@ export default function App() {
         <nav className="sidebar" aria-label="Main">
           <Link to="/" className="brand">
             <img src="/favicon.svg" width="28" height="28" alt="" />
-            <span className="brand-name">Kitchen Cost</span>
+            <span className="brand-name">food.db</span>
           </Link>
           <div className="nav">
-            <NavLink to="/ingredients"><Icon.database /> Ingredients</NavLink>
-            <NavLink to="/recipes"><Icon.recipe /> Recipes</NavLink>
-            <NavLink to="/events"><Icon.calendar /> Events</NavLink>
-            <NavLink to="/receipts"><Icon.receipt /> Receipts</NavLink>
-            <NavLink to="/backup"><Icon.archive /> Backup</NavLink>
+            <NavLink to="/ingredients"><Icon.carrot /> Ingredients</NavLink>
+            <NavLink to="/recipes"><Icon.chefHat /> Recipes</NavLink>
+            <NavLink to="/events"><Icon.glass /> Events</NavLink>
+            <NavLink to="/purchases"><Icon.cart /> Purchases</NavLink>
+            <NavLink to="/backup"><Icon.history /> Backup</NavLink>
           </div>
         </nav>
         <div className="main">
@@ -61,15 +66,18 @@ export default function App() {
             <Route path="/" element={<Navigate to="/ingredients" replace />} />
             <Route path="/ingredients" element={<IngredientsPage />} />
             <Route path="/ingredients/review" element={<ReceiptReviewPage />} />
-            <Route path="/receipts" element={<ReceiptsPage />} />
-            <Route path="/receipts/:id" element={<ReceiptDetailPage />} />
+            <Route path="/purchases" element={<PurchasesPage />} />
+            <Route path="/purchases/:id" element={<ReceiptDetailPage />} />
+            {/* Old addresses from before the page was renamed. */}
+            <Route path="/receipts" element={<Navigate to="/purchases" replace />} />
+            <Route path="/receipts/:id" element={<OldReceiptRedirect />} />
             <Route path="/recipes" element={<RecipeGallery />} />
             <Route path="/recipes/new" element={<RecipeBuilder />} />
             <Route path="/recipes/:id" element={<RecipeBuilder />} />
             <Route path="/events" element={<EventsPage />} />
             <Route path="/events/:id" element={<EventPlanner />} />
             <Route path="/backup" element={<BackupPage />} />
-            <Route path="*" element={<main className="page"><div className="panel empty"><h2>Page not found</h2><Link className="btn" to="/ingredients">Go to the database</Link></div></main>} />
+            <Route path="*" element={<main className="page"><div className="panel empty"><h2>Page not found</h2><Link className="btn" to="/ingredients">Go to ingredients</Link></div></main>} />
           </Routes>
         </div>
       </div>

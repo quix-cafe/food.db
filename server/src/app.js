@@ -11,6 +11,7 @@ import images from './routes/images.js';
 import backup from './routes/backup.js';
 import multer from 'multer';
 import { HttpError } from './validate.js';
+import { query } from './db.js';
 
 const clientDist = fileURLToPath(new URL('../../client/dist/', import.meta.url));
 
@@ -18,7 +19,14 @@ export function createApp() {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
-  app.get('/api/health', (_req, res) => res.json({ ok: true }));
+  app.get('/api/health', async (_req, res) => {
+    try {
+      await query('SELECT 1');
+      res.json({ ok: true });
+    } catch {
+      res.status(503).json({ ok: false, error: 'Database unreachable' });
+    }
+  });
   app.use('/api/ingredients', ingredients);
   app.use('/api/recipes', recipes);
   app.use('/api/events', events);

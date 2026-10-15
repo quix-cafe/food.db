@@ -17,16 +17,17 @@ import tarStream from 'tar-stream';
 import pg from 'pg';
 import { pool, tx } from './db.js';
 import { repoRoot, uploadDir } from './images.js';
-import { rerunForRestore } from './migrate.js';
 import { HttpError } from './validate.js';
 
-const APP = 'kitchen-cost';
+const APP = 'food.db';
 const FORMAT = 1;
+/** Oldest schema a backup can come from: 007 dropped the columns earlier backups depend on. */
+const MIN_MIGRATION = '007_drop_legacy_columns.sql';
 
 /** Insert order respects foreign keys; TRUNCATE takes them all at once. */
 export const TABLES = [
   'ingredients', 'ingredient_aliases', 'receipts', 'ingredient_purchases', 'receipt_lines',
-  'recipes', 'recipe_ingredients', 'events', 'event_recipes', 'images',
+  'recipes', 'recipe_ingredients', 'events', 'event_recipes', 'event_amounts', 'images',
 ];
 
 const IMAGE_FILE = /^[A-Za-z0-9-]+\.(jpg|png|webp|gif)$/;
@@ -36,7 +37,7 @@ const KEEP_SNAPSHOTS = 10;
 export const backupDir = () => path.resolve(repoRoot, process.env.BACKUP_DIR ?? 'data/backups');
 
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-').replace(/-\d{3}Z$/, 'Z');
-export const backupFilename = () => `kitchen-backup-${stamp()}.tar.gz`;
+export const backupFilename = () => `food.db-backup-${stamp()}.tar.gz`;
 
 async function currentMigrations(client = pool) {
   const { rows } = await client.query('SELECT name FROM schema_migrations ORDER BY name');
@@ -141,13 +142,13 @@ async function unpack(archivePath, dir) {
   try {
     await pipeline(createReadStream(archivePath), zlib.createGunzip(), extract);
   } catch {
-    throw new HttpError(400, 'That file isn’t a Kitchen Cost backup. Choose a .tar.gz file downloaded from this page.');
+    throw new HttpError(400, 'That file isn’t a food.db backup. Choose a .tar.gz file downloaded from this page.');
   }
   let data;
   try {
     data = JSON.parse(json);
   } catch {
-    throw new HttpError(400, 'That archive has no readable backup.json, so it isn’t a Kitchen Cost backup.');
+    throw new HttpError(400, 'That archive has no readable backup.json, so it isn’t a food.db backup.');
   }
   return { data, files };
 }
@@ -155,13 +156,17 @@ async function unpack(archivePath, dir) {
 /** Check an unpacked backup can be restored here; returns a summary for the confirm screen. */
 async function validate(data, files) {
   if (data?.app !== APP || typeof data.tables !== 'object' || !Array.isArray(data.migrations)) {
-    throw new HttpError(400, 'That archive isn’t a Kitchen Cost backup.');
+    throw new HttpError(400, 'That archive isn’t a food.db backup.');
   }
   if (data.format !== FORMAT) throw new HttpError(400, `Backup format ${data.format} isn’t supported by this version.`);
   const known = new Set(await currentMigrations());
   const newer = data.migrations.filter((m) => !known.has(m));
   if (newer.length) {
-    throw new HttpError(409, `This backup was made by a newer version of Kitchen Cost (it includes ${newer.join(', ')}). Update the app, then restore.`);
+    throw new HttpError(409, `This backup was made by a newer version of food.db (it includes ${newer.join(', ')}). Update the app, then restore.`);
+  }
+
+  if (!data.migrations.includes(MIN_MIGRATION)) {
+    throw new HttpError(409, 'This backup is from a version older than the units-of-measure update and can’t be restored.');
   }
 
   const warnings = [];
@@ -285,9 +290,6 @@ export async function restoreBackup(token) {
             [JSON.stringify(list)],
           );
         }
-        // Convert rows from a backup that predates data-changing migrations.
-        const have = new Set(data.migrations);
-        await rerunForRestore(c, (await currentMigrations(c)).filter((m) => !have.has(m)));
       });
     } catch (err) {
       await Promise.all(copied.map((f) => rm(path.join(dest, f), { force: true })));

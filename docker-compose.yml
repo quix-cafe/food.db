@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: kitchen
       POSTGRES_PASSWORD: kitchen
@@ -16,7 +17,10 @@ services:
       retries: 20
 
   app:
-    build: .
+    # Published by .github/workflows/publish.yml on every push to main. Pulling it (rather
+    # than building here) lets tugtainer or `docker compose pull` see new versions.
+    image: ghcr.io/quix-cafe/food.db:latest
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy

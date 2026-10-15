@@ -17,7 +17,7 @@ const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x4
 
 before(async () => {
   if (skip) return;
-  dir = await mkdtemp(path.join(tmpdir(), 'kitchen-backup-test-'));
+  dir = await mkdtemp(path.join(tmpdir(), 'food-db-backup-test-'));
   process.env.UPLOAD_DIR = path.join(dir, 'uploads');
   process.env.BACKUP_DIR = path.join(dir, 'backups');
   process.env.DATABASE_URL = url;
@@ -88,14 +88,14 @@ test('backup → change everything → restore brings it all back', { skip }, as
   const summary = (await api('GET', '/backup/summary')).data;
   assert.deepEqual(summary.counts, {
     ingredients: 1, ingredient_aliases: 1, receipts: 1, ingredient_purchases: 2, receipt_lines: 2,
-    recipes: 1, recipe_ingredients: 1, events: 1, event_recipes: 1, images: 2,
+    recipes: 1, recipe_ingredients: 1, events: 1, event_recipes: 1, event_amounts: 0, images: 2,
   });
 
   const stampsSql = 'SELECT id, created_at::text AS t FROM ingredient_purchases ORDER BY id';
   const stamps = (await pool.query(stampsSql)).rows;
   const res = await fetch(base + '/backup');
   assert.equal(res.status, 200);
-  assert.match(res.headers.get('content-disposition'), /attachment; filename="kitchen-backup-.*\.tar\.gz"/);
+  assert.match(res.headers.get('content-disposition'), /attachment; filename="food\.db-backup-.*\.tar\.gz"/);
   const archive = Buffer.from(await res.arrayBuffer());
   original = {
     archive,
@@ -147,7 +147,7 @@ test('bad uploads and newer-version backups are refused without changes', { skip
   const before = (await api('GET', '/backup/summary')).data.counts;
   const junk = await inspect(Buffer.from('not a backup'));
   assert.equal(junk.status, 400);
-  assert.match(junk.data.error, /isn’t a Kitchen Cost backup/);
+  assert.match(junk.data.error, /isn’t a food\.db backup/);
 
   const future = await repack(original.archive, (d) => ({ ...d, migrations: [...d.migrations, '999_future.sql'] }));
   const refused = await inspect(future);
@@ -158,37 +158,11 @@ test('bad uploads and newer-version backups are refused without changes', { skip
   assert.deepEqual((await api('GET', '/backup/summary')).data.counts, before);
 });
 
-test('backups from an older schema restore with defaults for newer columns', { skip }, async () => {
-  // Pretend the backup predates receipt line tracking (migration 004).
-  const old = await repack(original.archive, (d) => {
-    d.migrations = d.migrations.filter((m) => !m.startsWith('004'));
-    delete d.tables.receipt_lines;
-    for (const r of d.tables.receipts) delete r.lines_extracted;
-    return d;
-  });
-  const inspected = await inspect(old);
-  assert.equal(inspected.data.olderVersion, true);
-  assert.equal((await api('POST', '/backup/restore', { token: inspected.data.token })).status, 200);
-  // lines_extracted took its default (false), so opening the receipt rebuilds and re-matches its lines.
-  const receipt = (await api('GET', `/receipts/${original.receipt.id}`)).data;
-  assert.deepEqual(receipt.pendingLines.map((l) => l.name), ['SALT']);
-});
-
-test('a backup from before units of measure is converted on restore', { skip }, async () => {
-  // Shape the backup as the pre-006 app wrote it: a free-text unit, Use % × quantity lines.
-  const old = await repack(original.archive, (d) => {
-    d.migrations = d.migrations.filter((m) => !m.startsWith('006'));
-    for (const i of d.tables.ingredients) delete i.uom;
-    for (const p of d.tables.ingredient_purchases) { delete p.pack_size; p.unit = 'bag 50 lb'; }
-    for (const l of d.tables.recipe_ingredients) { delete l.amount; l.base_quantity = '1'; l.use_percent = '25'; }
-    return d;
-  });
-  const inspected = await inspect(old);
-  assert.equal((await api('POST', '/backup/restore', { token: inspected.data.token })).status, 200);
-  const [flour] = (await api('GET', '/ingredients')).data;
-  assert.equal(flour.uom, 'lb');
-  assert.equal(flour.latestPackSize, '50.0000');
-  const recipe = (await api('GET', `/recipes/${original.recipe.id}`)).data;
-  assert.equal(recipe.lines[0].amount, '12.5000'); // 25% of a 50 lb bag
-  assert.equal(recipe.costing.baseCost, '5.2500'); // 12.5 lb × $21 / 50 lb
+test('backups from before the legacy columns were dropped are refused', { skip }, async () => {
+  const before = (await api('GET', '/backup/summary')).data.counts;
+  const old = await repack(original.archive, (d) => ({ ...d, migrations: d.migrations.filter((m) => !m.startsWith('007')) }));
+  const refused = await inspect(old);
+  assert.equal(refused.status, 409);
+  assert.match(refused.data.error, /older than the units-of-measure update/);
+  assert.deepEqual((await api('GET', '/backup/summary')).data.counts, before);
 });

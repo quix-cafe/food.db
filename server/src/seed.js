@@ -59,7 +59,7 @@ if (rows[0].n > 0) {
       recipeIds.push(rows[0].id);
       for (const [position, [ingredient, amount]] of lines.entries()) {
         await c.query(
-          'INSERT INTO recipe_ingredients (recipe_id, position, ingredient_id, amount, base_quantity) VALUES ($1,$2,$3,$4,$4)',
+          'INSERT INTO recipe_ingredients (recipe_id, position, ingredient_id, amount) VALUES ($1,$2,$3,$4)',
           [rows[0].id, position, ids.get(ingredient), amount],
         );
       }

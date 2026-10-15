@@ -73,7 +73,7 @@ function ReviewGrid({ receipt, source, draftId }) {
       toast(savedMessage(res));
       const remaining = rows.filter((r) => !r.confirmed);
       if (remaining.length) setRows(remaining);
-      else navigate(`/receipts/${id}`);
+      else navigate(`/purchases/${id}`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -90,7 +90,7 @@ function ReviewGrid({ receipt, source, draftId }) {
         </div>
         <div className="form-actions">
           {receiptId
-            ? <button className="btn ghost" onClick={() => navigate(`/receipts/${receiptId}`)}>Finish later</button>
+            ? <button className="btn ghost" onClick={() => navigate(`/purchases/${receiptId}`)}>Finish later</button>
             : <button className="btn ghost" onClick={() => navigate('/ingredients')}>Discard</button>}
           <button className="btn primary" disabled={!confirmed.length || busy} onClick={commit}>
             {busy && <Spinner />} Save {confirmed.length || ''} confirmed {confirmed.length === 1 ? 'line' : 'lines'}

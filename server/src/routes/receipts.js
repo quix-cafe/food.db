@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { Decimal } from '@kitchen/shared';
 import { query, tx } from '../db.js';
 import { normalizeReceipt } from '../services/receipt.js';
-import { matchItems, resolveName } from '../matching.js';
+import { matchItems } from '../matching.js';
 import { uploadImages, attachImages, listImages, ownedFilenames, removeFiles, reorderImages } from '../images.js';
 import { badRequest, notFound, text, date, uuid, array } from '../validate.js';
 
@@ -28,43 +28,10 @@ async function extractLines(c, receiptId, source) {
       [receiptId, position, it.name, it.category, it.quantity, it.unit, it.unitCost, it.totalCost, it.note],
     );
   }
-  await c.query('UPDATE receipts SET lines_extracted = true WHERE id = $1', [receiptId]);
-}
-
-/**
- * Receipts saved before receipt_lines existed: extract their lines now and mark the ones
- * that were already saved, matching each purchase to a line for the same ingredient
- * (via alias or name) with the same total, then to any line with the same total.
- */
-async function ensureLines(receiptId) {
-  await tx(async (c) => {
-    const { rows: [r] } = await c.query('SELECT source, lines_extracted FROM receipts WHERE id = $1 FOR UPDATE', [receiptId]);
-    if (!r || r.lines_extracted) return;
-    await extractLines(c, receiptId, r.source);
-    const { rows: lines } = await c.query('SELECT position, name, total_cost FROM receipt_lines WHERE receipt_id = $1 ORDER BY position', [receiptId]);
-    const { rows: purchases } = await c.query('SELECT id, ingredient_id, total_cost FROM ingredient_purchases WHERE receipt_id = $1 ORDER BY created_at', [receiptId]);
-    for (const l of lines) l.ingredientId = (await resolveName(c, l.name))?.id ?? null;
-    const sameTotal = (l, p) => l.total_cost !== null && new Decimal(l.total_cost).toDecimalPlaces(2).eq(new Decimal(p.total_cost).toDecimalPlaces(2));
-    const link = async (p, l) => {
-      l.taken = true;
-      p.taken = true;
-      await c.query('UPDATE receipt_lines SET purchase_id = $1 WHERE receipt_id = $2 AND position = $3', [p.id, receiptId, l.position]);
-    };
-    for (const p of purchases) {
-      const l = lines.find((x) => !x.taken && x.ingredientId === p.ingredient_id && sameTotal(x, p));
-      if (l) await link(p, l);
-    }
-    for (const p of purchases.filter((x) => !x.taken)) {
-      const l = lines.find((x) => !x.taken && sameTotal(x, p));
-      if (l) await link(p, l);
-    }
-  });
 }
 
 // GET /api/receipts — newest first, with their images.
 router.get('/', async (_req, res) => {
-  const { rows: older } = await query('SELECT id FROM receipts WHERE NOT lines_extracted');
-  for (const r of older) await ensureLines(r.id);
   const { rows } = await query(`SELECT ${RECEIPT_COLUMNS} FROM receipts r ORDER BY coalesce(r.receipt_date, r.created_at::date) DESC, r.created_at DESC`);
   const images = await listImages({ query }, 'receipt', rows.map((r) => r.id));
   res.json(rows.map((r) => ({ ...r, images: images.get(r.id) })));
@@ -96,14 +63,13 @@ router.post('/', uploadImages, async (req, res) => {
 });
 
 async function getReceipt(id) {
-  await ensureLines(id);
   const { rows } = await query(`SELECT ${RECEIPT_COLUMNS}, r.source FROM receipts r WHERE r.id = $1`, [id]);
   if (!rows[0]) throw notFound('Receipt');
   const [images, purchases, pending] = await Promise.all([
     listImages({ query }, 'receipt', [id]),
     query(
       `SELECT p.id, p.ingredient_id AS "ingredientId", i.name AS "ingredientName", i.category, i.uom,
-              p.quantity, coalesce(p.pack_size, 1) AS "packSize", p.unit_cost AS "unitCost", p.total_cost AS "totalCost"
+              p.quantity, p.pack_size AS "packSize", p.unit_cost AS "unitCost", p.total_cost AS "totalCost"
        FROM ingredient_purchases p JOIN ingredients i ON i.id = p.ingredient_id
        WHERE p.receipt_id = $1 ORDER BY p.created_at, lower(i.name)`,
       [id],

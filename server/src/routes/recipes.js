@@ -57,10 +57,7 @@ async function writeLines(c, recipeId, lines) {
   await c.query('DELETE FROM recipe_ingredients WHERE recipe_id = $1', [recipeId]);
   for (const [position, l] of lines.entries()) {
     await c.query(
-      // base_quantity / use_percent are the pre-UOM columns, kept so older code paths and
-      // backups stay readable; amount is what costing uses.
-      `INSERT INTO recipe_ingredients (recipe_id, position, ingredient_id, amount, base_quantity, use_percent)
-       VALUES ($1,$2,$3,$4,$4,100)`,
+      `INSERT INTO recipe_ingredients (recipe_id, position, ingredient_id, amount) VALUES ($1,$2,$3,$4)`,
       [recipeId, position, l.ingredientId, l.amount],
     );
   }
@@ -201,8 +198,8 @@ router.post('/:id/duplicate', async (req, res) => {
     );
     if (!rows[0]) throw notFound('Recipe');
     await c.query(
-      `INSERT INTO recipe_ingredients (recipe_id, position, ingredient_id, use_percent, base_quantity, amount)
-       SELECT $2, position, ingredient_id, use_percent, base_quantity, amount FROM recipe_ingredients WHERE recipe_id = $1`,
+      `INSERT INTO recipe_ingredients (recipe_id, position, ingredient_id, amount)
+       SELECT $2, position, ingredient_id, amount FROM recipe_ingredients WHERE recipe_id = $1`,
       [id, rows[0].id],
     );
     await copyImages(c, 'recipe', id, rows[0].id);

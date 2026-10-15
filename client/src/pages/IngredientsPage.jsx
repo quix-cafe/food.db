@@ -53,7 +53,7 @@ export default function IngredientsPage() {
     <main className="page">
       <div className="page-head">
         <div>
-          <h1>Ingredient database</h1>
+          <h1>Ingredients</h1>
           <p>Every ingredient with its most recent purchase price. Open one to see its price history by vendor.</p>
         </div>
       </div>
@@ -270,7 +270,7 @@ function IngredientDrawer({ id, onClose }) {
                   {data.purchases.map((p) => (
                     <tr key={p.id}>
                       <td className="nowrap">{date(p.date)}</td>
-                      <td>{p.vendor ?? '—'}{p.receiptId && <> <Link to={`/receipts/${p.receiptId}`} className="muted" style={{ fontSize: '0.85rem' }}>Receipt</Link></>}</td>
+                      <td>{p.vendor ?? '—'}{p.receiptId && <> <Link to={`/purchases/${p.receiptId}`} className="muted" style={{ fontSize: '0.85rem' }}>Receipt</Link></>}</td>
                       <td className="num">{qty(p.quantity)}</td>
                       <td className="num nowrap">{pack(p.packSize, ing.uom)}</td>
                       <td className="num">{unitMoney(p.unitCost)}</td>

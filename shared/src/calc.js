@@ -158,11 +158,15 @@ export function calculateRecipe({
  *   packsToBuy   = ceil(amount / Pack_Size)        (store packs of the latest purchase's size)
  *   usedCost     = Σ recipe line costs             (what the recipes consume; sums to totalCost)
  *   purchaseCost = packsToBuy × Pack_Price         (what buying those whole packs costs)
+ *   leftover     = packsToBuy × Pack_Size − amount (what's left of those packs, in the UOM)
  *
  * recipes: [{ recipeId, name, baseServings, targetMargin, expectedServings, lines }]
  *   where lines carry { ingredientId, name, uom, packPrice, packSize, amount }.
+ * amounts: { [ingredientId]: amount } set by hand for the event (e.g. labor). It replaces
+ *   the scaled total; usedCost becomes amount × price per unit, and the difference from the
+ *   recipes' cost is reported as `adjustment` and included in totalCost and profit.
  */
-export function summarizeEvent(recipes = []) {
+export function summarizeEvent(recipes = [], amounts = {}) {
   let totalCost = new Decimal(0);
   let revenue = new Decimal(0);
   const shopping = new Map();
@@ -217,17 +221,29 @@ export function summarizeEvent(recipes = []) {
     };
   });
 
+  let adjustment = new Decimal(0);
+  for (const e of shopping.values()) {
+    const set = toDecimal(amounts[e.ingredientId]);
+    if (set === null) continue;
+    const used = e.packPrice === null ? new Decimal(0) : unitPrice(e.packPrice, e.packSize).times(set);
+    adjustment = adjustment.plus(used.minus(e.usedCost));
+    Object.assign(e, { calculatedAmount: cost(e.amount), amount: set, usedCost: used, amountSet: true });
+  }
+  totalCost = totalCost.plus(adjustment);
+
   const profit = revenue.minus(totalCost);
   let purchaseCost = new Decimal(0);
   const shoppingList = [...shopping.values()]
     .map((e) => {
-      const packs = e.amount.div(toDecimal(e.packSize) ?? 1).ceil();
+      const size = toDecimal(e.packSize) ?? new Decimal(1);
+      const packs = e.amount.div(size).ceil();
       const bought = e.packPrice === null ? null : packs.times(e.packPrice);
       if (bought) purchaseCost = purchaseCost.plus(bought);
       return {
         ...e,
         amount: cost(e.amount),
         packsToBuy: packs.toString(),
+        leftover: cost(packs.times(size).minus(e.amount)),
         usedCost: cost(e.usedCost),
         purchaseCost: bought === null ? null : cost(bought),
       };
@@ -237,6 +253,7 @@ export function summarizeEvent(recipes = []) {
   return {
     recipes: recipeSummaries,
     totalCost: cost(totalCost),
+    adjustment: cost(adjustment),
     purchaseCost: cost(purchaseCost),
     revenue: money(revenue),
     profit: money(profit),

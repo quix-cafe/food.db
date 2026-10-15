@@ -7,21 +7,21 @@ import ImageGallery from '../components/ImageGallery.jsx';
 import ReviewLinesTable, { toRow, toPurchaseItem, savedMessage } from '../components/ReviewLines.jsx';
 import { Modal, Notice, Spinner, useToast } from '../components/ui.jsx';
 
-export default function ReceiptsPage() {
+export default function PurchasesPage() {
   const { data, error, loading } = useApi('/receipts');
   return (
     <main className="page">
       <div className="page-head">
         <div>
-          <h1>Receipts</h1>
-          <p>Every receipt saved from the review screen, with its photos and the purchases it recorded.</p>
+          <h1>Purchases</h1>
+          <p>Every shopping trip saved from a receipt, with its photos and the purchases it recorded.</p>
         </div>
       </div>
       {error && <Notice kind="error">{error.message}</Notice>}
       {loading && !data && <Spinner />}
       {data && !data.length && (
         <div className="panel empty">
-          <h2>No receipts yet</h2>
+          <h2>No purchases yet</h2>
           <p>Use Quick add to import a receipt. When you save its lines, the receipt and its photos are kept here.</p>
         </div>
       )}
@@ -41,7 +41,7 @@ export default function ReceiptsPage() {
                       {r.images.length > 3 && <span className="muted">+{r.images.length - 3}</span>}
                     </div>
                   </td>
-                  <td><Link to={`/receipts/${r.id}`} style={{ fontWeight: 650, color: 'inherit' }}>{r.vendor ?? 'Unknown vendor'}</Link></td>
+                  <td><Link to={`/purchases/${r.id}`} style={{ fontWeight: 650, color: 'inherit' }}>{r.vendor ?? 'Unknown vendor'}</Link></td>
                   <td className="nowrap">{date(r.date)}</td>
                   <td className="num">{r.lineCount}{r.pendingCount > 0 && <> <span className="badge new">{r.pendingCount} not saved</span></>}</td>
                   <td className="num">{money(r.savedTotal)}</td>
@@ -66,7 +66,7 @@ export function ReceiptDetailPage() {
   const navigate = useNavigate();
   const toast = useToast();
 
-  if (error) return <main className="page"><Notice kind="error">{error.message}</Notice><Link to="/receipts">Back to receipts</Link></main>;
+  if (error) return <main className="page"><Notice kind="error">{error.message}</Notice><Link to="/purchases">Back to purchases</Link></main>;
   if (!r) return <main className="page"><Spinner /></main>;
 
   const photoAction = async (fn) => {
@@ -86,14 +86,14 @@ export function ReceiptDetailPage() {
     await api(`/receipts/${id}`, { method: 'DELETE' });
     notifyDataChanged();
     toast('Receipt deleted');
-    navigate('/receipts');
+    navigate('/purchases');
   };
 
   return (
     <main className="page">
       <div className="page-head">
         <div>
-          <Link to="/receipts" className="muted">Receipts</Link>
+          <Link to="/purchases" className="muted">Purchases</Link>
           <h1>{r.vendor ?? 'Unknown vendor'}</h1>
           <p>
             {date(r.date)}. {r.lineCount} {r.lineCount === 1 ? 'line' : 'lines'} saved for {money(r.savedTotal)}

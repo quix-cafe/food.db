@@ -3,20 +3,22 @@ import { createContext, useCallback, useContext, useEffect, useId, useRef, useSt
 const s = { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true };
 
 export const Icon = {
-  database: () => <svg {...s}><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5" /><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" /></svg>,
-  recipe: () => <svg {...s}><path d="M6 3h11a2 2 0 0 1 2 2v16l-3-2-3 2-3-2-3 2-3-2V5a2 2 0 0 1 2-2z" /><path d="M8 8h8M8 12h6" /></svg>,
-  calendar: () => <svg {...s}><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg>,
+  // Main menu: one distinct silhouette per section.
+  carrot: () => <svg {...s}><path d="M3 21 10.6 8.6a4.6 4.6 0 0 1 6.8 6.8z" /><path d="M8.2 14.6l1.5 1.5M10.9 11.4l1.3 1.3" /><path d="M15 8c-.4-2.3.3-4.4 2-6M16.3 9.3 20.6 5M17.6 10.6c2.2-.6 4-.3 5.4.7" /></svg>,
+  chefHat: () => <svg {...s}><path d="M6 13.9V20h12v-6.1a4 4 0 1 0-1.7-7.6 4.5 4.5 0 0 0-8.6 0A4 4 0 1 0 6 13.9z" /><path d="M6 16.5h12" /></svg>,
+  glass: () => <svg {...s}><path d="M7.5 3h9l-.4 5.5a4.1 4.1 0 0 1-8.2 0z" /><path d="M12 12.6V20M8 21h8" /><path d="M19.5 2.5v3M18 4h3" /></svg>,
+  cart: () => <svg {...s}><circle cx="9" cy="20" r="1.4" /><circle cx="17.5" cy="20" r="1.4" /><path d="M2 3h2.8l2.6 12a1.6 1.6 0 0 0 1.6 1.3h8.4a1.6 1.6 0 0 0 1.5-1.2L21 7H5.7" /></svg>,
+  history: () => <svg {...s}><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5" /><path d="M3.5 3.5v5h5" /><path d="M12 7.5V12l3 2" /></svg>,
+  print: () => <svg {...s}><path d="M6.5 9V3h11v6" /><rect x="3" y="9" width="18" height="8" rx="2" /><path d="M6.5 14h11v7h-11z" /></svg>,
   search: () => <svg {...s}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>,
   plus: () => <svg {...s}><path d="M12 5v14M5 12h14" /></svg>,
   close: () => <svg {...s}><path d="M6 6l12 12M18 6 6 18" /></svg>,
   dots: () => <svg {...s}><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></svg>,
   grip: () => <svg {...s} strokeWidth="2.5"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" /></svg>,
   trash: () => <svg {...s}><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>,
-  archive: () => <svg {...s}><rect x="3" y="4" width="18" height="5" rx="1" /><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4" /></svg>,
   download: () => <svg {...s}><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>,
   upload: () => <svg {...s}><path d="M12 20V9M7 14l5-5 5 5M5 4h14" /></svg>,
   pencil: () => <svg {...s} width="14" height="14"><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="m13.5 6.5 4 4" /></svg>,
-  receipt: () => <svg {...s}><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6" /></svg>,
   up: () => <svg {...s} width="14" height="14"><path d="m6 15 6-6 6 6" /></svg>,
   down: () => <svg {...s} width="14" height="14"><path d="m6 9 6 6 6-6" /></svg>,
   alert: () => <svg {...s}><path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>,

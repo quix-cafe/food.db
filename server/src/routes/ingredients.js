@@ -19,8 +19,8 @@ function ingredientFields(body, { partial = false } = {}) {
 }
 
 const PURCHASE_COLUMNS = `id, ingredient_id AS "ingredientId", purchase_date AS "date", vendor, quantity,
-  coalesce(pack_size, 1) AS "packSize", unit_cost AS "unitCost", total_cost AS "totalCost",
-  round(unit_cost / coalesce(pack_size, 1), 4) AS "unitPrice", receipt_id AS "receiptId", created_at AS "createdAt"`;
+  pack_size AS "packSize", unit_cost AS "unitCost", total_cost AS "totalCost",
+  round(unit_cost / pack_size, 4) AS "unitPrice", receipt_id AS "receiptId", created_at AS "createdAt"`;
 
 function purchaseFields(p) {
   const quantity = number(p.quantity, 'Quantity', { required: true, min: 0, minExclusive: true });

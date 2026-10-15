@@ -180,17 +180,3 @@ test('receipt lines skipped during review can be saved later', { skip }, async (
   detail = (await api('GET', `/receipts/${receipt.id}`)).data;
   assert.deepEqual(detail.pendingLines.map((l) => [l.name, l.match?.name, l.match?.via]), [['LMNS', 'Lemons', 'alias'], ['DONATION', undefined, undefined]]);
 });
-
-test('receipts saved before line tracking get their lines extracted and matched', { skip }, async () => {
-  const source = { items: [{ name: 'Basil', price: 2 }, { name: 'MYSTERY', price: 5 }, { name: 'Basil', price: 3 }] };
-  const { rows: [r] } = await pool.query(`INSERT INTO receipts (vendor, source) VALUES ('Old', $1) RETURNING id`, [source]);
-  const basil = (await api('GET', '/ingredients?q=basil')).data[0];
-  await pool.query(
-    `INSERT INTO ingredient_purchases (ingredient_id, purchase_date, quantity, unit_cost, total_cost, receipt_id) VALUES ($1, '2026-01-01', 1, 3, 3, $2)`,
-    [basil.id, r.id],
-  );
-  const detail = (await api('GET', `/receipts/${r.id}`)).data;
-  // The $3 Basil purchase claims the $3 Basil line, not the first Basil line.
-  assert.deepEqual(detail.pendingLines.map((l) => [l.line, l.name]), [[0, 'Basil'], [1, 'MYSTERY']]);
-  assert.equal(detail.pendingCount, 2);
-});

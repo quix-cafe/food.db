@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
 import { useApi } from '../hooks.js';
 import { isLabor } from '@kitchen/shared';
-import { money, pack, qty, toDecimal } from '../format.js';
+import { date, money, pack, qty, toDecimal } from '../format.js';
 import { Field, Icon, Modal, Notice, Spinner, Tabs, useToast } from '../components/ui.jsx';
 
 const isInt = (v) => /^\d+$/.test(String(v).trim());
@@ -176,7 +176,7 @@ export default function EventPlanner() {
         {summary.error && <Notice kind="error">{summary.error.message}</Notice>}
         {!s ? <Spinner /> : !s.recipes.length ? (
           <div className="panel empty"><p>Select recipes above to project costs and build the shopping list.</p></div>
-        ) : tab === 'financials' ? <Financials s={s} /> : <ShoppingList s={s} />}
+        ) : tab === 'financials' ? <Financials s={s} /> : <ShoppingList s={s} eventId={id} title={form.name || 'Untitled event'} date={form.date} />}
         {s?.warnings.length > 0 && <Notice>{s.warnings.map((w) => <div key={w}>{w}</div>)}</Notice>}
       </section>
 
@@ -220,6 +220,14 @@ function Financials({ s }) {
                 <td className="num">{money(r.profit)}</td>
               </tr>
             ))}
+            {!toDecimal(s.adjustment).isZero() && (
+              <tr className="labor-row">
+                <td colSpan={4}>Labor set on the shopping list <span className="muted">(instead of scaling with servings)</span></td>
+                <td className="num">{toDecimal(s.adjustment).gt(0) ? '+' : '−'}{money(toDecimal(s.adjustment).abs())}</td>
+                <td />
+                <td className="num">{toDecimal(s.adjustment).gt(0) ? '−' : '+'}{money(toDecimal(s.adjustment).abs())}</td>
+              </tr>
+            )}
           </tbody>
           <tfoot>
             <tr><td>Total</td><td className="num">{s.recipes.reduce((a, r) => a + Number(r.expectedServings), 0)}</td><td /><td /><td className="num">{money(s.totalCost)}</td><td className="num">{money(s.revenue)}</td><td className="num">{money(s.profit)}</td></tr>
@@ -230,8 +238,63 @@ function Financials({ s }) {
   );
 }
 
-function ShoppingList({ s }) {
+// Printing hides everything on the page except this list (see .printing in styles.css).
+function printShoppingList() {
+  document.body.classList.add('printing');
+  window.addEventListener('afterprint', () => document.body.classList.remove('printing'), { once: true });
+  window.print();
+}
+
+/**
+ * Labor's "needed" is typed in rather than scaled from servings. Saving stores it for this
+ * event; "Use recipes" clears it so the scaled total applies again.
+ */
+function NeededInput({ line, eventId }) {
+  const [draft, setDraft] = useState(null);
+  const [error, setError] = useState(null);
+  const value = draft ?? toDecimal(line.amount).toString();
+  const save = async () => {
+    if (draft === null) return;
+    const d = toDecimal(draft);
+    if (!d || d.lt(0)) return setError('Enter 0 or more');
+    setError(null);
+    try {
+      await api(`/events/${eventId}/amounts/${line.ingredientId}`, { method: 'PUT', body: { amount: d.toString() } });
+      notifyDataChanged();
+    } catch (err) {
+      setError(err.message);
+    }
+    setDraft(null);
+  };
+  const reset = async () => {
+    await api(`/events/${eventId}/amounts/${line.ingredientId}`, { method: 'DELETE' });
+    notifyDataChanged();
+  };
   return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+      <span className="nowrap">
+        <input className="input num" style={{ width: 80 }} inputMode="decimal" value={value} aria-label={`${line.name} needed, in ${line.uom}`}
+          aria-invalid={!!error} onChange={(e) => setDraft(e.target.value)} onBlur={save}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setDraft(null); setError(null); } }} />
+        {' '}{line.uom}
+      </span>
+      {error && <small style={{ color: 'var(--tomato)' }}>{error}</small>}
+      {line.amountSet && (
+        <small className="muted no-print nowrap">
+          Recipes: {qty(line.calculatedAmount)} · <button type="button" className="link-btn" onClick={reset}>Use recipes</button>
+        </small>
+      )}
+    </div>
+  );
+}
+
+function ShoppingList({ s, eventId, title, date: day }) {
+  return (
+    <div className="print-target" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <h2 className="print-only">{title}: shopping list{day ? `, ${date(day)}` : ''}</h2>
+        <button className="btn small no-print" style={{ marginLeft: 'auto' }} onClick={printShoppingList}><Icon.print /> Print</button>
+      </div>
     <div className="panel table-wrap">
       <table className="grid">
         <thead>
@@ -242,6 +305,7 @@ function ShoppingList({ s }) {
             <th>Pack size</th>
             <th className="num" title="Packs to buy × the latest pack price: what you'll pay">Total cost</th>
             <th className="num" title="Cost of the amount the recipes use; matches the recipes' total cost">Used cost</th>
+            <th className="num" title="What's left of the packs you buy after the recipes: packs × pack size − needed">Leftover</th>
             <th>Used in</th>
           </tr>
         </thead>
@@ -249,19 +313,21 @@ function ShoppingList({ s }) {
           {s.shoppingList.map((l) => (
             <tr key={l.ingredientId} className={isLabor(l) ? 'labor-row' : ''}>
               <td style={{ fontWeight: 600 }}>{l.name}{l.missingPrice && <> <span className="badge warn">No price</span></>}</td>
-              <td className="num nowrap">{qty(l.amount)} {l.uom}</td>
+              <td className="num nowrap">{isLabor(l) ? <NeededInput key={`${l.ingredientId}:${l.amount}`} line={l} eventId={eventId} /> : `${qty(l.amount)} ${l.uom}`}</td>
               <td className="num" style={{ fontWeight: 700 }}>{l.packsToBuy}</td>
               <td className="nowrap">{l.packSize ? pack(l.packSize, l.uom) : '—'}</td>
               <td className="num" style={{ fontWeight: 650 }}>{l.purchaseCost ? money(l.purchaseCost) : '—'}</td>
               <td className="num">{money(l.usedCost)}</td>
+              <td className="num nowrap muted">{qty(l.leftover)} {l.uom}</td>
               <td className="muted">{l.recipes.join(', ')}</td>
             </tr>
           ))}
         </tbody>
         <tfoot>
-          <tr><td>{s.shoppingList.length} items</td><td /><td /><td /><td className="num">{money(s.purchaseCost)}</td><td className="num">{money(s.totalCost)}</td><td /></tr>
+          <tr><td>{s.shoppingList.length} items</td><td /><td /><td /><td className="num">{money(s.purchaseCost)}</td><td className="num">{money(s.totalCost)}</td><td /><td /></tr>
         </tfoot>
       </table>
+    </div>
     </div>
   );
 }

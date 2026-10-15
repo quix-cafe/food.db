@@ -350,7 +350,7 @@ export default function RecipeBuilder() {
         <aside className="ticket-rail" aria-label="Financials">
           <div className="ticket">
             <div className="ticket-title">
-              <h2>Costing</h2>
+              <h2>Cost</h2>
               {costing && <span className={scaled ? 'scaled' : 'muted'}>×{toDecimal(costing.scale).toDecimalPlaces(2).toString()}</span>}
             </div>
             <div className="servings-input">

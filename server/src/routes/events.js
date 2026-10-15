@@ -148,8 +148,40 @@ router.get('/:id/summary', async (req, res) => {
         lines: r.lines,
       };
     }),
+    await loadAmounts(event.id),
   );
   res.json({ event, ...summary });
+});
+
+async function loadAmounts(eventId) {
+  const { rows } = await query('SELECT ingredient_id, amount FROM event_amounts WHERE event_id = $1', [eventId]);
+  return Object.fromEntries(rows.map((r) => [r.ingredient_id, r.amount]));
+}
+
+// Set the shopping list's "needed" amount for one ingredient by hand (labor), or clear it
+// to go back to the recipes' scaled total.
+router.put('/:id/amounts/:ingredientId', async (req, res) => {
+  const id = uuid(req.params.id, 'id');
+  const ingredientId = uuid(req.params.ingredientId, 'ingredientId');
+  const amount = number(req.body?.amount, 'Needed', { required: true, min: 0 });
+  try {
+    await query(
+      `INSERT INTO event_amounts (event_id, ingredient_id, amount) VALUES ($1,$2,$3)
+       ON CONFLICT (event_id, ingredient_id) DO UPDATE SET amount = EXCLUDED.amount`,
+      [id, ingredientId, amount],
+    );
+  } catch (err) {
+    if (fkViolation(err)) throw notFound('Event or ingredient');
+    throw err;
+  }
+  res.status(204).end();
+});
+
+router.delete('/:id/amounts/:ingredientId', async (req, res) => {
+  await query('DELETE FROM event_amounts WHERE event_id = $1 AND ingredient_id = $2', [
+    uuid(req.params.id, 'id'), uuid(req.params.ingredientId, 'ingredientId'),
+  ]);
+  res.status(204).end();
 });
 
 export default router;
