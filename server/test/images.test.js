@@ -158,7 +158,7 @@ test('receipt lines skipped during review can be saved later', { skip }, async (
   // Later, from the receipt page: save line 1 adjusted, as a new ingredient with an alias.
   const later = await api('POST', '/ingredients/purchase', {
     receiptId: receipt.id, vendor: 'Weis', date: '2026-10-02',
-    items: [{ receiptLine: 1, name: 'Lemons', alias: 'LMNS', category: 'Produce', quantity: 2, unit: 'ea', unitCost: '1.40' }],
+    items: [{ receiptLine: 1, name: 'Lemons', alias: 'LMNS', category: 'Produce', quantity: 2, uom: 'each', unitCost: '1.40' }],
   });
   assert.equal(later.status, 201);
   detail = (await api('GET', `/receipts/${receipt.id}`)).data;

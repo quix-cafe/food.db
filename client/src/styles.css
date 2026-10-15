@@ -101,6 +101,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn.primary:hover:not(:disabled) { background: var(--basil-dark); }
 .btn.danger { color: var(--tomato); }
 .btn.danger:hover { border-color: var(--tomato); }
+.btn.danger-solid { background: var(--tomato); border-color: var(--tomato); color: #fff; }
+.btn.danger-solid:hover:not(:disabled) { background: #a83223; }
 .btn.ghost { background: transparent; border-color: transparent; }
 .btn.ghost:hover { background: var(--steel-2); }
 .btn.small { padding: 4px 10px; font-size: 0.9rem; }
@@ -153,6 +155,7 @@ textarea.input { resize: vertical; font-size: 0.85rem; line-height: 1.4; }
   background: var(--saffron-wash); color: #5e420c; font-size: 0.92rem;
 }
 .notice.error { background: var(--tomato-wash); color: #7f2419; }
+.notice.success { background: var(--basil-wash); color: var(--basil-dark); }
 .notice ul { margin: 0; padding-left: 18px; }
 
 /* ---------- Surfaces ---------- */
@@ -227,6 +230,10 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 .tab { all: unset; cursor: pointer; padding: 10px 14px; font-weight: 600; color: var(--ink-2); border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .tab[aria-selected='true'] { color: var(--ink); border-color: var(--ink); }
 .tab:focus-visible { outline: 2px solid var(--basil); }
+.quick-add-tabs { display: flex; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.quick-add-tabs .tabs { border-bottom: 0; }
+.quick-add-tabs .tab { margin-bottom: 0; }
+.quick-add-tabs > a.tab { text-decoration: none; }
 
 .toast {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 60;
@@ -266,8 +273,10 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 .review-grid td { padding: 6px 6px; }
 .review-grid .input { padding: 5px 7px; }
 .review-grid tr.confirmed td { background: var(--basil-wash); }
-.review-grid td.check { width: 36px; text-align: center; }
-.review-grid input[type='checkbox'] { width: 18px; height: 18px; accent-color: var(--basil); }
+.review-grid td.check { width: 52px; padding: 0; text-align: center; }
+.review-grid .check-hit { display: grid; place-items: center; min-height: 52px; cursor: pointer; }
+.review-grid input[type='checkbox'] { width: 28px; height: 28px; margin: 0; cursor: pointer; accent-color: var(--basil); }
+.review-grid input[type='checkbox']:disabled { cursor: not-allowed; }
 .name-cell { display: flex; flex-direction: column; gap: 5px; min-width: 240px; }
 .name-btn {
   all: unset; cursor: text; display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
@@ -315,6 +324,15 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 .review-grid.pending tbody tr:not(.confirmed):hover td > *,
 .review-grid.pending tbody tr:not(.confirmed):focus-within td > * { opacity: 1; }
 
+.backup-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: start; }
+.backup-card { display: flex; flex-direction: column; gap: 14px; }
+.backup-counts { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin: 0; }
+.backup-counts div { border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 8px 10px; }
+.backup-counts dt { font-size: 0.82rem; color: var(--muted); }
+.backup-counts dd { margin: 0; font-size: 1.3rem; font-weight: 750; font-stretch: 80%; }
+.agree { display: flex; gap: 10px; align-items: flex-start; font-weight: 600; }
+.agree input { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--tomato); flex: none; }
+
 .dropzone {
   border: 2px dashed var(--line); border-radius: var(--radius); padding: 18px; text-align: center; color: var(--ink-2);
   background: #f7f9fa;
@@ -343,6 +361,10 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 .drag-handle { cursor: grab; color: var(--muted); display: grid; place-items: center; }
 .scaled { color: var(--saffron); font-weight: 650; }
 .combo { position: relative; }
+
+/* Labor lines: costed like ingredients, always last, tinted so they read as a different kind of cost. */
+tr.labor-row > td { background: var(--basil-wash); }
+tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 
 /* The ticket: the recipe's financials clipped to a kitchen ticket rail. */
 .ticket-rail { position: sticky; top: 76px; }
@@ -380,6 +402,11 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 .margin-slider label { font-weight: 650; }
 .margin-slider output { font-size: 1.3rem; font-weight: 750; font-stretch: 80%; }
 .margin-slider small { font-size: 0.78rem; color: var(--muted); }
+.price-input { display: grid; grid-template-columns: 1fr 110px; gap: 10px; align-items: center; margin-top: 6px; }
+.price-input label { font-weight: 650; }
+.money-input { position: relative; display: block; }
+.money-input > span { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font-weight: 650; pointer-events: none; }
+.money-input .input { width: 100%; padding-left: 22px; font-size: 1.1rem; font-weight: 750; font-stretch: 80%; }
 .margin-slider input[type='range'] {
   -webkit-appearance: none; appearance: none; width: 100%; height: 22px; background: transparent; cursor: pointer; margin: 0;
 }

@@ -2,48 +2,61 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
 import { saveDraftPhotos } from '../receiptDraft.js';
-import { useApi } from '../hooks.js';
-import { todayIso, toDecimal, money } from '../format.js';
+import { todayIso, toDecimal, money, perUnit } from '../format.js';
 import { Field, Notice, Spinner, useToast } from './ui.jsx';
+import CategoryCombobox from './CategoryCombobox.jsx';
 
-export const emptyPurchase = () => ({ date: todayIso(), vendor: '', quantity: '1', weight: '', unit: '', unitCost: '', totalCost: '' });
+export const emptyPurchase = () => ({ date: todayIso(), vendor: '', quantity: '1', packSize: '1', unitCost: '', totalCost: '' });
 
-/** Purchase inputs; whichever of unit/total cost is blank is derived from the other. */
-export function PurchaseFields({ value, onChange }) {
+/** Common units of measure, offered as suggestions; any text is allowed. */
+export const UOM_OPTIONS = ['each', 'lb', 'oz', 'g', 'kg', 'dz', 'fl oz', 'ml', 'L', 'qt', 'gal', 'cup', 'bunch', 'hours'];
+
+export function UomInput({ value, onChange, ...rest }) {
+  return (
+    <>
+      <input className="input" list="uom-options" value={value} onChange={(e) => onChange(e.target.value)} placeholder="lb, oz, each…" {...rest} />
+      <datalist id="uom-options">{UOM_OPTIONS.map((u) => <option key={u} value={u} />)}</datalist>
+    </>
+  );
+}
+
+/**
+ * Purchase inputs: packs bought, each pack's size in the ingredient's unit of measure
+ * (`uom`), and the pack price or the total (whichever is blank is derived from the other).
+ */
+export function PurchaseFields({ value, onChange, uom }) {
   const set = (k) => (e) => onChange({ ...value, [k]: e.target.value });
   const q = toDecimal(value.quantity);
   const u = toDecimal(value.unitCost);
   const t = toDecimal(value.totalCost);
+  const size = toDecimal(value.packSize);
+  const packPrice = u ?? (t && q && !q.isZero() ? t.div(q) : null);
   const derivedTotal = !t && u && q ? money(u.times(q)) : null;
-  const derivedUnit = !u && t && q && !q.isZero() ? money(t.div(q), 4) : null;
+  const derivedUnit = !u && packPrice ? money(packPrice, 4) : null;
+  const unit = uom || 'unit';
   return (
     <div className="form-grid">
       <Field label="Date"><input className="input" type="date" value={value.date} onChange={set('date')} required /></Field>
       <Field label="Vendor"><input className="input" value={value.vendor} onChange={set('vendor')} placeholder="e.g. Sysco" /></Field>
-      <Field label="Quantity"><input className="input num" inputMode="decimal" value={value.quantity} onChange={set('quantity')} required /></Field>
-      <Field label="Unit" hint="What one unit is"><input className="input" value={value.unit} onChange={set('unit')} placeholder="case 36 lb" /></Field>
-      <Field label="Weight" hint="Optional"><input className="input num" inputMode="decimal" value={value.weight} onChange={set('weight')} /></Field>
-      <Field label="Unit cost" hint={derivedUnit && `= ${derivedUnit}`}><input className="input num" inputMode="decimal" value={value.unitCost} onChange={set('unitCost')} placeholder="0.00" /></Field>
+      <Field label="Packs bought"><input className="input num" inputMode="decimal" value={value.quantity} onChange={set('quantity')} required /></Field>
+      <Field label={`Store pack size (${unit})`} hint={packPrice && size?.gt(0) ? `= ${perUnit(packPrice.div(size), unit)}` : `How many ${unit} in one pack`}>
+        <input className="input num" inputMode="decimal" value={value.packSize} onChange={set('packSize')} required />
+      </Field>
+      <Field label="Price per pack" hint={derivedUnit && `= ${derivedUnit}`}><input className="input num" inputMode="decimal" value={value.unitCost} onChange={set('unitCost')} placeholder="0.00" /></Field>
       <Field label="Total cost" hint={derivedTotal && `= ${derivedTotal}`}><input className="input num" inputMode="decimal" value={value.totalCost} onChange={set('totalCost')} placeholder="0.00" /></Field>
     </div>
   );
 }
 
-export function CategoryInput({ value, onChange, id = 'category-options' }) {
-  const { data } = useApi('/ingredients/categories');
-  return (
-    <>
-      <input className="input" list={id} value={value} onChange={onChange} placeholder="e.g. Produce" />
-      <datalist id={id}>{(data ?? []).map((c) => <option key={c} value={c} />)}</datalist>
-    </>
-  );
+export function CategoryInput({ value, onChange }) {
+  return <CategoryCombobox value={value} onChange={onChange} />;
 }
 
 /** Manual entry: a new master ingredient plus its first purchase. */
 export function NewIngredientForm({ onDone }) {
   const [name, setName] = useState('');
   const [category, setCategory] = useState('');
-  const [yieldPct, setYieldPct] = useState('100');
+  const [uom, setUom] = useState('each');
   const [purchase, setPurchase] = useState(emptyPurchase);
   const [withPurchase, setWithPurchase] = useState(true);
   const [error, setError] = useState(null);
@@ -57,7 +70,7 @@ export function NewIngredientForm({ onDone }) {
     try {
       const created = await api('/ingredients', {
         method: 'POST',
-        body: { name, category, defaultYieldPercent: yieldPct, purchase: withPurchase ? purchase : undefined },
+        body: { name, category, uom, purchase: withPurchase ? purchase : undefined },
       });
       notifyDataChanged();
       toast(`Added ${created.name}`);
@@ -73,13 +86,13 @@ export function NewIngredientForm({ onDone }) {
     <form onSubmit={submit} className="modal-body" style={{ padding: 0 }}>
       <div className="form-grid">
         <Field label="Name" className="span-2"><input className="input" value={name} onChange={(e) => setName(e.target.value)} required autoFocus /></Field>
-        <Field label="Category"><CategoryInput value={category} onChange={(e) => setCategory(e.target.value)} /></Field>
-        <Field label="Usable yield %" hint="After trim loss"><input className="input num" inputMode="decimal" value={yieldPct} onChange={(e) => setYieldPct(e.target.value)} /></Field>
+        <Field label="Category"><CategoryInput value={category} onChange={setCategory} /></Field>
+        <Field label="Unit of measurement" hint="What recipes measure it in"><UomInput value={uom} onChange={setUom} required /></Field>
       </div>
       <label className="nowrap" style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 600 }}>
         <input type="checkbox" checked={withPurchase} onChange={(e) => setWithPurchase(e.target.checked)} /> Record the first purchase
       </label>
-      {withPurchase && <PurchaseFields value={purchase} onChange={setPurchase} />}
+      {withPurchase && <PurchaseFields value={purchase} onChange={setPurchase} uom={uom} />}
       {error && <Notice kind="error">{error}</Notice>}
       <div className="form-actions">
         <button className="btn primary" disabled={busy}>{busy ? <Spinner /> : null} Add ingredient</button>

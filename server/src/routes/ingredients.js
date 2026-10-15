@@ -13,11 +13,14 @@ function ingredientFields(body, { partial = false } = {}) {
   const out = {};
   if (!partial || 'name' in body) out.name = text(body.name, 'Name', { required: true });
   if (!partial || 'category' in body) out.category = text(body.category, 'Category', { max: 80 });
-  if (!partial || 'defaultYieldPercent' in body) {
-    out.defaultYieldPercent = number(body.defaultYieldPercent, 'Default yield %', { min: 0, minExclusive: true, max: 100 }) ?? '100';
-  }
+  if (!partial || 'uom' in body) out.uom = text(body.uom, 'Unit of measurement', { max: 20 }) ?? (partial ? undefined : 'each');
+  if (partial && out.uom === undefined) delete out.uom;
   return out;
 }
+
+const PURCHASE_COLUMNS = `id, ingredient_id AS "ingredientId", purchase_date AS "date", vendor, quantity,
+  coalesce(pack_size, 1) AS "packSize", unit_cost AS "unitCost", total_cost AS "totalCost",
+  round(unit_cost / coalesce(pack_size, 1), 4) AS "unitPrice", receipt_id AS "receiptId", created_at AS "createdAt"`;
 
 function purchaseFields(p) {
   const quantity = number(p.quantity, 'Quantity', { required: true, min: 0, minExclusive: true });
@@ -34,8 +37,7 @@ function purchaseFields(p) {
     date: date(p.date, 'Date') ?? today(),
     vendor: text(p.vendor, 'Vendor', { max: 120 }),
     quantity,
-    weight: number(p.weight, 'Weight', { min: 0 }),
-    unit: text(p.unit, 'Unit', { max: 30 }),
+    packSize: number(p.packSize, 'Pack size', { min: 0, minExclusive: true }) ?? '1',
     ...costs,
   };
 }
@@ -43,11 +45,10 @@ function purchaseFields(p) {
 async function insertPurchase(client, ingredientId, p, receiptId = null) {
   const { rows } = await client.query(
     `INSERT INTO ingredient_purchases
-       (ingredient_id, purchase_date, vendor, quantity, weight, unit, unit_cost, total_cost, receipt_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-     RETURNING id, ingredient_id AS "ingredientId", purchase_date AS "date", vendor, quantity, weight, unit,
-               unit_cost AS "unitCost", total_cost AS "totalCost", receipt_id AS "receiptId", created_at AS "createdAt"`,
-    [ingredientId, p.date, p.vendor, p.quantity, p.weight, p.unit, p.unitCost, p.totalCost, receiptId],
+       (ingredient_id, purchase_date, vendor, quantity, pack_size, unit_cost, total_cost, receipt_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     RETURNING ${PURCHASE_COLUMNS}`,
+    [ingredientId, p.date, p.vendor, p.quantity, p.packSize, p.unitCost, p.totalCost, receiptId],
   );
   return rows[0];
 }
@@ -96,8 +97,8 @@ router.post('/', async (req, res) => {
   try {
     const id = await tx(async (c) => {
       const { rows } = await c.query(
-        `INSERT INTO ingredients (name, category, default_yield_percent) VALUES ($1,$2,$3) RETURNING id`,
-        [fields.name, fields.category, fields.defaultYieldPercent],
+        `INSERT INTO ingredients (name, category, uom) VALUES ($1,$2,$3) RETURNING id`,
+        [fields.name, fields.category, fields.uom],
       );
       if (purchase) await insertPurchase(c, rows[0].id, purchase);
       return rows[0].id;
@@ -125,6 +126,7 @@ router.post('/purchase', async (req, res) => {
         ingredientId: uuid(item.ingredientId, 'Ingredient', { required: false }),
         name: text(item.name, 'Item name'),
         alias: text(item.alias, 'Receipt name'),
+        uom: text(item.uom, 'Unit of measurement', { max: 20 }),
         receiptLine: number(item.receiptLine, 'Receipt line', { integer: true, min: 0 }),
         category: text(item.category, 'Category', { max: 80 }),
         purchase: purchaseFields({ ...shared, ...Object.fromEntries(Object.entries(item).filter(([, v]) => v !== undefined && v !== null && v !== '')) }),
@@ -147,26 +149,41 @@ router.post('/purchase', async (req, res) => {
     const purchases = [];
     const created = [];
     const aliases = [];
+    const renamed = [];
     for (const item of prepared) {
       let id = item.ingredientId;
       let name;
+      let uom = null;
       if (id) {
-        const { rows } = await c.query('SELECT name FROM ingredients WHERE id = $1', [id]);
+        const { rows } = await c.query('SELECT name, uom FROM ingredients WHERE id = $1', [id]);
         if (!rows[0]) throw notFound('Ingredient');
-        name = rows[0].name;
+        ({ name, uom } = rows[0]);
       } else {
         const known = await resolveName(c, item.name);
         if (known) {
-          ({ id, name } = known);
+          ({ id, name, uom } = known);
         } else {
           const { rows } = await c.query(
-            `INSERT INTO ingredients (name, category) VALUES ($1, $2) RETURNING id`,
-            [item.name, item.category],
+            `INSERT INTO ingredients (name, category, uom) VALUES ($1, $2, $3) RETURNING id`,
+            [item.name, item.category, item.uom ?? 'each'],
           );
+          uom = item.uom ?? 'each';
           ({ id } = rows[0]);
           name = item.name;
           created.push({ id, name });
         }
+      }
+      // Pack sizes are in the ingredient's unit; a purchase can't quietly switch it.
+      if (item.uom && uom && item.uom.toLowerCase() !== uom.toLowerCase()) {
+        throw badRequest(`${name} is measured in ${uom}, not ${item.uom}. Enter the pack size in ${uom}.`);
+      }
+      if (item.uom && !uom) await c.query('UPDATE ingredients SET uom = $1 WHERE id = $2', [item.uom, id]);
+      if (item.ingredientId && item.name && item.name !== name && item.name.toLowerCase() === name.toLowerCase()) {
+        // A chosen ingredient sent with its name recased: the reviewer is fixing the spelling.
+        // (A bare name never renames; it only resolves.)
+        await c.query('UPDATE ingredients SET name = $1 WHERE id = $2', [item.name, id]);
+        name = item.name;
+        renamed.push({ id, name });
       }
       if (item.alias && item.alias.toLowerCase() !== name.toLowerCase()) {
         // Re-pointing an existing alias is deliberate: the reviewer chose this ingredient.
@@ -192,7 +209,7 @@ router.post('/purchase', async (req, res) => {
       }
       purchases.push(purchase);
     }
-    return { purchases, createdIngredients: created, aliasesSaved: aliases };
+    return { purchases, createdIngredients: created, aliasesSaved: aliases, renamedIngredients: renamed };
   });
   res.status(201).json(result);
 });
@@ -213,7 +230,7 @@ router.get('/:id', async (req, res) => {
 router.patch('/:id', async (req, res) => {
   const id = uuid(req.params.id, 'id');
   const fields = ingredientFields(req.body ?? {}, { partial: true });
-  const cols = { name: 'name', category: 'category', defaultYieldPercent: 'default_yield_percent' };
+  const cols = { name: 'name', category: 'category', uom: 'uom' };
   const keys = Object.keys(fields);
   if (keys.length) {
     try {
@@ -268,30 +285,30 @@ router.delete('/:id/aliases/:aliasId', async (req, res) => {
   res.status(204).end();
 });
 
-// Time series of every purchase, with per-vendor price-hike flags.
+// Time series of every purchase, with price-movement flags.
 router.get('/:id/history', async (req, res) => {
   const id = uuid(req.params.id, 'id');
   const ingredient = await getIngredient(id);
   const { rows } = await query(
-    `SELECT id, purchase_date AS "date", vendor, quantity, weight, unit,
-            unit_cost AS "unitCost", total_cost AS "totalCost", receipt_id AS "receiptId", created_at AS "createdAt"
+    `SELECT ${PURCHASE_COLUMNS}
      FROM ingredient_purchases WHERE ingredient_id = $1
      ORDER BY purchase_date, created_at`,
     [id],
   );
 
-  // Compare each purchase with the previous one from the same vendor in the same unit.
-  const previous = new Map();
+  // Compare each purchase's price per unit of measure with the previous purchase, from
+  // whichever store and in whatever pack size.
+  let prev = null;
   const purchases = rows.map((p) => {
-    const key = `${p.vendor ?? ''}|${p.unit ?? ''}`;
-    const prev = previous.get(key);
-    const change = prev ? percentChange(prev.unitCost, p.unitCost) : null;
-    previous.set(key, p);
-    return {
+    const change = prev ? percentChange(prev.unitPrice, p.unitPrice) : null;
+    const out = {
       ...p,
       changePercent: change ? change.toFixed(1) : null,
       priceHike: change ? change.gte(PRICE_HIKE_THRESHOLD) : false,
+      previous: prev ? { vendor: prev.vendor, unitPrice: prev.unitPrice, packSize: prev.packSize, date: prev.date } : null,
     };
+    prev = p;
+    return out;
   });
 
   const vendors = new Map();
@@ -299,11 +316,10 @@ router.get('/:id/history', async (req, res) => {
     const name = p.vendor ?? 'Unknown vendor';
     const v = vendors.get(name) ?? { vendor: name, purchases: 0 };
     v.purchases += 1;
-    v.latestUnitCost = p.unitCost;
-    v.latestUnit = p.unit;
+    v.latestUnitPrice = p.unitPrice;
+    v.latestPackSize = p.packSize;
+    v.latestPackPrice = p.unitCost;
     v.latestDate = p.date;
-    v.latestChangePercent = p.changePercent;
-    v.priceHike = p.priceHike;
     vendors.set(name, v);
   }
 

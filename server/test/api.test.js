@@ -39,11 +39,14 @@ const ids = {};
 
 test('manual entry creates an ingredient with its first purchase', { skip }, async () => {
   const { status, data } = await api('POST', '/ingredients', {
-    name: 'Flour', category: 'Dry goods', defaultYieldPercent: 100,
-    purchase: { date: '2026-01-10', vendor: 'Depot', quantity: 2, unit: 'bag', totalCost: '40' },
+    name: 'Flour', category: 'Dry goods', uom: 'lb',
+    purchase: { date: '2026-01-10', vendor: 'Depot', quantity: 2, packSize: 50, totalCost: '40' },
   });
   assert.equal(status, 201);
-  assert.equal(data.latestUnitCost, '20.0000');
+  assert.equal(data.uom, 'lb');
+  assert.equal(data.latestPackPrice, '20.0000'); // one 50 lb bag
+  assert.equal(data.latestPackSize, '50.0000');
+  assert.equal(data.latestUnitPrice, '0.4000'); // per lb
   ids.flour = data.id;
 
   const dup = await api('POST', '/ingredients', { name: 'flour' });
@@ -54,8 +57,8 @@ test('recurring purchases keep history and the latest price wins', { skip }, asy
   const { status, data } = await api('POST', '/ingredients/purchase', {
     vendor: 'Depot',
     items: [
-      { name: 'FLOUR', date: '2026-02-10', quantity: 1, unit: 'bag', unitCost: '25' },
-      { name: 'Eggs', category: 'Dairy', date: '2026-02-10', quantity: 30, unit: 'ea', totalCost: '9' },
+      { name: 'FLOUR', date: '2026-02-10', quantity: 1, packSize: 50, unitCost: '25' },
+      { name: 'Eggs', category: 'Dairy', uom: 'each', date: '2026-02-10', quantity: 30, totalCost: '9' },
     ],
   });
   assert.equal(status, 201);
@@ -67,7 +70,8 @@ test('recurring purchases keep history and the latest price wins', { skip }, asy
   assert.equal(hist.data.purchases.length, 2);
   assert.equal(hist.data.purchases[0].changePercent, '25.0');
   assert.equal(hist.data.purchases[0].priceHike, true);
-  assert.equal(hist.data.ingredient.latestUnitCost, '25.0000');
+  assert.equal(hist.data.ingredient.latestUnitPrice, '0.5000');
+  assert.equal(hist.data.purchases[0].unitPrice, '0.5000');
 
   const list = await api('GET', '/ingredients?q=flo');
   assert.equal(list.data.length, 1);
@@ -84,18 +88,19 @@ test('recipe costing uses latest price and scales statelessly', { skip }, async 
   const created = await api('POST', '/recipes', {
     name: 'Pasta', baseServings: 4, targetMargin: 70,
     lines: [
-      { ingredientId: ids.flour, baseQuantity: 1, usePercent: 10 }, // 2.50
-      { ingredientId: ids.eggs, baseQuantity: 5, usePercent: 100 }, // 1.50
+      { ingredientId: ids.flour, amount: 5 }, // 5 lb × 0.50 = 2.50
+      { ingredientId: ids.eggs, amount: 5 }, // 5 × 0.30 = 1.50
     ],
   });
   assert.equal(created.status, 201);
   ids.pasta = created.data.id;
   assert.equal(created.data.costing.baseCost, '4.0000');
   assert.equal(created.data.costing.costPerServing, '1.0000');
+  assert.deepEqual(created.data.costing.lines.map((l) => [l.uom, l.packSize, l.packPrice, l.unitPrice]), [['lb', '50.0000', '25.0000', '0.5000'], ['each', '1.0000', '0.3000', '0.3000']]);
 
   const calc = await api('POST', '/recipes/calculate', {
     baseServings: 4, expectedServings: 8,
-    lines: [{ ingredientId: ids.flour, baseQuantity: 1, usePercent: 10 }],
+    lines: [{ ingredientId: ids.flour, amount: 5 }],
   });
   assert.equal(calc.data.scaledCost, '5.0000');
 
@@ -126,9 +131,11 @@ test('event summary aggregates cost, revenue and shopping list', { skip }, async
   assert.equal(data.totalCost, '8.0000');
   assert.equal(data.revenue, '26.64'); // 3.33 × 8
   const flour = data.shoppingList.find((l) => l.name === 'Flour');
-  assert.equal(flour.quantity, '2.0000');
-  assert.equal(flour.usage, '0.2000');
-  assert.equal(flour.unitsToBuy, '1');
+  assert.equal(flour.amount, '10.0000'); // 5 lb × 2
+  assert.equal(flour.uom, 'lb');
+  assert.equal(flour.packsToBuy, '1'); // one 50 lb bag
+  assert.equal(flour.purchaseCost, '25.0000'); // the whole bag
+  assert.equal(flour.usedCost, '5.0000'); // 10 lb × 0.50
 });
 
 test('validation errors are 400s with readable messages', { skip }, async () => {
@@ -191,4 +198,40 @@ test('receipt names become aliases and auto-resolve on the next import', { skip 
 test('an alias equal to the ingredient name is not stored', { skip }, async () => {
   const r = await api('POST', '/ingredients/purchase', { items: [{ ingredientId: ids.flour, alias: 'FLOUR', quantity: 1, totalCost: 1 }] });
   assert.deepEqual(r.data.aliasesSaved, []);
+});
+
+test('price movement compares against the previous purchase from any store', { skip }, async () => {
+  // A smaller bag elsewhere: compared per lb, not per bag.
+  await api('POST', '/ingredients/purchase', { vendor: 'Mart', items: [{ ingredientId: ids.flour, date: '2026-03-01', quantity: 1, packSize: 25, unitCost: '15' }] });
+  const hist = (await api('GET', `/ingredients/${ids.flour}/history`)).data;
+  const mart = hist.purchases.find((p) => p.vendor === 'Mart');
+  assert.equal(mart.unitPrice, '0.6000');
+  assert.equal(mart.changePercent, '20.0'); // vs Depot's $0.50/lb
+  assert.equal(mart.priceHike, true);
+  assert.deepEqual(mart.previous, { vendor: 'Depot', unitPrice: '0.5000', packSize: '50.0000', date: '2026-02-10' });
+
+  // Pack sizes are in the ingredient's unit; another unit is refused.
+  const wrong = await api('POST', '/ingredients/purchase', { items: [{ ingredientId: ids.flour, uom: 'kg', quantity: 1, packSize: 10, unitCost: 9 }] });
+  assert.equal(wrong.status, 400);
+  assert.match(wrong.data.error, /measured in lb/);
+});
+
+test('a capitalization-only rename on review renames the ingredient', { skip }, async () => {
+  const fix = await api('POST', '/ingredients/purchase', { items: [{ ingredientId: ids.flour, name: 'FLOUR', alias: 'AP FLR', quantity: 1, totalCost: 1 }] });
+  assert.deepEqual(fix.data.renamedIngredients.map((i) => i.name), ['FLOUR']);
+  assert.deepEqual(fix.data.aliasesSaved.map((a) => a.ingredient), ['FLOUR']);
+  const back = await api('POST', '/ingredients/purchase', { items: [{ ingredientId: ids.flour, name: 'Flour', quantity: 1, totalCost: 1 }] });
+  assert.deepEqual(back.data.renamedIngredients.map((i) => i.name), ['Flour']);
+  // A bare name only resolves, and a different name sent with an id is ignored.
+  const other = await api('POST', '/ingredients/purchase', { items: [{ name: 'FLOUR', quantity: 1, totalCost: 1 }, { ingredientId: ids.flour, name: 'Bread flour', quantity: 1, totalCost: 1 }] });
+  assert.deepEqual(other.data.renamedIngredients, []);
+  assert.equal((await api('GET', `/ingredients/${ids.flour}`)).data.name, 'Flour');
+});
+
+test('recipe amounts can exceed a pack and margins keep 6 decimals', { skip }, async () => {
+  const r = await api('POST', '/recipes', { name: 'Double', baseServings: 1, targetMargin: '70.833333', lines: [{ ingredientId: ids.flour, amount: '120' }] });
+  assert.equal(r.status, 201);
+  assert.equal(r.data.lines[0].amount, '120.0000');
+  assert.equal(r.data.targetMargin, '70.833333');
+  assert.equal((await api('POST', '/recipes', { name: 'Neg', baseServings: 1, lines: [{ ingredientId: ids.flour, amount: '-1' }] })).status, 400);
 });

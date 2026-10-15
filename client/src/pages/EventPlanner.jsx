@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
 import { useApi } from '../hooks.js';
-import { money, qty, toDecimal } from '../format.js';
+import { isLabor } from '@kitchen/shared';
+import { money, pack, qty, toDecimal } from '../format.js';
 import { Field, Icon, Modal, Notice, Spinner, Tabs, useToast } from '../components/ui.jsx';
 
 const isInt = (v) => /^\d+$/.test(String(v).trim());
@@ -236,27 +237,29 @@ function ShoppingList({ s }) {
         <thead>
           <tr>
             <th>Ingredient</th>
-            <th className="num" title="Fraction of purchase units actually used, after Use %">Needed</th>
-            <th className="num">Buy</th>
-            <th>Unit</th>
-            <th className="num">Est. cost</th>
+            <th className="num" title="Total amount used across recipes, in the ingredient's unit of measurement">Needed</th>
+            <th className="num" title="Whole store packs, at the latest purchase's pack size">Packs to buy</th>
+            <th>Pack size</th>
+            <th className="num" title="Packs to buy × the latest pack price: what you'll pay">Total cost</th>
+            <th className="num" title="Cost of the amount the recipes use; matches the recipes' total cost">Used cost</th>
             <th>Used in</th>
           </tr>
         </thead>
         <tbody>
           {s.shoppingList.map((l) => (
-            <tr key={`${l.ingredientId}|${l.unit}`}>
+            <tr key={l.ingredientId} className={isLabor(l) ? 'labor-row' : ''}>
               <td style={{ fontWeight: 600 }}>{l.name}{l.missingPrice && <> <span className="badge warn">No price</span></>}</td>
-              <td className="num">{qty(l.usage)}</td>
-              <td className="num" style={{ fontWeight: 700 }}>{l.unitsToBuy}</td>
-              <td>{l.unit ?? '—'}</td>
-              <td className="num">{money(l.estimatedCost)}</td>
+              <td className="num nowrap">{qty(l.amount)} {l.uom}</td>
+              <td className="num" style={{ fontWeight: 700 }}>{l.packsToBuy}</td>
+              <td className="nowrap">{l.packSize ? pack(l.packSize, l.uom) : '—'}</td>
+              <td className="num" style={{ fontWeight: 650 }}>{l.purchaseCost ? money(l.purchaseCost) : '—'}</td>
+              <td className="num">{money(l.usedCost)}</td>
               <td className="muted">{l.recipes.join(', ')}</td>
             </tr>
           ))}
         </tbody>
         <tfoot>
-          <tr><td>{s.shoppingList.length} items</td><td /><td /><td /><td className="num">{money(s.totalCost)}</td><td /></tr>
+          <tr><td>{s.shoppingList.length} items</td><td /><td /><td /><td className="num">{money(s.purchaseCost)}</td><td className="num">{money(s.totalCost)}</td><td /></tr>
         </tfoot>
       </table>
     </div>

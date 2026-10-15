@@ -40,8 +40,7 @@ function recipeFields(body) {
     const row = `Line ${i + 1}`;
     return {
       ingredientId: uuid(l.ingredientId, `${row}: ingredient`),
-      usePercent: number(l.usePercent, `${row}: Use %`, { min: 0, max: 100 }) ?? '100',
-      baseQuantity: number(l.baseQuantity, `${row}: quantity`, { required: true, min: 0 }),
+      amount: number(l.amount, `${row}: amount used`, { required: true, min: 0 }),
     };
   });
   return {
@@ -58,9 +57,11 @@ async function writeLines(c, recipeId, lines) {
   await c.query('DELETE FROM recipe_ingredients WHERE recipe_id = $1', [recipeId]);
   for (const [position, l] of lines.entries()) {
     await c.query(
-      `INSERT INTO recipe_ingredients (recipe_id, position, ingredient_id, use_percent, base_quantity)
-       VALUES ($1,$2,$3,$4,$5)`,
-      [recipeId, position, l.ingredientId, l.usePercent, l.baseQuantity],
+      // base_quantity / use_percent are the pre-UOM columns, kept so older code paths and
+      // backups stay readable; amount is what costing uses.
+      `INSERT INTO recipe_ingredients (recipe_id, position, ingredient_id, amount, base_quantity, use_percent)
+       VALUES ($1,$2,$3,$4,$4,100)`,
+      [recipeId, position, l.ingredientId, l.amount],
     );
   }
 }
@@ -94,7 +95,7 @@ router.get('/', async (req, res) => {
           coverImage: images[0] ?? null,
           imageCount: images.length,
           ingredientCount: lines.length,
-          missingPrices: lines.filter((l) => l.unitCost === null).length,
+          missingPrices: lines.filter((l) => l.packPrice === null).length,
           costPerServing: costing.costPerServing,
           recommendedPrice: costing.recommendedPrice,
           baseCost: costing.baseCost,
@@ -109,24 +110,24 @@ router.post('/calculate', async (req, res) => {
   const lines = array(body.lines, 'lines').map((l, i) => ({
     ingredientId: uuid(l.ingredientId, `Line ${i + 1}: ingredient`, { required: false }),
     name: l.name,
-    unitCost: number(l.unitCost, `Line ${i + 1}: unit cost`, { min: 0 }),
-    usePercent: number(l.usePercent, `Line ${i + 1}: Use %`, { min: 0, max: 100 }) ?? '100',
-    baseQuantity: number(l.baseQuantity, `Line ${i + 1}: quantity`, { min: 0 }) ?? '0',
+    packPrice: number(l.packPrice, `Line ${i + 1}: pack price`, { min: 0 }),
+    packSize: number(l.packSize, `Line ${i + 1}: pack size`, { min: 0, minExclusive: true }),
+    amount: number(l.amount, `Line ${i + 1}: amount used`, { min: 0 }) ?? '0',
   }));
 
-  // Lines given by ingredient id (without an explicit unit cost) use the most recent price.
-  const ids = lines.filter((l) => l.ingredientId && l.unitCost === null).map((l) => l.ingredientId);
+  // Lines given by ingredient id (without an explicit pack price) use the most recent purchase.
+  const ids = lines.filter((l) => l.ingredientId && l.packPrice === null).map((l) => l.ingredientId);
   if (ids.length) {
     const { rows } = await query(
-      `SELECT i.id, i.name, lp.unit_cost, lp.unit FROM ingredients i ${LATEST_PURCHASE} WHERE i.id = ANY($1::uuid[])`,
+      `SELECT i.id, i.name, i.uom, lp.unit_cost, lp.pack_size FROM ingredients i ${LATEST_PURCHASE} WHERE i.id = ANY($1::uuid[])`,
       [ids],
     );
     const byId = new Map(rows.map((r) => [r.id, r]));
     for (const l of lines) {
       const r = byId.get(l.ingredientId);
-      if (l.ingredientId && l.unitCost === null) {
+      if (l.ingredientId && l.packPrice === null) {
         if (!r) throw notFound('Ingredient');
-        Object.assign(l, { unitCost: r.unit_cost, unit: r.unit, name: l.name ?? r.name });
+        Object.assign(l, { packPrice: r.unit_cost, packSize: r.pack_size, uom: r.uom, name: l.name ?? r.name });
       }
     }
   }
@@ -200,8 +201,8 @@ router.post('/:id/duplicate', async (req, res) => {
     );
     if (!rows[0]) throw notFound('Recipe');
     await c.query(
-      `INSERT INTO recipe_ingredients (recipe_id, position, ingredient_id, use_percent, base_quantity)
-       SELECT $2, position, ingredient_id, use_percent, base_quantity FROM recipe_ingredients WHERE recipe_id = $1`,
+      `INSERT INTO recipe_ingredients (recipe_id, position, ingredient_id, use_percent, base_quantity, amount)
+       SELECT $2, position, ingredient_id, use_percent, base_quantity, amount FROM recipe_ingredients WHERE recipe_id = $1`,
       [id, rows[0].id],
     );
     await copyImages(c, 'recipe', id, rows[0].id);

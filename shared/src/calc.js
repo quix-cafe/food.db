@@ -12,6 +12,14 @@ export const MONEY_DP = 2;
 
 export class CalcError extends Error {}
 
+const LABOR = /^labou?r$/i;
+
+/** Labor is costed like an ingredient but always listed last: category or name "Labor". */
+export const isLabor = (item) => LABOR.test((item?.category ?? '').trim()) || LABOR.test((item?.name ?? '').trim());
+
+/** Stable reorder that keeps relative order but moves labor to the end. */
+export const laborLast = (items) => [...items.filter((i) => !isLabor(i)), ...items.filter(isLabor)];
+
 /** Parse a number/string into a Decimal, or null when blank or not numeric. */
 export function toDecimal(value) {
   if (value === null || value === undefined) return null;
@@ -27,9 +35,15 @@ export function toDecimal(value) {
 const cost = (d) => d.toFixed(COST_DP);
 const money = (d) => d.toFixed(MONEY_DP);
 
-/** Line Item Cost = Unit_Cost × (Use_Percent / 100) × Quantity */
-export function lineCost(unitCost, usePercent, quantity) {
-  return new Decimal(unitCost).times(new Decimal(usePercent).div(100)).times(quantity);
+/** Price per unit of measure = store pack price / pack size (a missing pack size is 1). */
+export function unitPrice(packPrice, packSize) {
+  const size = toDecimal(packSize);
+  return new Decimal(packPrice).div(size && size.gt(0) ? size : 1);
+}
+
+/** Line Item Cost = Price_Per_Unit × Amount_Used */
+export function lineCost(pricePerUnit, amount) {
+  return new Decimal(pricePerUnit).times(amount);
 }
 
 /** Scale = Expected_Servings / Base_Servings */
@@ -73,8 +87,9 @@ function requirePositive(value, label) {
 /**
  * Cost a recipe and scale it to `expectedServings` without touching its base values.
  *
- * lines: [{ unitCost, usePercent, baseQuantity, ...passthrough }]
- *   unitCost is the ingredient's most recent purchase price (null if never bought).
+ * lines: [{ packPrice, packSize, amount, ...passthrough }]
+ *   packPrice / packSize come from the ingredient's most recent purchase (packPrice null if
+ *   never bought); amount is how much of the ingredient's unit of measure the recipe uses.
  */
 export function calculateRecipe({
   lines = [],
@@ -93,23 +108,20 @@ export function calculateRecipe({
   const warnings = [];
 
   const outLines = lines.map((line) => {
-    const unitCost = toDecimal(line.unitCost);
-    const usePercent = toDecimal(line.usePercent) ?? new Decimal(100);
-    const quantity = toDecimal(line.baseQuantity) ?? new Decimal(0);
-    if (usePercent.lt(0) || usePercent.gt(100)) throw new CalcError('Use % must be between 0 and 100');
-    if (quantity.lt(0)) throw new CalcError('Quantity cannot be negative');
-    if (unitCost === null) warnings.push(`${line.name ?? 'An ingredient'} has no purchase price yet`);
+    const packPrice = toDecimal(line.packPrice);
+    const amount = toDecimal(line.amount) ?? new Decimal(0);
+    if (amount.lt(0)) throw new CalcError('Amount used cannot be negative');
+    if (packPrice === null) warnings.push(`${line.name ?? 'An ingredient'} has no purchase price yet`);
 
-    const itemCost = lineCost(unitCost ?? 0, usePercent, quantity);
+    const perUnit = packPrice === null ? new Decimal(0) : unitPrice(packPrice, line.packSize);
+    const itemCost = lineCost(perUnit, amount);
     baseCost = baseCost.plus(itemCost);
-    const scaledQuantity = quantity.times(scale);
     return {
       ...line,
-      missingPrice: unitCost === null,
+      missingPrice: packPrice === null,
+      unitPrice: packPrice === null ? null : cost(perUnit),
       baseCost: cost(itemCost),
-      scaledQuantity: cost(scaledQuantity),
-      // Fraction of purchase units actually consumed, after Use %.
-      scaledUsage: cost(scaledQuantity.times(usePercent).div(100)),
+      scaledAmount: cost(amount.times(scale)),
       scaledCost: cost(itemCost.times(scale)),
     };
   });
@@ -141,13 +153,14 @@ export function calculateRecipe({
 
 /**
  * Aggregate an event: financials across its recipes plus one consolidated shopping
- * list. Shopping lines are grouped by ingredient and unit:
- *   quantity  = Σ Base_Quantity × Expected/Base             (spec §7)
- *   usage     = Σ Base_Quantity × Expected/Base × Use%/100  (fraction actually consumed)
- *   unitsToBuy = ceil(usage)
+ * list, one line per ingredient:
+ *   amount       = Σ Amount_Used × Expected/Base   (in the ingredient's unit of measure)
+ *   packsToBuy   = ceil(amount / Pack_Size)        (store packs of the latest purchase's size)
+ *   usedCost     = Σ recipe line costs             (what the recipes consume; sums to totalCost)
+ *   purchaseCost = packsToBuy × Pack_Price         (what buying those whole packs costs)
  *
  * recipes: [{ recipeId, name, baseServings, targetMargin, expectedServings, lines }]
- *   where lines carry { ingredientId, name, unit, unitCost, usePercent, baseQuantity }.
+ *   where lines carry { ingredientId, name, uom, packPrice, packSize, amount }.
  */
 export function summarizeEvent(recipes = []) {
   let totalCost = new Decimal(0);
@@ -167,24 +180,25 @@ export function summarizeEvent(recipes = []) {
     for (const w of calc.warnings) warnings.push(`${r.name}: ${w}`);
 
     for (const line of calc.lines) {
-      const key = `${line.ingredientId}|${line.unit ?? ''}`;
+      const key = line.ingredientId;
       let entry = shopping.get(key);
       if (!entry) {
         entry = {
           ingredientId: line.ingredientId,
           name: line.name,
-          unit: line.unit ?? null,
-          quantity: new Decimal(0),
-          usage: new Decimal(0),
-          estimatedCost: new Decimal(0),
+          category: line.category ?? null,
+          uom: line.uom ?? null,
+          packSize: toDecimal(line.packSize)?.toString() ?? null,
+          packPrice: toDecimal(line.packPrice)?.toString() ?? null,
+          amount: new Decimal(0),
+          usedCost: new Decimal(0),
           missingPrice: false,
           recipes: [],
         };
         shopping.set(key, entry);
       }
-      entry.quantity = entry.quantity.plus(line.scaledQuantity);
-      entry.usage = entry.usage.plus(line.scaledUsage);
-      entry.estimatedCost = entry.estimatedCost.plus(line.scaledCost);
+      entry.amount = entry.amount.plus(line.scaledAmount);
+      entry.usedCost = entry.usedCost.plus(line.scaledCost);
       entry.missingPrice ||= line.missingPrice;
       if (!entry.recipes.includes(r.name)) entry.recipes.push(r.name);
     }
@@ -204,19 +218,26 @@ export function summarizeEvent(recipes = []) {
   });
 
   const profit = revenue.minus(totalCost);
+  let purchaseCost = new Decimal(0);
   const shoppingList = [...shopping.values()]
-    .map((e) => ({
-      ...e,
-      quantity: cost(e.quantity),
-      usage: cost(e.usage),
-      unitsToBuy: e.usage.ceil().toString(),
-      estimatedCost: cost(e.estimatedCost),
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .map((e) => {
+      const packs = e.amount.div(toDecimal(e.packSize) ?? 1).ceil();
+      const bought = e.packPrice === null ? null : packs.times(e.packPrice);
+      if (bought) purchaseCost = purchaseCost.plus(bought);
+      return {
+        ...e,
+        amount: cost(e.amount),
+        packsToBuy: packs.toString(),
+        usedCost: cost(e.usedCost),
+        purchaseCost: bought === null ? null : cost(bought),
+      };
+    })
+    .sort((a, b) => isLabor(a) - isLabor(b) || a.name.localeCompare(b.name));
 
   return {
     recipes: recipeSummaries,
     totalCost: cost(totalCost),
+    purchaseCost: cost(purchaseCost),
     revenue: money(revenue),
     profit: money(profit),
     marginPercent: revenue.isZero() ? null : profit.div(revenue).times(100).toFixed(1),

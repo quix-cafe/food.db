@@ -25,6 +25,16 @@ export function qty(value) {
   return d ? qtyFmt.format(d.toDecimalPlaces(3).toString()) : '—';
 }
 
+/** A store pack in the ingredient's unit of measure, e.g. "36 lb". */
+export function pack(size, uom) {
+  return `${qty(size ?? 1)} ${uom ?? 'each'}`;
+}
+
+/** Price per unit of measure, to the nearest cent, e.g. "$3.13 / lb". Costing keeps full precision. */
+export function perUnit(price, uom) {
+  return `${money(price)} / ${uom ?? 'each'}`;
+}
+
 export function percent(value, dp = 1) {
   const d = toDecimal(value);
   return d ? `${d.toDecimalPlaces(dp).toString()}%` : '—';

@@ -21,6 +21,17 @@ export async function migrate({ log = console.log } = {}) {
   }
 }
 
+/**
+ * Re-run, on `client`, the migrations in `names` that are marked `-- rerun-on-restore`:
+ * idempotent migrations that convert rows inserted from a backup made before them.
+ */
+export async function rerunForRestore(client, names) {
+  for (const file of [...names].sort()) {
+    const sql = await readFile(dir + file, 'utf8').catch(() => '');
+    if (sql.startsWith('-- rerun-on-restore')) await client.query(sql);
+  }
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   await migrate();
   await pool.end();

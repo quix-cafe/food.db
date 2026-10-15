@@ -3,7 +3,7 @@
 /** Joins `lp` = the most recent purchase of ingredient alias `i`. */
 export const LATEST_PURCHASE = `
   LEFT JOIN LATERAL (
-    SELECT p.id, p.unit_cost, p.unit, p.vendor, p.purchase_date, p.created_at
+    SELECT p.id, p.unit_cost, coalesce(p.pack_size, 1) AS pack_size, p.vendor, p.purchase_date, p.created_at
     FROM ingredient_purchases p
     WHERE p.ingredient_id = i.id
     ORDER BY p.purchase_date DESC, p.created_at DESC
@@ -11,21 +11,20 @@ export const LATEST_PURCHASE = `
   ) lp ON true`;
 
 export const INGREDIENT_COLUMNS = `
-  i.id, i.name, i.category,
-  i.default_yield_percent AS "defaultYieldPercent",
+  i.id, i.name, i.category, i.uom,
   i.created_at AS "createdAt",
-  lp.unit_cost AS "latestUnitCost",
-  lp.unit AS "latestUnit",
+  lp.unit_cost AS "latestPackPrice",
+  lp.pack_size AS "latestPackSize",
+  round(lp.unit_cost / lp.pack_size, 4) AS "latestUnitPrice",
   lp.vendor AS "latestVendor",
-  lp.purchase_date AS "latestPurchaseDate",
-  lp.created_at AS "latestPriceSyncedAt"`;
+  lp.purchase_date AS "latestPurchaseDate"`;
 
 /** Recipe lines with the ingredient's latest price, for the given recipe ids ($1 uuid[]). */
 export const RECIPE_LINES = `
   SELECT ri.recipe_id AS "recipeId", ri.position,
          i.id AS "ingredientId", i.name, i.category,
-         ri.use_percent AS "usePercent", ri.base_quantity AS "baseQuantity",
-         lp.unit_cost AS "unitCost", lp.unit, lp.purchase_date AS "priceDate",
+         i.uom, ri.amount,
+         lp.unit_cost AS "packPrice", lp.pack_size AS "packSize", lp.vendor, lp.purchase_date AS "priceDate",
          lp.created_at AS "priceSyncedAt"
   FROM recipe_ingredients ri
   JOIN ingredients i ON i.id = ri.ingredient_id

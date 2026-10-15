@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useDebounced } from '../hooks.js';
-import { unitMoney } from '../format.js';
+import { perUnit } from '../format.js';
 
 /**
  * Searchable combobox over the master ingredient list.
@@ -82,7 +82,7 @@ export default function IngredientCombobox({ value, onInput, onPick, exclude = [
               onMouseEnter={() => setActive(i)}
             >
               <span>{o.name}</span>
-              <small>{o.latestUnitCost ? `${unitMoney(o.latestUnitCost)} / ${o.latestUnit ?? 'unit'}` : 'no price yet'}</small>
+              <small>{o.latestUnitPrice ? perUnit(o.latestUnitPrice, o.uom) : 'no price yet'}</small>
             </div>
           ))}
           {footer && footer(q, () => setOpen(false))}

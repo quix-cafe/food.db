@@ -1,20 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
+import { isLabor, laborLast } from '@kitchen/shared';
 import { useApi, useDebounced } from '../hooks.js';
-import { date, money, percent, qty, signedPercent, unitMoney, toDecimal } from '../format.js';
-import { CategoryInput, PurchaseFields, emptyPurchase } from '../components/forms.jsx';
+import { date, money, pack, perUnit, qty, signedPercent, toDecimal, unitMoney } from '../format.js';
+import { CategoryInput, PurchaseFields, UomInput, emptyPurchase } from '../components/forms.jsx';
 import PriceChart from '../components/PriceChart.jsx';
 import { Drawer, Field, Icon, Notice, Spinner, useToast } from '../components/ui.jsx';
 
 const COLUMNS = [
   { key: 'name', label: 'Ingredient' },
   { key: 'category', label: 'Category' },
-  { key: 'latestUnitCost', label: 'Latest unit cost', num: true },
-  { key: 'latestUnit', label: 'Unit' },
+  { key: 'latestPackSize', label: 'Store pack size', num: true },
+  { key: 'latestPackPrice', label: 'Store price', num: true },
+  { key: 'latestUnitPrice', label: 'Price per unit', num: true },
   { key: 'latestVendor', label: 'Vendor' },
   { key: 'latestPurchaseDate', label: 'Last bought' },
-  { key: 'defaultYieldPercent', label: 'Yield', num: true },
 ];
 
 function compare(a, b, key, num) {
@@ -39,10 +40,10 @@ export default function IngredientsPage() {
 
   const rows = useMemo(() => {
     const col = COLUMNS.find((c) => c.key === sort.key);
-    return (data ?? [])
+    return laborLast((data ?? [])
       .filter((r) => !category || r.category === category)
       .slice()
-      .sort((a, b) => sort.dir * compare(a, b, sort.key, col?.num));
+      .sort((a, b) => sort.dir * compare(a, b, sort.key, col?.num)));
   }, [data, category, sort]);
 
   const toggleSort = (key) => setSort((s) => ({ key, dir: s.key === key ? -s.dir : 1 }));
@@ -92,16 +93,16 @@ export default function IngredientsPage() {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id} className={`clickable ${openId === r.id ? 'selected' : ''}`} onClick={() => open(r.id)}>
+                  <tr key={r.id} className={`clickable ${isLabor(r) ? 'labor-row' : ''} ${openId === r.id ? 'selected' : ''}`} onClick={() => open(r.id)}>
                     <td>
                       <button className="sort-btn" style={{ fontWeight: 650 }} onClick={(e) => { e.stopPropagation(); open(r.id); }}>{r.name}</button>
                     </td>
                     <td>{r.category ?? <span className="muted">—</span>}</td>
-                    <td className="num">{r.latestUnitCost ? unitMoney(r.latestUnitCost) : <span className="badge">No price</span>}</td>
-                    <td>{r.latestUnit ?? '—'}</td>
+                    <td className="num">{r.latestPackSize ? pack(r.latestPackSize, r.uom) : '—'}</td>
+                    <td className="num">{r.latestPackPrice ? unitMoney(r.latestPackPrice) : <span className="badge">No price</span>}</td>
+                    <td className="num nowrap" style={{ fontWeight: 650 }}>{r.latestUnitPrice ? perUnit(r.latestUnitPrice, r.uom) : '—'}</td>
                     <td>{r.latestVendor ?? '—'}</td>
                     <td className="nowrap">{date(r.latestPurchaseDate)}</td>
-                    <td className="num">{percent(r.defaultYieldPercent, 1)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -127,10 +128,10 @@ function IngredientDrawer({ id, onClose }) {
 
   const ing = data?.ingredient;
   useEffect(() => {
-    if (ing) setForm({ name: ing.name, category: ing.category ?? '', defaultYieldPercent: toDecimal(ing.defaultYieldPercent).toString() });
-  }, [ing?.id, ing?.name, ing?.category, ing?.defaultYieldPercent]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (ing) setForm({ name: ing.name, category: ing.category ?? '', uom: ing.uom ?? '' });
+  }, [ing?.id, ing?.name, ing?.category, ing?.uom]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const dirty = form && ing && (form.name !== ing.name || form.category !== (ing.category ?? '') || !toDecimal(form.defaultYieldPercent)?.eq(ing.defaultYieldPercent));
+  const dirty = form && ing && (form.name !== ing.name || form.category !== (ing.category ?? '') || form.uom !== (ing.uom ?? ''));
 
   const run = async (fn, ok) => {
     setSaving(true);
@@ -168,7 +169,8 @@ function IngredientDrawer({ id, onClose }) {
   const removeAlias = (a) => run(() => api(`/ingredients/${id}/aliases/${a.id}`, { method: 'DELETE' }), `Forgot “${a.alias}”`).then(reload);
   const removePurchase = (pid) => run(() => api(`/ingredients/${id}/purchases/${pid}`, { method: 'DELETE' }), 'Purchase removed').then(reload);
 
-  const hikes = data?.vendors.filter((v) => v.priceHike) ?? [];
+  const latest = data?.purchases[0]; // newest first
+  const hike = latest?.priceHike ? latest : null;
 
   return (
     <Drawer title={ing?.name ?? 'Loading…'} subtitle={ing && `Asset ID ${ing.id}`} onClose={onClose}>
@@ -177,35 +179,34 @@ function IngredientDrawer({ id, onClose }) {
       {data && form && (
         <>
           <div className="stat-row">
-            <div className="stat"><b>{ing.latestUnitCost ? unitMoney(ing.latestUnitCost) : '—'}</b><span>Latest per {ing.latestUnit ?? 'unit'}</span></div>
+            <div className="stat"><b>{ing.latestUnitPrice ? unitMoney(ing.latestUnitPrice) : '—'}</b><span>Latest per {ing.uom ?? 'unit'}{ing.latestPackSize ? ` (${pack(ing.latestPackSize, ing.uom)} for ${unitMoney(ing.latestPackPrice)})` : ''}</span></div>
             <div className="stat"><b>{data.purchases.length}</b><span>Purchases</span></div>
             <div className="stat"><b>{data.vendors.length}</b><span>Vendors</span></div>
           </div>
 
-          {hikes.length > 0 && (
+          {hike && (
             <Notice>
-              {hikes.map((v) => (
-                <div key={v.vendor}><b>{v.vendor}</b> raised the price {signedPercent(v.latestChangePercent)} on {date(v.latestDate)}.</div>
-              ))}
+              Price up <b>{signedPercent(hike.changePercent)}</b>: {perUnit(hike.unitPrice, ing.uom)}{hike.vendor ? ` at ${hike.vendor}` : ''} on {date(hike.date)},
+              {' '}was {perUnit(hike.previous.unitPrice, ing.uom)}{hike.previous.vendor ? ` at ${hike.previous.vendor}` : ''} on {date(hike.previous.date)}.
             </Notice>
           )}
 
           <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <h3>Price history</h3>
-            <PriceChart key={id} purchases={data.purchases} />
+            <PriceChart key={id} purchases={data.purchases} uom={ing.uom} />
           </section>
 
           <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <h3>Vendors</h3>
             <div className="panel table-wrap">
               <table className="grid">
-                <thead><tr><th>Vendor</th><th className="num">Latest</th><th className="num">Change</th><th>Last bought</th></tr></thead>
+                <thead><tr><th>Vendor</th><th className="num">Latest per unit</th><th className="num">Pack</th><th>Last bought</th></tr></thead>
                 <tbody>
                   {data.vendors.map((v) => (
                     <tr key={v.vendor}>
                       <td>{v.vendor}</td>
-                      <td className="num">{unitMoney(v.latestUnitCost)} <span className="muted">/ {v.latestUnit ?? 'unit'}</span></td>
-                      <td className="num"><Change value={v.latestChangePercent} hike={v.priceHike} /></td>
+                      <td className="num">{perUnit(v.latestUnitPrice, ing.uom)}</td>
+                      <td className="num muted">{pack(v.latestPackSize, ing.uom)} for {unitMoney(v.latestPackPrice)}</td>
                       <td className="nowrap">{date(v.latestDate)}</td>
                     </tr>
                   ))}
@@ -218,9 +219,9 @@ function IngredientDrawer({ id, onClose }) {
             <h3>Details</h3>
             <div className="form-grid">
               <Field label="Name" className="span-2"><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
-              <Field label="Category"><CategoryInput id="drawer-categories" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></Field>
-              <Field label="Usable yield %" hint="After trim loss; new recipe lines start at this Use %">
-                <input className="input num" inputMode="decimal" value={form.defaultYieldPercent} onChange={(e) => setForm({ ...form, defaultYieldPercent: e.target.value })} />
+              <Field label="Category"><CategoryInput value={form.category} onChange={(category) => setForm((f) => ({ ...f, category }))} /></Field>
+              <Field label="Unit of measurement" hint="Pack sizes and recipe amounts are in this unit. Changing it doesn’t convert them.">
+                <UomInput value={form.uom} onChange={(uom) => setForm((f) => ({ ...f, uom }))} required />
               </Field>
             </div>
             {formError && <Notice kind="error">{formError}</Notice>}
@@ -255,7 +256,7 @@ function IngredientDrawer({ id, onClose }) {
             </div>
             {adding && (
               <form className="panel panel-pad" onSubmit={addPurchase} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <PurchaseFields value={purchase} onChange={setPurchase} />
+                <PurchaseFields value={purchase} onChange={setPurchase} uom={ing.uom} />
                 <div className="form-actions">
                   <button type="button" className="btn ghost" onClick={() => setAdding(false)}>Cancel</button>
                   <button className="btn primary" disabled={saving}>Record purchase</button>
@@ -264,20 +265,22 @@ function IngredientDrawer({ id, onClose }) {
             )}
             <div className="panel table-wrap">
               <table className="grid">
-                <thead><tr><th>Date</th><th>Vendor</th><th className="num">Qty</th><th className="num">Unit cost</th><th className="num">Total</th><th className="num">Change</th><th><span className="visually-hidden">Actions</span></th></tr></thead>
+                <thead><tr><th>Date</th><th>Vendor</th><th className="num">Packs</th><th className="num">Pack size</th><th className="num">Pack price</th><th className="num">Per unit</th><th className="num">Total</th><th className="num" title="Price per unit vs the previous purchase, any store">Change</th><th><span className="visually-hidden">Actions</span></th></tr></thead>
                 <tbody>
                   {data.purchases.map((p) => (
                     <tr key={p.id}>
                       <td className="nowrap">{date(p.date)}</td>
                       <td>{p.vendor ?? '—'}{p.receiptId && <> <Link to={`/receipts/${p.receiptId}`} className="muted" style={{ fontSize: '0.85rem' }}>Receipt</Link></>}</td>
-                      <td className="num">{qty(p.quantity)} {p.unit}</td>
+                      <td className="num">{qty(p.quantity)}</td>
+                      <td className="num nowrap">{pack(p.packSize, ing.uom)}</td>
                       <td className="num">{unitMoney(p.unitCost)}</td>
+                      <td className="num nowrap">{perUnit(p.unitPrice, ing.uom)}</td>
                       <td className="num">{money(p.totalCost)}</td>
-                      <td className="num"><Change value={p.changePercent} hike={p.priceHike} /></td>
+                      <td className="num" title={p.previous ? `vs ${perUnit(p.previous.unitPrice, ing.uom)}${p.previous.vendor ? ` at ${p.previous.vendor}` : ''} on ${date(p.previous.date)}` : undefined}><Change value={p.changePercent} hike={p.priceHike} /></td>
                       <td><button className="icon-btn" aria-label={`Remove purchase from ${date(p.date)}`} onClick={() => removePurchase(p.id)}><Icon.trash /></button></td>
                     </tr>
                   ))}
-                  {!data.purchases.length && <tr><td colSpan={7} className="muted">No purchases yet.</td></tr>}
+                  {!data.purchases.length && <tr><td colSpan={9} className="muted">No purchases yet.</td></tr>}
                 </tbody>
               </table>
             </div>

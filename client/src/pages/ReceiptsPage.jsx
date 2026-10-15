@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api, imageForm, notifyDataChanged } from '../api.js';
 import { useApi } from '../hooks.js';
-import { date, dateTime, money, qty, unitMoney } from '../format.js';
+import { date, dateTime, money, pack, qty, unitMoney } from '../format.js';
 import ImageGallery from '../components/ImageGallery.jsx';
 import ReviewLinesTable, { toRow, toPurchaseItem, savedMessage } from '../components/ReviewLines.jsx';
 import { Modal, Notice, Spinner, useToast } from '../components/ui.jsx';
@@ -125,21 +125,22 @@ export function ReceiptDetailPage() {
         <div className="table-wrap">
         <table className="grid">
           <thead>
-            <tr><th>Ingredient</th><th>Category</th><th className="num">Qty</th><th className="num">Unit cost</th><th className="num">Total</th></tr>
+            <tr><th>Ingredient</th><th>Category</th><th className="num">Qty</th><th className="num">Pack size</th><th className="num">Pack price</th><th className="num">Total</th></tr>
           </thead>
           <tbody>
             {r.purchases.map((p) => (
               <tr key={p.id}>
                 <td><Link to={`/ingredients?open=${p.ingredientId}`} style={{ color: 'inherit', fontWeight: 600 }}>{p.ingredientName}</Link></td>
                 <td>{p.category ?? '—'}</td>
-                <td className="num">{qty(p.quantity)} {p.unit}</td>
+                <td className="num">{qty(p.quantity)}</td>
+                <td className="num nowrap">{pack(p.packSize, p.uom)}</td>
                 <td className="num">{unitMoney(p.unitCost)}</td>
                 <td className="num">{money(p.totalCost)}</td>
               </tr>
             ))}
-            {!r.purchases.length && <tr><td colSpan={5} className="muted">Nothing from this receipt has been saved yet.</td></tr>}
+            {!r.purchases.length && <tr><td colSpan={6} className="muted">Nothing from this receipt has been saved yet.</td></tr>}
           </tbody>
-          {r.purchases.length > 0 && <tfoot><tr><td colSpan={4}>Total</td><td className="num">{money(r.savedTotal)}</td></tr></tfoot>}
+          {r.purchases.length > 0 && <tfoot><tr><td colSpan={5}>Total</td><td className="num">{money(r.savedTotal)}</td></tr></tfoot>}
         </table>
         </div>
       </section>

@@ -10,19 +10,23 @@ import RecipeBuilder from './pages/RecipeBuilder.jsx';
 import EventsPage from './pages/EventsPage.jsx';
 import EventPlanner from './pages/EventPlanner.jsx';
 import ReceiptsPage, { ReceiptDetailPage } from './pages/ReceiptsPage.jsx';
+import BackupPage from './pages/BackupPage.jsx';
 
 function QuickAdd({ onClose }) {
   const [tab, setTab] = useState('receipt');
   return (
     <Modal title="Quick add" onClose={onClose}>
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { value: 'receipt', label: 'Import receipt' },
-          { value: 'manual', label: 'New ingredient' },
-        ]}
-      />
+      <div className="quick-add-tabs">
+        <Tabs
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { value: 'receipt', label: 'Import receipt' },
+            { value: 'manual', label: 'New ingredient' },
+          ]}
+        />
+        <Link to="/recipes/new" className="tab" onClick={onClose}>New recipe</Link>
+      </div>
       {tab === 'manual' ? <NewIngredientForm onDone={onClose} /> : <ReceiptImportForm onDone={onClose} />}
     </Modal>
   );
@@ -39,10 +43,11 @@ export default function App() {
             <span className="brand-name">Kitchen Cost</span>
           </Link>
           <div className="nav">
-            <NavLink to="/ingredients"><Icon.database /> Database</NavLink>
-            <NavLink to="/receipts"><Icon.receipt /> Receipts</NavLink>
+            <NavLink to="/ingredients"><Icon.database /> Ingredients</NavLink>
             <NavLink to="/recipes"><Icon.recipe /> Recipes</NavLink>
             <NavLink to="/events"><Icon.calendar /> Events</NavLink>
+            <NavLink to="/receipts"><Icon.receipt /> Receipts</NavLink>
+            <NavLink to="/backup"><Icon.archive /> Backup</NavLink>
           </div>
         </nav>
         <div className="main">
@@ -63,6 +68,7 @@ export default function App() {
             <Route path="/recipes/:id" element={<RecipeBuilder />} />
             <Route path="/events" element={<EventsPage />} />
             <Route path="/events/:id" element={<EventPlanner />} />
+            <Route path="/backup" element={<BackupPage />} />
             <Route path="*" element={<main className="page"><div className="panel empty"><h2>Page not found</h2><Link className="btn" to="/ingredients">Go to the database</Link></div></main>} />
           </Routes>
         </div>

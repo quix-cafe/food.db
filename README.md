@@ -47,7 +47,7 @@ docker compose logs -f app     # follow the server log
 git pull && docker compose up -d --build   # update to the latest version
 ```
 
-Your data lives in two Docker volumes: `pgdata` (the database) and `uploads` (recipe and receipt photos). They survive restarts and rebuilds. `docker compose down -v` **deletes them**.
+Your data lives in Docker volumes: `pgdata` (the database), `uploads` (recipe and receipt photos) and `backups` (automatic copies made before a restore). They survive restarts and rebuilds. `docker compose down -v` **deletes them**, so download a backup first.
 
 ## Option 2: Development setup (Node.js + Docker database)
 
@@ -122,6 +122,7 @@ Settings are read from `.env` in the project root (copy `.env.example`):
 | `TEST_DATABASE_URL` | none | Database used by `npm test`; **its contents are deleted on every run** |
 | `PORT` | `3000` | API / app port |
 | `UPLOAD_DIR` | `data/uploads` | Where photos are stored (relative to the project root) |
+| `BACKUP_DIR` | `data/backups` | Where automatic pre-restore copies are kept |
 | `PRICE_HIKE_THRESHOLD` | `10` | Percent increase that flags a vendor price hike |
 
 ## Importing receipts
@@ -138,15 +139,18 @@ Nothing is saved until you tick lines on the review screen. If you rename a line
 
 ## Backups
 
-```bash
-docker compose exec -T db pg_dump -U kitchen kitchen > kitchen-backup.sql   # database
-docker compose cp app:/app/data/uploads ./uploads-backup                     # photos
-```
+Open **Backup** in the sidebar.
 
-To restore the database into a fresh install:
+- **Download backup** saves one `.tar.gz` file with everything: ingredients and price history, receipt names, receipts, recipes, events and all photos.
+- **Restore** uploads a backup and shows what's in it next to what's in the app now. Nothing changes until you confirm. A restore replaces all data.
+- Before each restore, the current data is saved automatically. The last 10 copies are listed under **Automatic copies**, where you can download them. In Docker they're kept in the `backups` volume (`BACKUP_DIR` elsewhere).
+
+You can restore a backup made by an older version of the app. A backup from a newer version is refused until you update.
+
+You can still use the database tools directly if you prefer. This copies the data but not the photos:
 
 ```bash
-docker compose exec -T db psql -U kitchen kitchen < kitchen-backup.sql
+docker compose exec -T db pg_dump -U kitchen kitchen > kitchen-backup.sql
 ```
 
 ## Troubleshooting

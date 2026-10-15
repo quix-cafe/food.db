@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 import { HttpError } from './validate.js';
 
-const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
+export const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 /** Resolved lazily so tests can point UPLOAD_DIR at a temp dir before first use. */
 export const uploadDir = () => path.resolve(repoRoot, process.env.UPLOAD_DIR ?? 'data/uploads');

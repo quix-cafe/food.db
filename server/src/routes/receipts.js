@@ -102,8 +102,8 @@ async function getReceipt(id) {
   const [images, purchases, pending] = await Promise.all([
     listImages({ query }, 'receipt', [id]),
     query(
-      `SELECT p.id, p.ingredient_id AS "ingredientId", i.name AS "ingredientName", i.category,
-              p.quantity, p.unit, p.unit_cost AS "unitCost", p.total_cost AS "totalCost"
+      `SELECT p.id, p.ingredient_id AS "ingredientId", i.name AS "ingredientName", i.category, i.uom,
+              p.quantity, coalesce(p.pack_size, 1) AS "packSize", p.unit_cost AS "unitCost", p.total_cost AS "totalCost"
        FROM ingredient_purchases p JOIN ingredients i ON i.id = p.ingredient_id
        WHERE p.receipt_id = $1 ORDER BY p.created_at, lower(i.name)`,
       [id],

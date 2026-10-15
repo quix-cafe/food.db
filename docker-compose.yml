@@ -24,11 +24,14 @@ services:
       DATABASE_URL: postgres://kitchen:kitchen@db:5432/kitchen
       PORT: 3000
       UPLOAD_DIR: /app/data/uploads
+      BACKUP_DIR: /app/data/backups
     volumes:
       - uploads:/app/data/uploads
+      - backups:/app/data/backups
     ports:
       - "3000:3000"
 
 volumes:
   pgdata:
   uploads:
+  backups:
