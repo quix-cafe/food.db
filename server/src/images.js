@@ -6,6 +6,7 @@ import { mkdir, writeFile, rm, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import multer from 'multer';
+import { runAsTestData } from './db.js';
 import { HttpError } from './validate.js';
 
 export const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -15,10 +16,14 @@ export const uploadDir = () => path.resolve(repoRoot, process.env.UPLOAD_DIR ?? 
 
 export const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
-export const uploadImages = multer({
+const multerImages = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_IMAGE_BYTES, files: 20, fieldSize: 2 * 1024 * 1024 },
 }).array('images', 20);
+// multer finishes in the request stream's callbacks, outside the test-mode context app.js set
+// up, so re-enter it for the route handler.
+export const uploadImages = (req, res, next) =>
+  multerImages(req, res, (err) => (req.testData ? runAsTestData(() => next(err)) : next(err)));
 
 /** Identify the format from the file's first bytes, not its name or claimed type. */
 function sniff(buf) {

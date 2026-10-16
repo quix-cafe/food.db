@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
 import { useApi } from '../hooks.js';
 import { todayIso } from '../format.js';
-import { Field, Icon, Notice, Spinner } from '../components/ui.jsx';
+import { Field, Icon, Notice, Spinner, TestBadge } from '../components/ui.jsx';
 
 function DateBlock({ iso }) {
   const [y, m, d] = iso.split('-').map(Number);
@@ -53,7 +53,7 @@ export default function EventsPage() {
               <Link key={e.id} to={`/events/${e.id}`} className={`event-row ${e.date < today ? 'past' : ''}`}>
                 <DateBlock iso={e.date} />
                 <div>
-                  <h3>{e.name}</h3>
+                  <h3>{e.name} <TestBadge item={e} /></h3>
                   <span className="muted">{new Date(e.date + 'T00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</span>
                 </div>
                 <span className="muted">

@@ -193,6 +193,7 @@ export function summarizeEvent(recipes = [], amounts = {}) {
           blendId: line.blendId ?? null,
           name: line.name,
           category: line.category ?? null,
+          vendor: line.vendor ?? null,
           uom: line.uom ?? null,
           packSize: toDecimal(line.packSize)?.toString() ?? null,
           packPrice: toDecimal(line.packPrice)?.toString() ?? null,

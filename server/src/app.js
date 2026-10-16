@@ -12,9 +12,11 @@ import receipts from './routes/receipts.js';
 import images from './routes/images.js';
 import backup from './routes/backup.js';
 import blends from './routes/blends.js';
+import testData from './routes/testdata.js';
+import exportRoutes from './routes/export.js';
 import multer from 'multer';
 import { HttpError } from './validate.js';
-import { query } from './db.js';
+import { query, runAsTestData } from './db.js';
 import { embedded } from './embedded.js';
 
 const clientDist = fileURLToPath(new URL('../../client/dist/', import.meta.url));
@@ -31,6 +33,13 @@ export function createApp() {
       res.status(503).json({ ok: false, error: 'Database unreachable' });
     }
   });
+  // Test mode (the client sends X-Test-Data: 1): whatever a request adds is marked test data.
+  // Not for backup/restore or clearing, which handle data wholesale.
+  app.use('/api', (req, _res, next) => {
+    const test = req.get('x-test-data') === '1' && !/^\/(backup|test-data)(\/|$)/.test(req.path);
+    req.testData = test;
+    return test ? runAsTestData(next) : next();
+  });
   app.use('/api/ingredients', ingredients);
   app.use('/api/recipes', recipes);
   app.use('/api/events', events);
@@ -39,6 +48,8 @@ export function createApp() {
   app.use('/api/images', images);
   app.use('/api/backup', backup);
   app.use('/api/blends', blends);
+  app.use('/api/test-data', testData);
+  app.use('/api/export', exportRoutes);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
   // In production the built SPA is served from here; in dev Vite proxies /api instead.

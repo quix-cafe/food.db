@@ -3,10 +3,14 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
 import { useApi } from '../hooks.js';
 import { isLabor } from '@kitchen/shared';
-import { date, money, pack, qty, toDecimal } from '../format.js';
-import { Field, Icon, Modal, Notice, Spinner, Tabs, useToast } from '../components/ui.jsx';
+import { Decimal, date, money, pack, qty, toDecimal } from '../format.js';
+import { Field, Icon, Modal, Notice, Spinner, Tabs, TestBadge, useToast } from '../components/ui.jsx';
 
 const isInt = (v) => /^\d+$/.test(String(v).trim());
+const optional = (v) => (v == null ? '' : String(v));
+const blankOrInt = (v) => v.trim() === '' || isInt(v);
+const blankOrAmount = (v) => v.trim() === '' || (toDecimal(v.replace(/[$,]/g, ''))?.gte(0) ?? false);
+const amountOf = (v) => (v.trim() === '' ? '' : v.replace(/[$,]/g, '').trim());
 
 export default function EventPlanner() {
   const { id } = useParams();
@@ -29,9 +33,14 @@ export default function EventPlanner() {
         if (stale) return;
         const f = {
           name: ev.name,
+          isTest: ev.isTest,
           date: ev.date,
           guestCount: ev.guestCount == null ? '' : String(ev.guestCount),
           servings: Object.fromEntries(ev.recipes.map((r) => [r.recipeId, String(r.expectedServings)])),
+          actualGuests: optional(ev.actualGuests),
+          actualRevenue: optional(ev.actualRevenue),
+          actualCost: optional(ev.actualCost),
+          notes: ev.notes ?? '',
         };
         lastSaved.current = JSON.stringify(f);
         setForm(f);
@@ -48,7 +57,10 @@ export default function EventPlanner() {
     const problem = !form.name.trim() ? 'Give the event a name' :
       !form.date ? 'Pick a date' :
       form.guestCount !== '' && !isInt(form.guestCount) ? 'Guests must be a whole number' :
-      Object.values(form.servings).some((s) => !isInt(s)) ? 'Servings must be whole numbers' : null;
+      Object.values(form.servings).some((s) => !isInt(s)) ? 'Servings must be whole numbers' :
+      !blankOrInt(form.actualGuests) ? 'Actual guests must be a whole number' :
+      !blankOrAmount(form.actualRevenue) ? 'Actual revenue must be an amount' :
+      !blankOrAmount(form.actualCost) ? 'Actual spend must be an amount' : null;
     if (problem) {
       setStatus('invalid');
       setSaveError(problem);
@@ -66,6 +78,10 @@ export default function EventPlanner() {
             date: form.date,
             guestCount: form.guestCount,
             recipes: Object.entries(form.servings).map(([recipeId, expectedServings]) => ({ recipeId, expectedServings })),
+            actualGuests: form.actualGuests,
+            actualRevenue: amountOf(form.actualRevenue),
+            actualCost: amountOf(form.actualCost),
+            notes: form.notes,
           },
         });
         lastSaved.current = snapshot;
@@ -108,7 +124,7 @@ export default function EventPlanner() {
       <div className="page-head">
         <div>
           <Link to="/events" className="muted">Events</Link>
-          <h1>{form.name || 'Untitled event'}</h1>
+          <h1>{form.name || 'Untitled event'}<TestBadge item={form} /></h1>
         </div>
         <div className="form-actions" style={{ alignItems: 'center' }}>
           <span className="save-state" role="status" style={status === 'invalid' || status === 'error' ? { color: 'var(--tomato)' } : undefined}>
@@ -172,11 +188,13 @@ export default function EventPlanner() {
       </section>
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Tabs value={tab} onChange={setTab} tabs={[{ value: 'financials', label: 'Financials' }, { value: 'shopping', label: 'Shopping list' }]} />
+        <Tabs value={tab} onChange={setTab} tabs={[{ value: 'financials', label: 'Financials' }, { value: 'shopping', label: 'Shopping list' }, { value: 'results', label: 'After the event' }]} />
         {summary.error && <Notice kind="error">{summary.error.message}</Notice>}
         {!s ? <Spinner /> : !s.recipes.length ? (
           <div className="panel empty"><p>Select recipes above to project costs and build the shopping list.</p></div>
-        ) : tab === 'financials' ? <Financials s={s} /> : <ShoppingList s={s} eventId={id} title={form.name || 'Untitled event'} date={form.date} />}
+        ) : tab === 'financials' ? <Financials s={s} />
+          : tab === 'results' ? <Results s={s} form={form} set={set} />
+          : <ShoppingList s={s} eventId={id} title={form.name || 'Untitled event'} date={form.date} guests={form.guestCount} />}
         {s?.warnings.length > 0 && <Notice>{s.warnings.map((w) => <div key={w}>{w}</div>)}</Notice>}
       </section>
 
@@ -238,6 +256,118 @@ function Financials({ s }) {
   );
 }
 
+/**
+ * What actually happened, typed in after the event, next to the plan. Profit uses the actual
+ * spend when it's given, otherwise the projected cost.
+ */
+function Results({ s, form, set }) {
+  const dec = (v) => (v.trim() === '' ? null : toDecimal(v.replace(/[$,]/g, '')));
+  const guests = isInt(form.guestCount) ? new Decimal(form.guestCount) : null;
+  const actualGuests = isInt(form.actualGuests) ? new Decimal(form.actualGuests) : null;
+  const revenue = dec(form.actualRevenue);
+  const spend = dec(form.actualCost);
+  const plannedCost = toDecimal(s.totalCost);
+  const plannedRevenue = toDecimal(s.revenue);
+  const plannedProfit = toDecimal(s.profit);
+  const cost = spend ?? (revenue ? plannedCost : null);
+  const profit = revenue && cost ? revenue.minus(cost) : null;
+  const margin = (p, r) => (p && r && !r.isZero() ? p.div(r).times(100) : null);
+  const perGuest = (r, g) => (r && g && !g.isZero() ? r.div(g) : null);
+  const pct = (d) => (d === null ? '—' : `${d.toFixed(1)}%`);
+  const count = (d) => (d === null ? '—' : d.toString());
+  const signed = (d, fmt) => (d === null ? '—' : `${d.gt(0) ? '+' : d.lt(0) ? '−' : ''}${fmt(d.abs())}`);
+  const diff = (a, b) => (a === null || b === null ? null : a.minus(b));
+  // Higher is better for everything but cost.
+  const tone = (d, lowerIsBetter = false) => (d === null || d.isZero() ? '' : d.gt(0) !== lowerIsBetter ? 'better' : 'worse');
+  const rows = [
+    ['Guests', guests, actualGuests, count, false, (d) => d.toString()],
+    ['Revenue', plannedRevenue, revenue, money, false, money],
+    [spend ? 'Spend' : 'Cost (projected; enter the actual spend to compare)', plannedCost, spend, money, true, money],
+    ['Profit', plannedProfit, profit, money, false, money],
+    ['Margin', margin(plannedProfit, plannedRevenue), margin(profit, revenue), pct, false, (d) => `${d.toFixed(1)} pts`],
+    ['Revenue per guest', perGuest(plannedRevenue, guests), perGuest(revenue, actualGuests), (d) => (d === null ? '—' : money(d)), false, money],
+  ];
+  return (
+    <>
+      <section className="panel panel-pad">
+        <div className="form-grid">
+          <Field label="Actual guests"><input className="input num" inputMode="numeric" value={form.actualGuests} onChange={set('actualGuests')} placeholder={form.guestCount || ''} /></Field>
+          <Field label="Actual revenue"><input className="input num" inputMode="decimal" value={form.actualRevenue} onChange={set('actualRevenue')} placeholder="0.00" /></Field>
+          <Field label="Actual spend" hint={`Shopping list total: ${money(s.purchaseCost)}`}><input className="input num" inputMode="decimal" value={form.actualCost} onChange={set('actualCost')} placeholder="0.00" /></Field>
+          <Field label="Notes" className="span-2"><textarea className="input" rows={3} value={form.notes} onChange={set('notes')} placeholder="What sold out, what was left over, what to change next time…" /></Field>
+        </div>
+      </section>
+      <div className="panel table-wrap">
+        <table className="grid results-grid">
+          <thead><tr><th /><th className="num">Planned</th><th className="num">Actual</th><th className="num">Difference</th></tr></thead>
+          <tbody>
+            {rows.map(([label, planned, actual, fmt, lowerIsBetter, fmtDiff]) => {
+              const d = diff(actual, planned);
+              return (
+                <tr key={label}>
+                  <td>{label}</td>
+                  <td className="num">{planned === null ? '—' : fmt(planned)}</td>
+                  <td className="num" style={{ fontWeight: 650 }}>{actual === null ? '—' : fmt(actual)}</td>
+                  <td className={`num ${tone(d, lowerIsBetter)}`}>{signed(d, fmtDiff)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {revenue && !spend && <p className="muted">Profit uses the projected cost until you enter the actual spend.</p>}
+    </>
+  );
+}
+
+/**
+ * The shopping list as printed: one dense table grouped by category, with a box to tick
+ * per line. Labor isn't bought, so it's left off. Shown only in print (see styles.css).
+ */
+function PrintedList({ s, title, day, guests }) {
+  const lines = s.shoppingList.filter((l) => !isLabor(l));
+  const groups = new Map();
+  for (const l of lines) {
+    const key = l.blendId ? 'Spice blends to make' : l.category || 'Other';
+    groups.set(key, [...(groups.get(key) ?? []), l]);
+  }
+  const order = [...groups.keys()].sort((a, b) => (a === 'Other') - (b === 'Other') || a.localeCompare(b));
+  const total = lines.reduce((sum, l) => sum.plus(toDecimal(l.purchaseCost) ?? 0), new Decimal(0));
+  return (
+    <div className="print-only printed-list">
+      <h2>{title}: shopping list</h2>
+      <p>
+        {[day && date(day), guests && `${guests} guests`, `${lines.length} items`, `about ${money(total)}`].filter(Boolean).join(', ')}
+      </p>
+      <table>
+        <thead>
+          <tr><th aria-label="Got it" /><th>Item</th><th>Buy</th><th className="num">Needed</th><th className="num">Est.</th><th>Store</th><th>For</th></tr>
+        </thead>
+        {order.map((group) => (
+          <tbody key={group}>
+            <tr className="group"><th colSpan={7}>{group}</th></tr>
+            {groups.get(group).map((l) => (
+              <tr key={l.ingredientId ?? l.blendId}>
+                <td><span className="tick" /></td>
+                <td className="item">{l.name}</td>
+                <td className="nowrap">
+                  {l.blendId
+                    ? `${l.packsToBuy} batch${l.packsToBuy === '1' ? '' : 'es'} (${qty(l.packSize, 2)} tsp)`
+                    : l.packSize ? `${l.packsToBuy} × ${pack(l.packSize, l.uom, 2)}` : '—'}
+                </td>
+                <td className="num nowrap">{qty(l.amount, 2)} {l.uom}</td>
+                <td className="num">{l.purchaseCost ? money(l.purchaseCost) : '—'}</td>
+                <td>{l.vendor ?? ''}</td>
+                <td className="for">{l.recipes.join(', ')}</td>
+              </tr>
+            ))}
+          </tbody>
+        ))}
+      </table>
+    </div>
+  );
+}
+
 // Printing hides everything on the page except this list (see .printing in styles.css).
 function printShoppingList() {
   document.body.classList.add('printing');
@@ -288,14 +418,15 @@ function NeededInput({ line, eventId }) {
   );
 }
 
-function ShoppingList({ s, eventId, title, date: day }) {
+function ShoppingList({ s, eventId, title, date: day, guests }) {
   return (
     <div className="print-target" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <h2 className="print-only">{title}: shopping list{day ? `, ${date(day)}` : ''}</h2>
-        <button className="btn small no-print" style={{ marginLeft: 'auto' }} onClick={printShoppingList}><Icon.print /> Print</button>
+      <div className="list-actions no-print">
+        <a className="btn small" href={`/api/events/${eventId}/shopping-list.csv`} download><Icon.download /> Download CSV</a>
+        <button className="btn small" onClick={printShoppingList}><Icon.print /> Print</button>
       </div>
-    <div className="panel table-wrap">
+      <PrintedList s={s} title={title} day={day} guests={guests} />
+    <div className="panel table-wrap no-print">
       <table className="grid">
         <thead>
           <tr>

@@ -150,6 +150,22 @@ textarea.input { resize: vertical; font-size: 0.85rem; line-height: 1.4; }
 .badge.good { background: var(--basil-wash); color: var(--basil-dark); }
 .badge.warn { background: var(--tomato-wash); color: var(--tomato); }
 .badge.new { background: var(--saffron-wash); color: #7d5710; }
+.badge.test { background: transparent; border: 1px dashed currentColor; color: #7d5710; padding: 0 7px; vertical-align: middle; font-family: var(--font); }
+h1 .badge.test { font-size: 0.8rem; margin-left: 10px; }
+
+/* Test mode is on: a striped strip across the top so it's never forgotten. */
+.test-mode-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 7px 28px; font-size: 0.9rem; color: #5c400b;
+  background: repeating-linear-gradient(135deg, var(--saffron-wash) 0 14px, #f6e6bf 14px 28px);
+  border-bottom: 1px solid #ecd59b;
+}
+.test-mode-bar b { font-weight: 700; }
+.test-mode-bar .btn { margin-left: auto; }
+@media (max-width: 800px) { .test-mode-bar { padding: 7px 16px; } }
+.switch-row { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; }
+.switch-row input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--saffron); flex: none; }
+.test-counts { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .notice {
   display: flex; gap: 10px; align-items: flex-start;
@@ -414,12 +430,27 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
   body.printing .print-target, body.printing .print-target * { visibility: visible; }
   body.printing .print-target { position: absolute; inset: 0 auto auto 0; width: 100%; }
   body.printing .print-only { display: block; }
+  body.printing .print-target .no-print { display: none; }
   html:has(body.printing), body.printing { background: #fff; }
   body.printing .print-target { padding: 0 4px; }
   body.printing .no-print { display: none; }
   body.printing .panel { box-shadow: none; border-color: #999; }
   body.printing .table-wrap { overflow: visible; }
   body.printing tr.labor-row > td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  @page { margin: 12mm; }
+  /* The printed shopping list: small type, tight rows, a box to tick per line. */
+  .printed-list { font-size: 9pt; line-height: 1.25; color: #000; }
+  .printed-list h2 { font-size: 13pt; margin: 0; }
+  .printed-list > p { margin: 1mm 0 3mm; color: #333; }
+  .printed-list table { width: 100%; border-collapse: collapse; }
+  .printed-list th, .printed-list td { padding: 1.2mm 2mm; text-align: left; vertical-align: top; border-bottom: 0.5pt solid #bbb; }
+  .printed-list thead th { font-size: 8pt; color: #333; border-bottom: 1pt solid #000; }
+  .printed-list .num { text-align: right; }
+  .printed-list tr { break-inside: avoid; }
+  .printed-list tr.group th { padding-top: 3mm; font-size: 9.5pt; border-bottom: 1pt solid #000; break-after: avoid; }
+  .printed-list .item { font-weight: 650; }
+  .printed-list .for { color: #444; font-size: 8pt; }
+  .printed-list .tick { display: inline-block; width: 3mm; height: 3mm; border: 0.75pt solid #000; border-radius: 0.5mm; }
 }
 
 /* Labor lines: costed like ingredients, always last, tinted so they read as a different kind of cost. */
@@ -515,6 +546,9 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 .figure b { font-size: 2rem; font-weight: 780; font-stretch: 68%; line-height: 1.1; }
 .figure.profit b { color: var(--basil); }
 .figure.loss b { color: var(--tomato); }
+.list-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.results-grid td.better { color: var(--basil); font-weight: 650; }
+.results-grid td.worse { color: var(--tomato); font-weight: 650; }
 .save-state { font-size: 0.86rem; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
 .recipe-pick td { padding: 8px 12px; }
 .recipe-pick tr.off td:not(:first-child) { color: var(--muted); }

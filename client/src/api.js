@@ -1,5 +1,23 @@
 export class ApiError extends Error {}
 
+// Test mode (per browser): every request carries X-Test-Data, and whatever the server adds
+// while it's on is marked test data, removable in one go from the Backup page.
+const TEST_KEY = 'food.db:test-mode';
+const TEST_EVENT = 'food.db:test-mode';
+let testMode = (() => {
+  try { return localStorage.getItem(TEST_KEY) === '1'; } catch { return false; }
+})();
+export const isTestMode = () => testMode;
+export function setTestMode(on) {
+  testMode = on;
+  try { on ? localStorage.setItem(TEST_KEY, '1') : localStorage.removeItem(TEST_KEY); } catch { /* still on for this tab */ }
+  window.dispatchEvent(new Event(TEST_EVENT));
+}
+export const onTestModeChanged = (fn) => {
+  window.addEventListener(TEST_EVENT, fn);
+  return () => window.removeEventListener(TEST_EVENT, fn);
+};
+
 /** JSON fetch against /api; a FormData body is sent as multipart. Throws ApiError with the server's message. */
 export async function api(path, { method = 'GET', body } = {}) {
   const multipart = body instanceof FormData;
@@ -7,7 +25,10 @@ export async function api(path, { method = 'GET', body } = {}) {
   try {
     res = await fetch(`/api${path}`, {
       method,
-      headers: body !== undefined && !multipart ? { 'content-type': 'application/json' } : undefined,
+      headers: {
+        ...(body !== undefined && !multipart ? { 'content-type': 'application/json' } : {}),
+        ...(testMode ? { 'x-test-data': '1' } : {}),
+      },
       body: body === undefined || multipart ? body : JSON.stringify(body),
     });
   } catch {

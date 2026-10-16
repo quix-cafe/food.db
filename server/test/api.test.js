@@ -25,10 +25,10 @@ after(async () => {
   await pool?.end();
 });
 
-async function api(method, path, body) {
+async function api(method, path, body, headers = {}) {
   const res = await fetch(base + path, {
     method,
-    headers: body ? { 'content-type': 'application/json' } : {},
+    headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...headers },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = res.status === 204 ? null : await res.json();
@@ -289,4 +289,108 @@ test('spice blends: breakdown, use in a recipe as tsp, and an event batch line',
   assert.equal((await api('DELETE', `/ingredients/${paprika.id}`)).status, 409); // used by the blend
   const list = (await api('GET', '/blends?q=house')).data;
   assert.deepEqual(list.map((b) => b.name), ['House rub']);
+});
+
+test('test mode marks new data, and clearing it keeps whatever real data uses', { skip }, async () => {
+  const { mkdtemp, readdir } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  process.env.BACKUP_DIR = await mkdtemp(`${tmpdir()}/food.db-test-`);
+  const test = { 'x-test-data': '1' };
+  const purchase = (packSize, totalCost) => ({ date: '2026-06-01', vendor: 'Depot', quantity: 1, packSize, totalCost });
+
+  const rice = (await api('POST', '/ingredients', { name: 'Rice', category: 'Dry goods', uom: 'lb', purchase: purchase(10, '10') })).data;
+  assert.equal(rice.isTest, false);
+  // In test mode: a new ingredient, a newer purchase of a real one, a recipe and an event.
+  const oats = (await api('POST', '/ingredients', { name: 'Test oats', uom: 'lb', purchase: purchase(1, '3') }, test)).data;
+  const saffron = (await api('POST', '/ingredients', { name: 'Test saffron', uom: 'g', purchase: purchase(1, '9') }, test)).data;
+  assert.equal(oats.isTest, true);
+  assert.equal((await api('POST', `/ingredients/${rice.id}/purchases`, { ...purchase(10, '20'), date: '2026-07-01' }, test)).status, 201);
+  assert.equal((await api('GET', `/ingredients/${rice.id}`)).data.latestUnitPrice, '2.0000');
+  const porridge = (await api('POST', '/recipes', { name: 'Test porridge', baseServings: 1, lines: [{ ingredientId: oats.id, amount: 1 }] }, test)).data;
+  const ev = (await api('POST', '/events', { name: 'Test brunch', date: '2026-12-01', recipes: [{ recipeId: porridge.id, expectedServings: 2 }] }, test)).data;
+  assert.equal(porridge.isTest, true);
+  assert.equal(ev.isTest, true);
+  // A real recipe that uses a test ingredient keeps that ingredient.
+  const paella = (await api('POST', '/recipes', { name: 'Paella', baseServings: 4, lines: [{ ingredientId: saffron.id, amount: 1 }] })).data;
+  assert.equal(paella.isTest, false);
+
+  // Labor is never test data, even when added and re-rated in test mode.
+  const labor = (await api('POST', '/ingredients', { name: 'Labor', category: 'Labor', uom: 'hr', purchase: purchase(1, '20') }, test)).data;
+  assert.equal(labor.isTest, false);
+  assert.equal((await api('POST', `/ingredients/${labor.id}/purchases`, { ...purchase(1, '25'), date: '2026-07-01' }, test)).status, 201);
+
+  const preview = (await api('GET', '/test-data')).data;
+  assert.deepEqual(preview.deleted, { events: 1, recipes: 1, blends: 0, ingredients: 1, purchases: 1, receipts: 0 });
+  assert.deepEqual(preview.kept.ingredients, ['Test saffron']);
+  assert.equal((await api('GET', `/events/${ev.id}`)).status, 200); // a preview changes nothing
+
+  const cleared = (await api('POST', '/test-data/clear', undefined, test)).data;
+  assert.deepEqual(cleared.deleted, preview.deleted);
+  assert.ok((await readdir(process.env.BACKUP_DIR)).includes(cleared.snapshot));
+  assert.equal((await api('GET', `/events/${ev.id}`)).status, 404);
+  assert.equal((await api('GET', `/recipes/${porridge.id}`)).status, 404);
+  assert.equal((await api('GET', `/ingredients/${oats.id}`)).status, 404);
+  assert.equal((await api('GET', `/ingredients/${rice.id}`)).data.latestUnitPrice, '1.0000'); // back to the real price
+  assert.equal((await api('GET', `/recipes/${paella.id}`)).status, 200);
+  assert.equal((await api('GET', `/ingredients/${saffron.id}`)).data.isTest, true);
+  assert.equal((await api('GET', `/ingredients/${labor.id}`)).data.latestUnitPrice, '25.0000');
+});
+
+test('a database migrated before migrations 001–010 were squashed is recognised', { skip }, async () => {
+  const { migrate } = await import('../src/migrate.js');
+  const legacy = ['001_init.sql', '002_ingredient_aliases.sql', '003_receipts_and_images.sql', '004_receipt_lines.sql',
+    '005_used_multiplier_and_price.sql', '006_units_of_measure.sql', '007_drop_legacy_columns.sql', '008_event_amounts.sql',
+    '009_spice_blends.sql', '010_blend_servings.sql'];
+  await pool.query("DELETE FROM schema_migrations WHERE name = '001_schema.sql'");
+  await pool.query('INSERT INTO schema_migrations (name) SELECT unnest($1::text[])', [legacy]);
+  await migrate({ log: () => {} });
+  const { rows } = await pool.query('SELECT name FROM schema_migrations ORDER BY name');
+  assert.deepEqual(rows.map((r) => r.name), ['001_schema.sql', '011_test_data.sql', '012_labor_never_test.sql', '013_event_results.sql']);
+});
+
+test('event results: set with the event, kept when a save leaves them out, cleared when blank', { skip }, async () => {
+  const ev = (await api('POST', '/events', { name: 'Gala', date: '2026-09-01', guestCount: 40 })).data;
+  assert.equal(ev.actualGuests, null);
+  const base = { name: 'Gala', date: '2026-09-01', guestCount: 40 };
+  const saved = await api('PUT', `/events/${ev.id}`, { ...base, actualGuests: 38, actualRevenue: '1520.5', actualCost: '610', notes: 'Ran out of bread' });
+  assert.equal(saved.status, 200);
+  assert.deepEqual([saved.data.actualGuests, saved.data.actualRevenue, saved.data.actualCost, saved.data.notes], [38, '1520.50', '610.00', 'Ran out of bread']);
+  const renamed = (await api('PUT', `/events/${ev.id}`, { ...base, name: 'Autumn gala' })).data; // no results in the body
+  assert.deepEqual([renamed.name, renamed.actualGuests, renamed.actualRevenue], ['Autumn gala', 38, '1520.50']);
+  const cleared = (await api('PUT', `/events/${ev.id}`, { ...base, actualCost: '' })).data;
+  assert.equal(cleared.actualCost, null);
+  assert.equal(cleared.actualRevenue, '1520.50');
+  assert.equal((await api('PUT', `/events/${ev.id}`, { ...base, actualGuests: -1 })).status, 400);
+});
+
+test('CSV exports: ingredients, price history and an event shopping list', { skip }, async () => {
+  const csv = async (path) => {
+    const res = await fetch(base + path);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type'), /text\/csv/);
+    assert.match(res.headers.get('content-disposition'), /attachment; filename=".+\.csv"/);
+    const bytes = Buffer.from(await res.arrayBuffer());
+    assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf]); // UTF-8 BOM, for Excel
+    return bytes.subarray(3).toString('utf8').trimEnd().split('\r\n');
+  };
+  await api('POST', '/ingredients', { name: '=Sum trick, "quoted"', uom: 'each', purchase: { date: '2026-03-01', vendor: 'Depot', quantity: 1, packSize: 1, totalCost: '2' } });
+
+  const ingredients = await csv('/export/ingredients.csv');
+  assert.equal(ingredients[0], 'Ingredient,Category,Unit,Unit price,Pack size,Pack price,Vendor,Last bought,Test data,ID');
+  // A formula-looking name is defused and quoted; numbers are left alone.
+  assert.ok(ingredients.some((l) => l.startsWith(`"'=Sum trick, ""quoted""",,each,2.0000,1.0000,2.0000,Depot,2026-03-01,,`)));
+
+  const history = await csv('/export/purchases.csv');
+  assert.equal(history[0], 'Date,Ingredient,Category,Vendor,Packs bought,Pack size,Unit,Pack price,Total,Unit price,Receipt ID,Test data,Ingredient ID');
+  const { rows } = await pool.query('SELECT count(*)::int AS n FROM ingredient_purchases');
+  assert.equal(history.length - 1, rows[0].n);
+
+  const flour = (await api('GET', '/ingredients?q=flour')).data[0];
+  const recipe = (await api('POST', '/recipes', { name: 'Flatbread', baseServings: 4, lines: [{ ingredientId: flour.id, amount: 2 }] })).data;
+  const ev = (await api('POST', '/events', { name: 'Bread & Co. night', date: '2026-11-02', recipes: [{ recipeId: recipe.id, expectedServings: 8 }] })).data;
+  const res = await fetch(`${base}/events/${ev.id}/shopping-list.csv`);
+  assert.match(res.headers.get('content-disposition'), /filename="bread-co-night-2026-11-02-shopping-list.csv"/);
+  const list = (await res.text()).trimEnd().split('\r\n'); // text() drops the BOM
+  assert.equal(list[0], 'Ingredient,Category,Needed,Unit,Packs to buy,Pack size,Total cost,Used cost,Leftover,Vendor,Used in');
+  assert.match(list[1], /^Flour,Dry goods,4\.0000,lb,\d+,.*,Flatbread$/); // 2 lb × 8/4 servings
 });

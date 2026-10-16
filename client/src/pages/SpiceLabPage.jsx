@@ -7,7 +7,7 @@ import { useApi, useLeaveGuard, useRowReorder } from '../hooks.js';
 import { Decimal, money, qty, toDecimal, unitMoney } from '../format.js';
 import { OTHER, SERIES } from '../palette.js';
 import IngredientCombobox from '../components/IngredientCombobox.jsx';
-import { Field, Icon, LeaveModal, Modal, Notice, Spinner, useToast } from '../components/ui.jsx';
+import { Field, Icon, LeaveModal, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
 
 /** A spice keeps the color of its position in the blend; past the palette it's "Other". */
 const colorAt = (i) => SERIES[i] ?? OTHER;
@@ -87,7 +87,7 @@ export default function SpiceLabPage() {
           <article key={b.id} className="panel recipe-card blend-card">
             <BlendPie items={b.items} totalTsp={b.totalTsp} size={84} interactive={false} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-              <h3><Link to={`/spice-lab/${b.id}`}>{b.name}</Link></h3>
+              <h3><Link to={`/spice-lab/${b.id}`}>{b.name}</Link> <TestBadge item={b} /></h3>
               <span className="muted">{b.items.length} spice{b.items.length === 1 ? '' : 's'}, {qty(b.totalTsp)} tsp per batch</span>
               <div className="blend-swatches">
                 {b.items.slice(0, SERIES.length).map((it, i) => <span key={i}><i style={{ background: colorAt(i) }} />{it.name}</span>)}
@@ -108,6 +108,7 @@ const fromServer = (b) => ({
   name: b.name,
   notes: b.notes ?? '',
   servings: String(b.servings),
+  isTest: b.isTest,
   items: b.items.map((it) => ({
     key: nextKey++,
     ingredientId: it.ingredientId,
@@ -238,7 +239,7 @@ export function BlendEditor() {
       <div className="page-head">
         <div>
           <Link to="/spice-lab" className="muted">Spice Lab</Link>
-          <h1>{form.name || 'New blend'}</h1>
+          <h1>{form.name || 'New blend'}<TestBadge item={form} /></h1>
         </div>
         <div className="form-actions">
           {id && <button className="btn ghost" onClick={() => setDeleting(true)}><Icon.trash /> Delete</button>}

@@ -160,6 +160,11 @@ export function Field({ label, hint, children, className = '' }) {
   );
 }
 
+/** Marks a record added in test mode. */
+export function TestBadge({ item }) {
+  return item?.isTest ? <span className="badge test" title="Test data: removed when you clear test data on the Backup page">Test</span> : null;
+}
+
 export function Notice({ kind = 'warn', children }) {
   if (!children || (Array.isArray(children) && !children.length)) return null;
   return (

@@ -36,10 +36,10 @@ after(async () => {
   if (dir) await rm(dir, { recursive: true, force: true });
 });
 
-async function api(method, p, body) {
+async function api(method, p, body, headers = {}) {
   const res = await fetch(base + p, {
     method,
-    headers: body && !(body instanceof FormData) ? { 'content-type': 'application/json' } : {},
+    headers: { ...(body && !(body instanceof FormData) ? { 'content-type': 'application/json' } : {}), ...headers },
     body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
   });
   const data = res.status === 204 ? null : await res.json();
@@ -179,4 +179,12 @@ test('receipt lines skipped during review can be saved later', { skip }, async (
   assert.equal((await api('DELETE', `/ingredients/${lemon.ingredientId}/purchases/${lemon.id}`)).status, 204);
   detail = (await api('GET', `/receipts/${receipt.id}`)).data;
   assert.deepEqual(detail.pendingLines.map((l) => [l.name, l.match?.name, l.match?.via]), [['LMNS', 'Lemons', 'alias'], ['DONATION', undefined, undefined]]);
+});
+
+test('a receipt uploaded with photos in test mode is test data', { skip }, async () => {
+  const created = await api('POST', '/receipts', form([['r.jpg', JPEG, 'image/jpeg']], { vendor: 'Test store', date: '2026-10-03', source: '{}' }), { 'x-test-data': '1' });
+  assert.equal(created.status, 201);
+  assert.equal((await api('GET', '/receipts')).data.find((r) => r.id === created.data.id).isTest, true);
+  const real = await api('POST', '/receipts', form([['r.jpg', JPEG, 'image/jpeg']], { vendor: 'Real store', date: '2026-10-03', source: '{}' }));
+  assert.equal((await api('GET', '/receipts')).data.find((r) => r.id === real.data.id).isTest, false);
 });

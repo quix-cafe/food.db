@@ -5,10 +5,12 @@ import { useApi, useLeaveGuard } from '../hooks.js';
 import { date, dateTime, money, pack, perUnit, qty, toDecimal, unitMoney } from '../format.js';
 import ImageGallery from '../components/ImageGallery.jsx';
 import ReviewLinesTable, { rowsSnapshot, toRow, toPurchaseItem, savedMessage } from '../components/ReviewLines.jsx';
-import { LeaveModal, Modal, Notice, Spinner, useToast } from '../components/ui.jsx';
+import { Icon, LeaveModal, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
+import { ReceiptImportForm } from '../components/forms.jsx';
 
 export default function PurchasesPage() {
   const { data, error, loading } = useApi('/receipts');
+  const [importing, setImporting] = useState(false);
   return (
     <main className="page">
       <div className="page-head">
@@ -16,13 +18,20 @@ export default function PurchasesPage() {
           <h1>Purchases</h1>
           <p>Every shopping trip saved from a receipt, with its photos and the purchases it recorded.</p>
         </div>
+        <button className="btn primary" onClick={() => setImporting(true)}><Icon.plus /> Import receipt</button>
       </div>
+      {importing && (
+        <Modal title="Import receipt" onClose={() => setImporting(false)}>
+          <ReceiptImportForm onDone={() => setImporting(false)} />
+        </Modal>
+      )}
       {error && <Notice kind="error">{error.message}</Notice>}
       {loading && !data && <Spinner />}
       {data && !data.length && (
         <div className="panel empty">
           <h2>No purchases yet</h2>
-          <p>Use Quick add to import a receipt. When you save its lines, the receipt and its photos are kept here.</p>
+          <p>Import a receipt to get started. When you save its lines, the receipt and its photos are kept here.</p>
+          <button className="btn primary" onClick={() => setImporting(true)}>Import receipt</button>
         </div>
       )}
       {data?.length > 0 && (
@@ -41,7 +50,7 @@ export default function PurchasesPage() {
                       {r.images.length > 3 && <span className="muted">+{r.images.length - 3}</span>}
                     </div>
                   </td>
-                  <td><Link to={`/purchases/${r.id}`} style={{ fontWeight: 650, color: 'inherit' }}>{r.vendor ?? 'Unknown vendor'}</Link></td>
+                  <td><Link to={`/purchases/${r.id}`} style={{ fontWeight: 650, color: 'inherit' }}>{r.vendor ?? 'Unknown vendor'}</Link> <TestBadge item={r} /></td>
                   <td className="nowrap">{date(r.date)}</td>
                   <td className="num">{r.lineCount}{r.pendingCount > 0 && <> <span className="badge new">{r.pendingCount} not saved</span></>}</td>
                   <td className="num">{money(r.savedTotal)}</td>
@@ -94,7 +103,7 @@ export function ReceiptDetailPage() {
       <div className="page-head">
         <div>
           <Link to="/purchases" className="muted">Purchases</Link>
-          <h1>{r.vendor ?? 'Unknown vendor'}</h1>
+          <h1>{r.vendor ?? 'Unknown vendor'}<TestBadge item={r} /></h1>
           <p>
             {date(r.date)}. {r.lineCount} {r.lineCount === 1 ? 'line' : 'lines'} saved for {money(r.savedTotal)}
             {r.pendingLines.length > 0 ? `, ${r.pendingLines.length} not saved yet` : ''}.

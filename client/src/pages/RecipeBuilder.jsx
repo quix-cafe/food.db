@@ -6,7 +6,7 @@ import { useLeaveGuard, useRowReorder } from '../hooks.js';
 import ImageGallery, { useLocalImages } from '../components/ImageGallery.jsx';
 import { date, money, pack, percent, perUnit, qty, unitMoney, toDecimal } from '../format.js';
 import IngredientCombobox from '../components/IngredientCombobox.jsx';
-import { Field, Icon, LeaveModal, Notice, Spinner, useToast } from '../components/ui.jsx';
+import { Field, Icon, LeaveModal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
 import { AddToEventModal } from './RecipeGallery.jsx';
 
 let nextKey = 1;
@@ -18,6 +18,7 @@ const fromServer = (r) => ({
   totalYield: r.totalYield ? toDecimal(r.totalYield).toString() : '',
   yieldUnit: r.yieldUnit ?? '',
   targetMargin: toDecimal(r.targetMargin).toString(),
+  isTest: r.isTest,
   lines: laborLast(r.lines).map((l) => ({
     key: nextKey++,
     ingredientId: l.ingredientId,
@@ -217,7 +218,7 @@ export default function RecipeBuilder() {
       <div className="page-head">
         <div>
           <Link to="/recipes" className="muted">Recipes</Link>
-          <h1>{form.name || (id ? 'Untitled recipe' : 'New recipe')}</h1>
+          <h1>{form.name || (id ? 'Untitled recipe' : 'New recipe')}<TestBadge item={form} /></h1>
         </div>
         <div className="form-actions">
           {id && <button className="btn" onClick={() => setAddToEvent(true)}>Add to event</button>}

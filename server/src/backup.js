@@ -18,6 +18,7 @@ import pg from 'pg';
 import { pool, tx } from './db.js';
 import { repoRoot, uploadDir } from './images.js';
 import { HttpError } from './validate.js';
+import { currentNames } from './migrate.js';
 
 const APP = 'food.db';
 const FORMAT = 1;
@@ -31,7 +32,7 @@ export const TABLES = [
 ];
 
 const IMAGE_FILE = /^[A-Za-z0-9-]+\.(jpg|png|webp|gif)$/;
-const SNAPSHOT_FILE = /^before-restore-[0-9TZ-]+\.tar\.gz$/;
+const SNAPSHOT_FILE = /^before-(restore|clearing-test-data)-[0-9TZ-]+\.tar\.gz$/;
 const KEEP_SNAPSHOTS = 10;
 
 export const backupDir = () => path.resolve(repoRoot, process.env.BACKUP_DIR ?? 'data/backups');
@@ -159,14 +160,15 @@ async function validate(data, files) {
     throw new HttpError(400, 'That archive isn’t a food.db backup.');
   }
   if (data.format !== FORMAT) throw new HttpError(400, `Backup format ${data.format} isn’t supported by this version.`);
+  // Restore fills in anything a backup from 007 on lacks (missing columns take their defaults).
+  const migrations = currentNames(data.migrations, MIN_MIGRATION);
+  if (!migrations) {
+    throw new HttpError(409, 'This backup is from a version older than the units-of-measure update and can’t be restored.');
+  }
   const known = new Set(await currentMigrations());
-  const newer = data.migrations.filter((m) => !known.has(m));
+  const newer = migrations.filter((m) => !known.has(m));
   if (newer.length) {
     throw new HttpError(409, `This backup was made by a newer version of food.db (it includes ${newer.join(', ')}). Update the app, then restore.`);
-  }
-
-  if (!data.migrations.includes(MIN_MIGRATION)) {
-    throw new HttpError(409, 'This backup is from a version older than the units-of-measure update and can’t be restored.');
   }
 
   const warnings = [];
@@ -184,7 +186,7 @@ async function validate(data, files) {
   return {
     createdAt: data.createdAt,
     counts: Object.fromEntries(TABLES.map((t) => [t, data.tables[t]?.length ?? 0])),
-    olderVersion: data.migrations.length < known.size,
+    olderVersion: migrations.length < known.size,
     warnings,
   };
 }
@@ -235,6 +237,17 @@ export async function listSnapshots() {
   return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+/** Save the current data to BACKUP_DIR as before-<reason>-<time>.tar.gz; returns the file name. */
+export async function saveSnapshot(reason) {
+  await mkdir(backupDir(), { recursive: true });
+  const snapshot = `before-${reason}-${stamp()}.tar.gz`;
+  const tmp = path.join(backupDir(), `.${snapshot}.partial`);
+  await writeBackup(createWriteStream(tmp));
+  await rename(tmp, path.join(backupDir(), snapshot));
+  await pruneSnapshots();
+  return snapshot;
+}
+
 export function snapshotPath(name) {
   if (!SNAPSHOT_FILE.test(name)) return null;
   return path.join(backupDir(), name);
@@ -252,12 +265,7 @@ export async function restoreBackup(token) {
   staged.delete(token); // one restore per upload
 
   try {
-    await mkdir(backupDir(), { recursive: true });
-    const snapshot = `before-restore-${stamp()}.tar.gz`;
-    const tmp = path.join(backupDir(), `.${snapshot}.partial`);
-    await writeBackup(createWriteStream(tmp));
-    await rename(tmp, path.join(backupDir(), snapshot));
-    await pruneSnapshots();
+    const snapshot = await saveSnapshot('restore');
 
     const { data } = stage;
     const dest = uploadDir();

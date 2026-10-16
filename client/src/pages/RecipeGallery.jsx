@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
 import { useApi } from '../hooks.js';
 import { date, dateTime, money, percent, todayIso } from '../format.js';
-import { Field, Icon, Menu, Modal, Notice, Spinner, useToast } from '../components/ui.jsx';
+import { Field, Icon, Menu, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
 
 export default function RecipeGallery() {
   const { data, error, loading } = useApi('/recipes');
@@ -59,7 +59,7 @@ export default function RecipeGallery() {
             {r.coverImage && (
               <div className="card-cover"><img src={r.coverImage.url} alt="" loading="lazy" /></div>
             )}
-            <h3><Link to={`/recipes/${r.id}`}>{r.name}</Link></h3>
+            <h3><Link to={`/recipes/${r.id}`}>{r.name}</Link> <TestBadge item={r} /></h3>
             <Menu
               label={`Actions for ${r.name}`}
               items={[

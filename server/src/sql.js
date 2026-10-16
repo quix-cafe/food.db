@@ -12,7 +12,7 @@ export const LATEST_PURCHASE = `
 
 export const INGREDIENT_COLUMNS = `
   i.id, i.name, i.category, i.uom,
-  i.created_at AS "createdAt",
+  i.created_at AS "createdAt", i.is_test AS "isTest",
   lp.unit_cost AS "latestPackPrice",
   lp.pack_size AS "latestPackSize",
   round(lp.unit_cost / lp.pack_size, 4) AS "latestUnitPrice",
@@ -35,4 +35,4 @@ export const RECIPE_LINES = `
 export const RECIPE_COLUMNS = `
   r.id, r.name, r.base_servings AS "baseServings", r.total_yield AS "totalYield",
   r.yield_unit AS "yieldUnit", r.target_margin AS "targetMargin",
-  r.created_at AS "createdAt", r.updated_at AS "updatedAt"`;
+  r.created_at AS "createdAt", r.updated_at AS "updatedAt", r.is_test AS "isTest"`;

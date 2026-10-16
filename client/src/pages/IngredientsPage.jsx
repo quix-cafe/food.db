@@ -4,9 +4,9 @@ import { api, notifyDataChanged } from '../api.js';
 import { isLabor, laborLast } from '@kitchen/shared';
 import { useApi, useDebounced } from '../hooks.js';
 import { Decimal, date, money, pack, perUnit, qty, signedPercent, toDecimal, todayIso, unitMoney } from '../format.js';
-import { CategoryInput, PurchaseFields, UomInput, emptyPurchase } from '../components/forms.jsx';
+import { CategoryInput, NewIngredientForm, PurchaseFields, UomInput, emptyPurchase } from '../components/forms.jsx';
 import PriceChart from '../components/PriceChart.jsx';
-import { Drawer, Field, Icon, Notice, Spinner, useToast } from '../components/ui.jsx';
+import { Drawer, Field, Icon, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
 
 const COLUMNS = [
   { key: 'name', label: 'Ingredient' },
@@ -33,6 +33,7 @@ export default function IngredientsPage() {
   const [filter, setFilter] = useState('');
   const [category, setCategory] = useState(null);
   const [sort, setSort] = useState({ key: 'name', dir: 1 });
+  const [adding, setAdding] = useState(false);
   const q = useDebounced(filter, 200);
   const { data, error, loading } = useApi(`/ingredients${q ? `?q=${encodeURIComponent(q)}` : ''}`);
   const { data: categories } = useApi('/ingredients/categories');
@@ -56,7 +57,17 @@ export default function IngredientsPage() {
           <h1>Ingredients</h1>
           <p>Every ingredient with its most recent purchase price. Open one to see its price history by vendor.</p>
         </div>
+        <div className="form-actions">
+          <a className="btn" href="/api/export/ingredients.csv" download title="Every ingredient with its latest price, as a spreadsheet file"><Icon.download /> Ingredients CSV</a>
+          <a className="btn" href="/api/export/purchases.csv" download title="Every purchase ever recorded, as a spreadsheet file"><Icon.download /> Price history CSV</a>
+          <button className="btn primary" onClick={() => setAdding(true)}><Icon.plus /> New ingredient</button>
+        </div>
       </div>
+      {adding && (
+        <Modal title="New ingredient" onClose={() => setAdding(false)}>
+          <NewIngredientForm onDone={(created) => { setAdding(false); open(created.id); }} />
+        </Modal>
+      )}
 
       <section className="panel">
         <div className="toolbar">
@@ -95,7 +106,7 @@ export default function IngredientsPage() {
                 {rows.map((r) => (
                   <tr key={r.id} className={`clickable ${isLabor(r) ? 'labor-row' : ''} ${openId === r.id ? 'selected' : ''}`} onClick={() => open(r.id)}>
                     <td>
-                      <button className="sort-btn" style={{ fontWeight: 650 }} onClick={(e) => { e.stopPropagation(); open(r.id); }}>{r.name}</button>
+                      <button className="sort-btn" style={{ fontWeight: 650 }} onClick={(e) => { e.stopPropagation(); open(r.id); }}>{r.name}</button> <TestBadge item={r} />
                     </td>
                     <td>{r.category ?? <span className="muted">—</span>}</td>
                     <td className="num nowrap" style={{ fontWeight: 650 }}>{r.latestUnitPrice ? perUnit(r.latestUnitPrice, r.uom) : <span className="badge">No price</span>}</td>
@@ -174,7 +185,7 @@ function IngredientDrawer({ id, onClose }) {
   const hike = latest?.priceHike ? latest : null;
 
   return (
-    <Drawer title={ing?.name ?? 'Loading…'} subtitle={ing && `Asset ID ${ing.id}`} onClose={onClose}>
+    <Drawer title={ing ? <>{ing.name} <TestBadge item={ing} /></> : 'Loading…'} subtitle={ing && `Asset ID ${ing.id}`} onClose={onClose}>
       {error && <Notice kind="error">{error.message}</Notice>}
       {!data && !error && <Spinner />}
       {data && form && (
@@ -280,7 +291,7 @@ function IngredientDrawer({ id, onClose }) {
                   {data.purchases.map((p) => (
                     <tr key={p.id}>
                       <td className="nowrap">{date(p.date)}</td>
-                      <td>{p.vendor ?? '—'}{p.receiptId && <> <Link to={`/purchases/${p.receiptId}`} className="muted" style={{ fontSize: '0.85rem' }}>Receipt</Link></>}</td>
+                      <td>{p.vendor ?? '—'} <TestBadge item={p} />{p.receiptId && <> <Link to={`/purchases/${p.receiptId}`} className="muted" style={{ fontSize: '0.85rem' }}>Receipt</Link></>}</td>
                       <td className="num">{qty(p.quantity)}</td>
                       <td className="num nowrap"><PackSizeInput purchase={p} uom={ing.uom} ingredientId={id} run={run} /></td>
                       <td className="num">{unitMoney(p.unitCost)}</td>

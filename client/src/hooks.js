@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useBlocker } from 'react-router';
-import { api, onDataChanged } from './api.js';
+import { api, isTestMode, onDataChanged, onTestModeChanged } from './api.js';
+
+/** Whether test mode is on in this browser (see api.js). */
+export const useTestMode = () => useSyncExternalStore(onTestModeChanged, isTestMode);
 
 /** GET `path` (skipped when null); refetches on path change and on global data changes. */
 export function useApi(path) {

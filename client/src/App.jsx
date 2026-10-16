@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Navigate, Route, Routes, Link, useLocation, useParams } from 'react-router';
 import UniversalSearch from './components/UniversalSearch.jsx';
+import { setTestMode } from './api.js';
+import { useTestMode } from './hooks.js';
 import { NewIngredientForm, ReceiptImportForm } from './components/forms.jsx';
 import { Icon, Modal, Tabs, ToastProvider } from './components/ui.jsx';
 import IngredientsPage from './pages/IngredientsPage.jsx';
@@ -31,6 +33,17 @@ function QuickAdd({ onClose }) {
       </div>
       {tab === 'manual' ? <NewIngredientForm onDone={onClose} /> : <ReceiptImportForm onDone={onClose} />}
     </Modal>
+  );
+}
+
+function TestModeBar() {
+  const on = useTestMode();
+  if (!on) return null;
+  return (
+    <div className="test-mode-bar" role="status">
+      <span><b>Test mode.</b> Everything you add is marked as test data, which you can clear from <Link to="/backup#test-data">Backup</Link>.</span>
+      <button className="btn small" onClick={() => setTestMode(false)}>Turn off</button>
+    </div>
   );
 }
 
@@ -73,6 +86,7 @@ export default function App() {
           </div>
         </nav>
         <div className="main">
+          <TestModeBar />
           <header className="topbar">
             <UniversalSearch />
             <button className="btn primary" onClick={() => setQuickAdd(true)}>

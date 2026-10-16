@@ -3,10 +3,23 @@ import { summarizeEvent } from '@kitchen/shared';
 import { query, tx, fkViolation } from '../db.js';
 import { loadRecipes } from './recipes.js';
 import { badRequest, notFound, text, number, date, uuid, array } from '../validate.js';
+import { sendCsv, slug } from '../csv.js';
 
 const router = Router();
 
-const EVENT_COLUMNS = `e.id, e.name, e.event_date AS "date", e.guest_count AS "guestCount", e.created_at AS "createdAt"`;
+const EVENT_COLUMNS = `e.id, e.name, e.event_date AS "date", e.guest_count AS "guestCount", e.created_at AS "createdAt", e.is_test AS "isTest",
+  e.actual_guests AS "actualGuests", e.actual_revenue AS "actualRevenue", e.actual_cost AS "actualCost", e.notes`;
+
+/** After-the-event results, as columns to set: only the fields present in the body (blank clears one). */
+function resultFields(body) {
+  const fields = {
+    actualGuests: ['actual_guests', (v) => number(v, 'Actual guests', { integer: true, min: 0 })],
+    actualRevenue: ['actual_revenue', (v) => number(v, 'Actual revenue', { min: 0 })],
+    actualCost: ['actual_cost', (v) => number(v, 'Actual spend', { min: 0 })],
+    notes: ['notes', (v) => text(v, 'Notes', { max: 5000 })],
+  };
+  return Object.entries(fields).filter(([key]) => key in body).map(([key, [column, check]]) => [column, check(body[key])]);
+}
 
 function eventFields(body) {
   const recipes = body.recipes === undefined
@@ -90,11 +103,12 @@ router.get('/:id', async (req, res) => {
 router.put('/:id', async (req, res) => {
   const id = uuid(req.params.id, 'id');
   const f = eventFields(req.body ?? {});
+  const results = resultFields(req.body ?? {});
   try {
     await tx(async (c) => {
       const { rowCount } = await c.query(
-        'UPDATE events SET name=$2, event_date=$3, guest_count=$4 WHERE id=$1',
-        [id, f.name, f.date, f.guestCount],
+        `UPDATE events SET name=$2, event_date=$3, guest_count=$4${results.map(([col], i) => `, ${col}=$${i + 5}`).join('')} WHERE id=$1`,
+        [id, f.name, f.date, f.guestCount, ...results.map(([, v]) => v)],
       );
       if (!rowCount) throw notFound('Event');
       if (f.recipes) await replaceRecipes(c, id, f.recipes);
@@ -130,9 +144,8 @@ router.delete('/:id', async (req, res) => {
   res.status(204).end();
 });
 
-// Aggregated financials and the consolidated shopping list.
-router.get('/:id/summary', async (req, res) => {
-  const event = await getEvent(uuid(req.params.id, 'id'));
+async function eventSummary(id) {
+  const event = await getEvent(id);
   const recipes = await loadRecipes(event.recipes.map((r) => r.recipeId));
   const byId = new Map(recipes.map((r) => [r.id, r]));
   const summary = summarizeEvent(
@@ -149,7 +162,29 @@ router.get('/:id/summary', async (req, res) => {
     }),
     await loadAmounts(event.id),
   );
-  res.json({ event, ...summary });
+  return { event, ...summary };
+}
+
+// Aggregated financials and the consolidated shopping list.
+router.get('/:id/summary', async (req, res) => {
+  res.json(await eventSummary(uuid(req.params.id, 'id')));
+});
+
+router.get('/:id/shopping-list.csv', async (req, res) => {
+  const { event, shoppingList } = await eventSummary(uuid(req.params.id, 'id'));
+  sendCsv(res, `${slug(event.name)}-${event.date}-shopping-list.csv`, [
+    ['Ingredient', 'name', { text: true }],
+    ['Category', 'category', { text: true }],
+    ['Needed', 'amount'],
+    ['Unit', 'uom', { text: true }],
+    ['Packs to buy', 'packsToBuy'],
+    ['Pack size', (l) => l.packSize],
+    ['Total cost', 'purchaseCost'],
+    ['Used cost', 'usedCost'],
+    ['Leftover', 'leftover'],
+    ['Vendor', 'vendor', { text: true }],
+    ['Used in', (l) => l.recipes.join('; '), { text: true }],
+  ], shoppingList);
 });
 
 async function loadAmounts(eventId) {

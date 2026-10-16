@@ -8,7 +8,7 @@ import { badRequest, notFound, text, date, uuid, array } from '../validate.js';
 
 const router = Router();
 
-const RECEIPT_COLUMNS = `r.id, r.vendor, r.receipt_date AS "date", r.created_at AS "createdAt",
+const RECEIPT_COLUMNS = `r.id, r.vendor, r.receipt_date AS "date", r.created_at AS "createdAt", r.is_test AS "isTest",
   (SELECT count(*)::int FROM receipt_lines l WHERE l.receipt_id = r.id AND l.purchase_id IS NULL) AS "pendingCount",
   (SELECT count(*)::int FROM ingredient_purchases p WHERE p.receipt_id = r.id) AS "lineCount",
   (SELECT coalesce(sum(p.total_cost), 0) FROM ingredient_purchases p WHERE p.receipt_id = r.id) AS "savedTotal"`;

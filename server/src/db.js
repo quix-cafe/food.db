@@ -30,16 +30,28 @@ function postgresPool(connectionString) {
   return p;
 }
 
-export const query = (text, params) => pool.query(text, params);
+/**
+ * Test mode: rows inserted inside runAsTestData() get is_test = true (migration 011). The
+ * column default reads `app.test_data`, set for the length of each transaction, so a query
+ * in test mode always runs inside one.
+ */
+const testMode = new AsyncLocalStorage();
+export const runAsTestData = (fn) => testMode.run(true, fn);
+const markTestData = (c) => c.query("SELECT set_config('app.test_data', 'on', true)");
+
+export const query = (text, params) =>
+  testMode.getStore() && !pool.inTransaction?.() ? tx((c) => c.query(text, params)) : pool.query(text, params);
 
 /** A row is still referenced: foreign_key_violation, or restrict_violation from Postgres 18 (PGlite) on ON DELETE RESTRICT. */
 export const fkViolation = (err) => err.code === '23503' || err.code === '23001';
 
 export async function tx(fn) {
-  if (pool.tx) return pool.tx(fn);
+  const test = testMode.getStore();
+  if (pool.tx) return pool.tx(async (c) => { if (test) await markTestData(c); return fn(c); });
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    if (test) await markTestData(client);
     const result = await fn(client);
     await client.query('COMMIT');
     return result;
@@ -124,6 +136,7 @@ function pglitePool(dir) {
       const release = await acquire();
       return { query: run, release };
     },
+    inTransaction: () => !!inside.getStore(),
     on() {},
     end: () => exclusive(async () => (await opened).close()),
   };

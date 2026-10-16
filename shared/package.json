@@ -1,9 +1,15 @@
 {
   "name": "@kitchen/shared",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/calc.js" },
-  "scripts": { "test": "node --test test/*.test.js" },
-  "dependencies": { "decimal.js": "^10.5.0" }
+  "exports": {
+    ".": "./src/calc.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "decimal.js": "^10.5.0"
+  }
 }
