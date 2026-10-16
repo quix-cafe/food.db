@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { rm } from 'node:fs/promises';
+import path from 'node:path';
 import { tmpdir } from 'node:os';
 import multer from 'multer';
 import { backupFilename, inspectBackup, listSnapshots, restoreBackup, snapshotPath, summarizeCurrent, writeBackup } from '../backup.js';
@@ -42,7 +43,8 @@ router.post('/restore', async (req, res) => {
 router.get('/snapshots/:name', async (req, res) => {
   const file = snapshotPath(req.params.name);
   if (!file) throw notFound('Snapshot');
-  res.download(file, req.params.name, (err) => {
+  // `root` keeps send's dotfile check to the file name; the binary's data dir is under ~/.local on Linux.
+  res.download(path.basename(file), req.params.name, { root: path.dirname(file) }, (err) => {
     if (err && !res.headersSent) res.status(404).json({ error: 'Snapshot not found' });
   });
 });

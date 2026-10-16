@@ -19,7 +19,8 @@ const HEIC = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypheic'
 before(async () => {
   if (skip) return;
   dir = await mkdtemp(path.join(tmpdir(), 'kitchen-images-'));
-  process.env.UPLOAD_DIR = dir;
+  // A dotted segment, like the binary's ~/.local/share/food.db on Linux.
+  process.env.UPLOAD_DIR = path.join(dir, '.local', 'uploads');
   process.env.DATABASE_URL = url;
   ({ pool } = await import('../src/db.js'));
   await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
@@ -53,7 +54,7 @@ function form(files, fields = {}) {
   return fd;
 }
 
-const filesOnDisk = async () => (await readdir(dir)).sort();
+const filesOnDisk = async () => (await readdir(process.env.UPLOAD_DIR)).sort();
 
 test('recipe images: upload, serve, cover order, duplicate, delete', { skip }, async () => {
   const recipe = (await api('POST', '/recipes', { name: 'Tart', baseServings: 8 })).data;

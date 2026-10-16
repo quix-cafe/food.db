@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import path from 'node:path';
 import { query } from '../db.js';
 import { uploadDir, removeFiles } from '../images.js';
 import { notFound, uuid } from '../validate.js';
@@ -12,7 +11,8 @@ router.get('/:id', async (req, res) => {
   // Files are never rewritten (new uploads get new ids), so they can be cached forever.
   res.set('Cache-Control', 'private, max-age=31536000, immutable');
   res.type(rows[0].mime);
-  res.sendFile(path.join(uploadDir(), rows[0].filename), (err) => {
+  // `root` keeps send's dotfile check to the file name; the binary's data dir is under ~/.local on Linux.
+  res.sendFile(rows[0].filename, { root: uploadDir() }, (err) => {
     if (err && !res.headersSent) res.status(404).json({ error: 'Image file is missing from storage' });
   });
 });

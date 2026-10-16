@@ -18,8 +18,9 @@ const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x4
 before(async () => {
   if (skip) return;
   dir = await mkdtemp(path.join(tmpdir(), 'food-db-backup-test-'));
-  process.env.UPLOAD_DIR = path.join(dir, 'uploads');
-  process.env.BACKUP_DIR = path.join(dir, 'backups');
+  // A dotted segment, like the binary's ~/.local/share/food.db on Linux.
+  process.env.UPLOAD_DIR = path.join(dir, '.local', 'uploads');
+  process.env.BACKUP_DIR = path.join(dir, '.local', 'backups');
   process.env.DATABASE_URL = url;
   ({ pool } = await import('../src/db.js'));
   await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
