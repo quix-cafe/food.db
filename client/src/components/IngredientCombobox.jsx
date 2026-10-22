@@ -1,14 +1,14 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useDebounced } from '../hooks.js';
-import { perUnit, qty } from '../format.js';
+import { perUnit, qty, toDecimal } from '../format.js';
 
 /**
  * Searchable combobox over the master ingredient list.
  * - `value` / `onInput`: the typed text (controlled)
  * - `onPick(ingredient)`: called when an existing ingredient is chosen
  * - `exclude`: ingredient ids to hide (e.g. already on the recipe)
- * - `includeBlends`: also offer spice blends (picked with `kind: 'blend'`), after the ingredients
+ * - `includeBlends`: also offer spice blends and sauces (picked with `kind: 'blend'`, their own kind as `blendKind`), after the ingredients
  * - `autoHighlight`: pre-select the first option so Enter picks it; when false, Enter with
  *   nothing highlighted calls `onCommit` (keep the typed text) and Escape calls `onCancel`
  */
@@ -33,7 +33,7 @@ export default function IngredientCombobox({ value, onInput, onPick, exclude = [
         const keep = (r) => !exclude.includes(r.id);
         setOptions([
           ...ingredients.filter(keep).slice(0, 12),
-          ...blends.filter(keep).slice(0, 6).map((b) => ({ ...b, kind: 'blend' })),
+          ...blends.filter(keep).slice(0, 6).map((b) => ({ ...b, blendKind: b.kind, kind: 'blend' })),
         ]);
       })
       .catch(() => !stale && setOptions([]));
@@ -85,7 +85,7 @@ export default function IngredientCombobox({ value, onInput, onPick, exclude = [
         <div className="popover" role="listbox" id={listId}>
           {options.map((o, i) => (
             <Fragment key={o.id}>
-            {o.kind === 'blend' && options[i - 1]?.kind !== 'blend' && <div className="popover-group">Spice blends</div>}
+            {o.kind === 'blend' && options[i - 1]?.kind !== 'blend' && <div className="popover-group">Spice Lab</div>}
             <div
               id={`${listId}-${i}`}
               role="option"
@@ -97,7 +97,7 @@ export default function IngredientCombobox({ value, onInput, onPick, exclude = [
               <span>{o.name}</span>
               <small>
                 {o.kind === 'blend'
-                  ? `${qty(o.totalTsp)} tsp batch${o.costPerTsp ? `, ${perUnit(o.costPerTsp, 'tsp')}` : ''}`
+                  ? `${o.blendKind === 'sauce' ? `Sauce, ${o.container}` : 'Spice blend'}: ${qty(o.batchSize)} ${o.uom} batch${o.cost && o.batchSize ? `, ${perUnit(toDecimal(o.cost).div(o.batchSize), o.uom)}` : ''}`
                   : o.latestUnitPrice ? perUnit(o.latestUnitPrice, o.uom) : 'no price yet'}
               </small>
             </div>

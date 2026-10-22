@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 import {
   calculateRecipe,
   summarizeEvent,
+  eventPricing,
+  saleItem,
   lineCost,
   unitPrice,
   recommendedPrice,
   completePurchaseCosts,
+  combinePurchases,
   percentChange,
   toDecimal,
   CalcError,
@@ -90,6 +93,24 @@ test('purchase cost completion', () => {
   assert.throws(() => completePurchaseCosts({ quantity: 0, unitCost: 1 }), CalcError);
 });
 
+test('combinePurchases: one receipt\'s lines as one average pack', () => {
+  // 2.3 lb for $9.20 and 1.7 lb for $7.65: $16.85 for 4 lb.
+  assert.deepEqual(combinePurchases([
+    { quantity: '1', packSize: '2.3', unitCost: '9.20', totalCost: '9.20' },
+    { quantity: '1', packSize: '1.7', unitCost: '7.65', totalCost: '7.65' },
+  ]), { quantity: '2.0000', packSize: '2.0000', unitCost: '8.4250', totalCost: '16.8500', unitPrice: '4.2125' });
+  // Weighted by packs bought: 3 × 1 lb at $5 and 1 × 2 lb at $6 is $21 for 5 lb.
+  const r = combinePurchases([
+    { quantity: 3, packSize: 1, unitCost: 5, totalCost: 15 },
+    { quantity: 1, packSize: 2, unitCost: 6, totalCost: 6 },
+  ]);
+  assert.equal(r.unitPrice, '4.2000');
+  assert.equal(r.packSize, '1.2500');
+  // One line is itself.
+  assert.deepEqual(combinePurchases([{ quantity: 2, packSize: 50, unitCost: 20, totalCost: 40 }]),
+    { quantity: '2.0000', packSize: '50.0000', unitCost: '20.0000', totalCost: '40.0000', unitPrice: '0.4000' });
+});
+
 test('helpers', () => {
   assert.equal(percentChange('10', '12').toString(), '20');
   assert.equal(percentChange('0', '12'), null);
@@ -131,4 +152,42 @@ test('an amount set for the event replaces the scaled total and adjusts the even
   assert.equal(set.adjustment, '-8.7500');
   assert.equal(set.totalCost, '10.0000');
   assert.equal(set.recipes[0].scaledCost, '18.7500'); // per-recipe figures stay as the recipes say
+});
+
+test('an event price replaces the recipe price, and a deal comes off every N servings', () => {
+  // Cost $1.20 a serving at 70% margin: the recipe sells for $4.00.
+  const recipe = { recipeId: 'a', name: 'Tacos', baseServings: 10, expectedServings: 25, targetMargin: 70,
+    lines: [{ ingredientId: 'm', name: 'Meat', packPrice: '12', packSize: '1', amount: '1' }] };
+  const plain = summarizeEvent([recipe]).recipes[0];
+  assert.deepEqual([plain.salePrice, plain.priceSet, plain.revenue, plain.marginPerServing, plain.marginPercent], ['4.00', false, '100.00', '2.8000', '70.0']);
+
+  // $5 here, and buy 2 get $1 off: 12 deals in 25 servings.
+  const s = summarizeEvent([{ ...recipe, salePrice: '5', discountAmount: '1', discountQty: 2 }]);
+  const r = s.recipes[0];
+  assert.deepEqual([r.recommendedPrice, r.salePrice, r.priceSet, r.discount, r.revenue, r.profit], ['4.00', '5.00', true, '12.00', '113.00', '83.00']);
+  assert.deepEqual([r.netPrice, r.marginPerServing, r.marginPercent, r.discountAmount, r.discountQty], ['4.5000', '3.3000', '73.3', '1.00', 2]);
+  assert.deepEqual([s.revenue, s.profit], ['113.00', '83.00']);
+
+  // A discount alone is per serving; a free item has no margin percent.
+  assert.equal(eventPricing({ costPerServing: '1', recommendedPrice: '3', discountAmount: '0.5', expectedServings: 3 }).revenue, '7.50');
+  assert.equal(eventPricing({ costPerServing: '1', recommendedPrice: '3', salePrice: '0' }).marginPercent, null);
+  assert.throws(() => eventPricing({ costPerServing: '1', recommendedPrice: '3', discountAmount: '1', discountQty: 0 }), /1 or more/);
+});
+
+test('a sale line: the deal applies as often as it fits, and given-away items are free', () => {
+  const taco = { salePrice: '4', discountAmount: '1', discountQty: 2 };
+  assert.deepEqual(saleItem({ ...taco, quantity: 3 }), { quantity: 3, unitPrice: '4.00', deals: 0, discount: '0.00', amount: '12.00' });
+  assert.deepEqual(saleItem({ ...taco, quantity: 3, dealUsed: true }), { quantity: 3, unitPrice: '4.00', deals: 1, discount: '1.00', amount: '11.00' });
+  assert.deepEqual(saleItem({ ...taco, quantity: 4, dealUsed: true }).amount, '14.00');
+  assert.deepEqual(saleItem({ ...taco, quantity: 2, dealUsed: true, free: true }), { quantity: 2, unitPrice: '4.00', deals: 0, discount: '0.00', amount: '0.00' });
+  assert.equal(saleItem({ salePrice: '3', quantity: 2, dealUsed: true }).deals, 0); // no deal on this recipe
+  assert.throws(() => saleItem({ salePrice: '3', quantity: 0 }), /1 or more/);
+});
+
+test('a vendor fee comes off the event profit, not the food cost', () => {
+  const recipe = { recipeId: 'a', name: 'Tacos', baseServings: 10, expectedServings: 25, targetMargin: 70,
+    lines: [{ ingredientId: 'm', name: 'Meat', packPrice: '12', packSize: '1', amount: '1' }] };
+  const s = summarizeEvent([recipe], {}, { vendorFee: '40' });
+  assert.deepEqual([s.totalCost, s.revenue, s.vendorFee, s.profit, s.marginPercent], ['30.0000', '100.00', '40.00', '30.00', '30.0']);
+  assert.equal(summarizeEvent([recipe]).vendorFee, '0.00');
 });

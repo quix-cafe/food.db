@@ -3,6 +3,7 @@
 // through decimal.js; numbers are returned as strings to keep JSON float-free.
 
 import DecimalBase from 'decimal.js';
+import { SAUCE_CONTAINERS, SAUCE_GRAMS_PER_TSP, SPICE_GRAMS_PER_TSP, convertUnits } from './units.js';
 
 export const Decimal = DecimalBase.clone({ precision: 40, rounding: DecimalBase.ROUND_HALF_UP });
 
@@ -64,6 +65,25 @@ export function percentChange(previous, current) {
   const c = toDecimal(current);
   if (!p || !c || p.isZero()) return null;
   return c.minus(p).div(p).times(100);
+}
+
+/**
+ * One shopping trip's purchases of one ingredient (the lines of one receipt) as a single
+ * average pack: pack price and pack size are averaged per pack bought, so the price per unit
+ * is what the trip spent ÷ how much it bought. Same rounding as `LATEST_PURCHASE` in SQL.
+ */
+export function combinePurchases(purchases) {
+  const sum = (f) => purchases.reduce((s, p) => s.plus(f(p)), new Decimal(0));
+  const quantity = sum((p) => p.quantity);
+  const unitCost = sum((p) => new Decimal(p.quantity).times(p.unitCost)).div(quantity).toDecimalPlaces(COST_DP);
+  const packSize = sum((p) => new Decimal(p.quantity).times(p.packSize ?? 1)).div(quantity).toDecimalPlaces(COST_DP);
+  return {
+    quantity: cost(quantity),
+    packSize: cost(packSize),
+    unitCost: cost(unitCost),
+    totalCost: cost(sum((p) => p.totalCost)),
+    unitPrice: cost(unitPrice(unitCost, packSize)),
+  };
 }
 
 /** Fill in whichever of unit cost / total cost is missing from the other and quantity. */
@@ -166,11 +186,135 @@ export function calculateRecipe({
  *   the scaled total; usedCost becomes amount × price per unit, and the difference from the
  *   recipes' cost is reported as `adjustment` and included in totalCost and profit.
  */
-export function summarizeEvent(recipes = [], amounts = {}) {
+/**
+ * A recipe's price at one event. `salePrice` (per serving) replaces the recipe's own target price
+ * when set. A deal takes `discountAmount` off every `discountQty` servings ("buy 2, get $1 off" is
+ * $1 per 2; the default is per serving) and is assumed to apply to every serving sold, so the
+ * projection is the cautious one. Margin per serving is after the discount.
+ */
+export function eventPricing({ costPerServing, recommendedPrice, salePrice = null, discountAmount = null, discountQty = null, expectedServings = 0 }) {
+  const listPrice = (toDecimal(salePrice) ?? toDecimal(recommendedPrice) ?? new Decimal(0)).toDecimalPlaces(MONEY_DP);
+  const off = toDecimal(discountAmount) ?? new Decimal(0);
+  const per = toDecimal(discountQty) ?? new Decimal(1);
+  if (listPrice.lt(0) || off.lt(0)) throw new CalcError('Prices and discounts cannot be negative');
+  if (!per.isInteger() || per.lt(1)) throw new CalcError('A discount applies per 1 or more servings');
+  const expected = toDecimal(expectedServings) ?? new Decimal(0);
+  const netPrice = listPrice.minus(off.div(per));
+  const margin = netPrice.minus(toDecimal(costPerServing) ?? 0);
+  const discount = off.times(expected.div(per).floor());
+  return {
+    salePrice: money(listPrice),
+    priceSet: toDecimal(salePrice) !== null,
+    discountAmount: off.isZero() ? null : money(off),
+    discountQty: off.isZero() ? null : per.toNumber(),
+    netPrice: cost(netPrice),
+    marginPerServing: cost(margin),
+    marginPercent: netPrice.gt(0) ? margin.div(netPrice).times(100).toFixed(1) : null,
+    discount: money(discount),
+    revenue: money(listPrice.times(expected).minus(discount)),
+  };
+}
+
+/** What a payment app keeps from each payment: percent of what's paid plus a fixed fee. */
+export const PAYMENT_FEES = {
+  venmo: { percent: '1.9', fixed: '0.10' },
+  cashapp: { percent: '2.6', fixed: '0.15' },
+};
+
+/**
+ * The fee added on top of a sale line of `amount` paid by `method`: the customer is charged
+ * amount + fee, and the app's cut of that whole charge is the fee, so the sale nets `amount`.
+ * charge = (amount + fixed) ÷ (1 − percent), rounded up to the cent. 0 for cash, card,
+ * giveaways and $0 lines.
+ */
+export function paymentFee(method, amount) {
+  const f = PAYMENT_FEES[method];
+  const a = toDecimal(amount);
+  if (!f || !a || a.lte(0)) return money(new Decimal(0));
+  const charge = a.plus(f.fixed).div(new Decimal(1).minus(new Decimal(f.percent).div(100))).toDecimalPlaces(MONEY_DP, Decimal.ROUND_UP);
+  return money(charge.minus(a));
+}
+
+/**
+ * One recipe on a sale recorded during an event: what it's charged. With `dealUsed`, the
+ * recipe's deal applies as many times as the quantity allows (3 on "buy 2, $1 off" is one deal).
+ * Items given away (`free`) are charged nothing and use no deal.
+ */
+export function saleItem({ quantity, salePrice, discountAmount = null, discountQty = null, dealUsed = false, free = false }) {
+  const q = toDecimal(quantity);
+  if (!q || !q.isInteger() || q.lt(1)) throw new CalcError('Quantity must be a whole number, 1 or more');
+  const price = toDecimal(salePrice) ?? new Decimal(0);
+  const off = toDecimal(discountAmount) ?? new Decimal(0);
+  const per = toDecimal(discountQty) ?? new Decimal(1);
+  const deals = dealUsed && !free && off.gt(0) ? q.div(per).floor() : new Decimal(0);
+  const discount = off.times(deals);
+  const amount = free ? new Decimal(0) : Decimal.max(0, price.times(q).minus(discount));
+  return { quantity: q.toNumber(), unitPrice: money(price), deals: deals.toNumber(), discount: money(discount), amount: money(amount) };
+}
+
+/**
+ * A sauce made at an event in `container`s (default: the sauce's own): one container is
+ * `scale` of the sauce's batch and holds `servingsPerContainer` of its servings. It's sold by
+ * the serving: the batch cost ÷ the batch's servings, by default priced at the default margin,
+ * as a recipe's would be. blend: a loadBlends row.
+ */
+export function sauceContainer(blend, container = null) {
+  const size = container ?? blend.container;
+  const oz = SAUCE_CONTAINERS[size];
+  const batch = toDecimal(blend.batchSize);
+  if (!oz || !batch || batch.lte(0)) throw new CalcError(`${blend.name}: pick a container`);
+  const scale = new Decimal(oz).div(batch);
+  const servings = new Decimal(blend.servings ?? 1);
+  const perServing = toDecimal(blend.cost)?.div(servings) ?? null;
+  return {
+    container: size,
+    containerOz: oz,
+    scale,
+    servingsPerContainer: servings.times(scale).toString(),
+    costPerServing: perServing === null ? null : cost(perServing),
+    recommendedPrice: perServing === null ? null : money(recommendedPrice(perServing, DEFAULT_MARGIN)),
+  };
+}
+
+/**
+ * `vendorFee`: what the event charges for the stand, taken off the profit (not part of the food cost).
+ * `sauces`: [{ blend (a loadBlends row), servings, container, salePrice }] — a sauce on the menu,
+ *   sold by the serving (no deals) and made in whole containers: its cost is the containers
+ *   made, and their ingredients join the shopping list.
+ */
+export function summarizeEvent(recipes = [], amounts = {}, { vendorFee = null, sauces = [] } = {}) {
+  const fee = toDecimal(vendorFee) ?? new Decimal(0);
   let totalCost = new Decimal(0);
   let revenue = new Decimal(0);
   const shopping = new Map();
   const warnings = [];
+
+  // A spice blend line is its own entry (packs = batches to make), never merged with an ingredient.
+  const addToList = (line, amount, used, missingPrice, source, key = line.ingredientId ?? `blend:${line.blendId}`) => {
+    let entry = shopping.get(key);
+    if (!entry) {
+      entry = {
+        key,
+        ingredientId: line.ingredientId ?? null,
+        blendId: line.blendId ?? null,
+        name: line.name,
+        category: line.category ?? null,
+        vendor: line.vendor ?? null,
+        uom: line.uom ?? null,
+        packSize: toDecimal(line.packSize)?.toString() ?? null,
+        packPrice: toDecimal(line.packPrice)?.toString() ?? null,
+        amount: new Decimal(0),
+        usedCost: new Decimal(0),
+        missingPrice: false,
+        recipes: [],
+      };
+      shopping.set(key, entry);
+    }
+    entry.amount = entry.amount.plus(amount);
+    entry.usedCost = entry.usedCost.plus(used);
+    entry.missingPrice ||= missingPrice;
+    if (!entry.recipes.includes(source)) entry.recipes.push(source);
+  };
 
   const recipeSummaries = recipes.map((r) => {
     const calc = calculateRecipe({
@@ -179,36 +323,19 @@ export function summarizeEvent(recipes = [], amounts = {}) {
       expectedServings: r.expectedServings,
       targetMargin: r.targetMargin,
     });
+    const pricing = eventPricing({
+      costPerServing: calc.costPerServing,
+      recommendedPrice: calc.recommendedPrice,
+      salePrice: r.salePrice,
+      discountAmount: r.discountAmount,
+      discountQty: r.discountQty,
+      expectedServings: calc.expectedServings,
+    });
     totalCost = totalCost.plus(calc.scaledCost);
-    revenue = revenue.plus(calc.revenue);
+    revenue = revenue.plus(pricing.revenue);
     for (const w of calc.warnings) warnings.push(`${r.name}: ${w}`);
 
-    for (const line of calc.lines) {
-      // A spice blend line is its own entry (packs = batches to make), never merged with another.
-      const key = line.ingredientId ?? `blend:${line.blendId}`;
-      let entry = shopping.get(key);
-      if (!entry) {
-        entry = {
-          ingredientId: line.ingredientId ?? null,
-          blendId: line.blendId ?? null,
-          name: line.name,
-          category: line.category ?? null,
-          vendor: line.vendor ?? null,
-          uom: line.uom ?? null,
-          packSize: toDecimal(line.packSize)?.toString() ?? null,
-          packPrice: toDecimal(line.packPrice)?.toString() ?? null,
-          amount: new Decimal(0),
-          usedCost: new Decimal(0),
-          missingPrice: false,
-          recipes: [],
-        };
-        shopping.set(key, entry);
-      }
-      entry.amount = entry.amount.plus(line.scaledAmount);
-      entry.usedCost = entry.usedCost.plus(line.scaledCost);
-      entry.missingPrice ||= line.missingPrice;
-      if (!entry.recipes.includes(r.name)) entry.recipes.push(r.name);
-    }
+    for (const line of calc.lines) addToList(line, line.scaledAmount, line.scaledCost, line.missingPrice, r.name);
 
     return {
       recipeId: r.recipeId,
@@ -218,9 +345,56 @@ export function summarizeEvent(recipes = [], amounts = {}) {
       targetMargin: calc.targetMargin,
       scaledCost: calc.scaledCost,
       costPerServing: calc.costPerServing,
-      recommendedPrice: calc.recommendedPrice,
-      revenue: calc.revenue,
-      profit: calc.profit,
+      recommendedPrice: calc.recommendedPrice, // the recipe's own target price
+      ...pricing, // salePrice (what it sells for here), discount, revenue, margin per serving
+      profit: money(new Decimal(pricing.revenue).minus(calc.scaledCost)),
+    };
+  });
+
+  const sauceSummaries = sauces.map((s) => {
+    const { blend } = s;
+    const n = toDecimal(s.servings);
+    if (!n || !n.isInteger() || n.lt(1)) throw new CalcError(`${blend.name}: servings must be a whole number, 1 or more`);
+    const c = sauceContainer(blend, s.container);
+    const containers = n.div(c.servingsPerContainer).ceil();
+    const scale = c.scale.times(containers); // of the sauce's batch, for every container made
+    const density = blend.kind === 'sauce' ? SAUCE_GRAMS_PER_TSP : SPICE_GRAMS_PER_TSP;
+    let used = new Decimal(0);
+    for (const it of blend.items) {
+      const amount = toDecimal(it.amount).times(scale);
+      const inUom = it.ingredientId && it.uom ? convertUnits(amount, it.unit, it.uom, density) : null;
+      const price = toDecimal(it.packPrice);
+      if (inUom) {
+        const itemCost = price === null ? new Decimal(0) : unitPrice(price, it.packSize).times(inUom);
+        used = used.plus(itemCost);
+        addToList({ ...it, blendId: null }, inUom, itemCost, price === null, blend.name);
+      } else {
+        // A typed name, or a unit that can't become the ingredient's: listed as written, unpriced.
+        addToList({ ...it, ingredientId: null, blendId: null, uom: it.unit, packSize: null, packPrice: null }, amount, new Decimal(0), true, blend.name, `item:${it.name.toLowerCase()}:${it.unit}`);
+        if (it.ingredientId) warnings.push(`${blend.name}: ${it.name} is in ${it.unit}, which can’t be priced in ${it.uom}`);
+      }
+    }
+    const pricing = eventPricing({
+      costPerServing: c.costPerServing ?? 0,
+      recommendedPrice: c.recommendedPrice,
+      salePrice: s.salePrice,
+      expectedServings: n,
+    });
+    totalCost = totalCost.plus(used);
+    revenue = revenue.plus(pricing.revenue);
+    return {
+      blendId: blend.id,
+      name: blend.name,
+      container: c.container,
+      containerOz: c.containerOz,
+      containers: containers.toNumber(),
+      servingsPerContainer: c.servingsPerContainer,
+      expectedServings: n.toNumber(),
+      costPerServing: c.costPerServing ?? cost(new Decimal(0)),
+      recommendedPrice: c.recommendedPrice,
+      scaledCost: cost(used),
+      ...pricing,
+      profit: money(new Decimal(pricing.revenue).minus(used)),
     };
   });
 
@@ -234,7 +408,7 @@ export function summarizeEvent(recipes = [], amounts = {}) {
   }
   totalCost = totalCost.plus(adjustment);
 
-  const profit = revenue.minus(totalCost);
+  const profit = revenue.minus(totalCost).minus(fee);
   let purchaseCost = new Decimal(0);
   const shoppingList = [...shopping.values()]
     .map((e) => {
@@ -255,10 +429,12 @@ export function summarizeEvent(recipes = [], amounts = {}) {
 
   return {
     recipes: recipeSummaries,
+    sauces: sauceSummaries,
     totalCost: cost(totalCost),
     adjustment: cost(adjustment),
     purchaseCost: cost(purchaseCost),
     revenue: money(revenue),
+    vendorFee: money(fee),
     profit: money(profit),
     marginPercent: revenue.isZero() ? null : profit.div(revenue).times(100).toFixed(1),
     shoppingList,
@@ -266,3 +442,4 @@ export function summarizeEvent(recipes = [], amounts = {}) {
   };
 }
 export * from './units.js';
+export * from './names.js';

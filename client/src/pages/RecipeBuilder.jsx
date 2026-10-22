@@ -10,11 +10,25 @@ import { Field, Icon, LeaveModal, Notice, Spinner, TestBadge, useToast } from '.
 import { AddToEventModal } from './RecipeGallery.jsx';
 
 let nextKey = 1;
-const blank = { name: '', baseServings: '4', totalYield: '', yieldUnit: '', targetMargin: String(DEFAULT_MARGIN), lines: [] };
+const blank = { name: '', baseServings: '4', servingSize: '', totalYield: '', yieldUnit: '', targetMargin: String(DEFAULT_MARGIN), lines: [] };
+
+// The recipe stores its total yield; the header edits it as size per serving × expected
+// (base) servings, so the size per serving is derived from it on load.
+const sizePerServing = (totalYield, servings) => {
+  const t = toDecimal(totalYield);
+  const n = toDecimal(servings);
+  return t && n && n.gt(0) ? t.div(n).toDecimalPlaces(4).toString() : '';
+};
+const totalQty = (size, servings) => {
+  const s = toDecimal(size);
+  const n = toDecimal(servings);
+  return s && n ? s.times(n).toDecimalPlaces(4).toString() : '';
+};
 
 const fromServer = (r) => ({
   name: r.name,
   baseServings: String(r.baseServings),
+  servingSize: sizePerServing(r.totalYield, r.baseServings),
   totalYield: r.totalYield ? toDecimal(r.totalYield).toString() : '',
   yieldUnit: r.yieldUnit ?? '',
   targetMargin: toDecimal(r.targetMargin).toString(),
@@ -36,7 +50,7 @@ const fromServer = (r) => ({
 
 // Each line's amount is in the ingredient's unit of measure (lb, oz, each…), priced from
 // its latest purchase: price per unit = store price / store pack size. A spice blend line is
-// measured in tsp, its "pack" being one batch of the blend.
+// measured in grams (a sauce in oz), its "pack" being one batch of the blend.
 const apiLines = (lines) => lines.map(({ ingredientId, blendId, amount }) => (blendId ? { blendId, amount } : { ingredientId, amount }));
 const amountProblem = (lines) => lines.some((l) => { const a = toDecimal(l.amount); return !a || a.lt(0); });
 
@@ -116,6 +130,16 @@ export default function RecipeBuilder() {
   if (!form) return <main className="page"><Spinner /></main>;
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  // Total qty needed follows size per serving × expected servings; it's what's saved as the yield.
+  const setServingSize = (e) => {
+    const servingSize = e.target.value;
+    setForm((f) => ({ ...f, servingSize, totalYield: totalQty(servingSize, f.baseServings) }));
+  };
+  const setServings = (e) => {
+    const baseServings = e.target.value;
+    setForm((f) => ({ ...f, baseServings, totalYield: f.servingSize.trim() ? totalQty(f.servingSize, baseServings) : f.totalYield }));
+  };
+  const unitLabel = form.yieldUnit.trim() || 'units';
 
   // Typing a target price sets the margin that produces it: margin = 1 − cost / price.
   const cps = costing && toDecimal(costing.costPerServing);
@@ -135,7 +159,7 @@ export default function RecipeBuilder() {
   const removeLine = (key) => setForm((f) => ({ ...f, lines: f.lines.filter((l) => l.key !== key) }));
   const addIngredient = (ing) => {
     const line = ing.kind === 'blend'
-      ? { key: nextKey++, blendId: ing.id, name: ing.name, category: 'Spice blend', uom: 'tsp', packSize: ing.totalTsp, packPrice: ing.cost, amount: '1' }
+      ? { key: nextKey++, blendId: ing.id, name: ing.name, category: ing.blendKind === 'sauce' ? 'Sauce' : 'Spice blend', uom: ing.uom, packSize: ing.batchSize, packPrice: ing.cost, amount: '1' }
       : null;
     setForm((f) => ({
       ...f,
@@ -159,7 +183,8 @@ export default function RecipeBuilder() {
     setSaving(true);
     setSaveError(null);
     try {
-      const body = { ...form, lines: apiLines(form.lines) };
+      const { servingSize, ...fields } = form; // eslint-disable-line no-unused-vars
+      const body = { ...fields, lines: apiLines(form.lines) };
       const r = await api(id ? `/recipes/${id}` : '/recipes', { method: id ? 'PUT' : 'POST', body });
       const f = fromServer(r);
       setForm(f);
@@ -232,11 +257,19 @@ export default function RecipeBuilder() {
       <div className="builder">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
           <section className="panel panel-pad">
-            <div className="form-grid">
-              <Field label="Recipe name" className="span-2"><input className="input" value={form.name} onChange={set('name')} placeholder="e.g. Marinara sauce" /></Field>
-              <Field label="Base servings" hint="What the recipe makes as written"><input className="input num" inputMode="numeric" value={form.baseServings} onChange={set('baseServings')} /></Field>
-              <Field label="Total yield"><input className="input num" inputMode="decimal" value={form.totalYield} onChange={set('totalYield')} placeholder="Optional" /></Field>
-              <Field label="Yield unit"><input className="input" value={form.yieldUnit} onChange={set('yieldUnit')} placeholder="qt, portions…" /></Field>
+            <div className="recipe-header">
+              <Field label="Recipe name"><input className="input" value={form.name} onChange={set('name')} placeholder="e.g. Marinara sauce" /></Field>
+              <Field label="Unit of measurement" hint="What a serving is measured in"><input className="input" value={form.yieldUnit} onChange={set('yieldUnit')} placeholder="oz, tacos, bowls…" /></Field>
+              <Field label="Size per serving" hint={`${unitLabel} in one serving`}>
+                <input className="input num" inputMode="decimal" value={form.servingSize} onChange={setServingSize} placeholder="Optional"
+                  aria-invalid={form.servingSize.trim() !== '' && !(toDecimal(form.servingSize)?.gt(0))} />
+              </Field>
+              <Field label="Expected servings" hint="What the recipe makes as written"><input className="input num" inputMode="numeric" value={form.baseServings} onChange={setServings} /></Field>
+              <div className="field">
+                <span id="total-qty-label">Total qty needed</span>
+                <output className="input num readonly-value" aria-labelledby="total-qty-label">{form.totalYield ? `${qty(form.totalYield)} ${unitLabel}` : '—'}</output>
+                <small>Size per serving × expected servings</small>
+              </div>
             </div>
           </section>
 
@@ -272,7 +305,7 @@ export default function RecipeBuilder() {
                         <td>
                           <div style={{ fontWeight: 600 }}>{l.name}</div>
                           {l.blendId
-                            ? <small><Link to={`/spice-lab/${l.blendId}`} className="muted"><Icon.starburst /> Spice blend, batch of {qty(l.packSize)} tsp</Link>{c?.missingPrice && <> <span className="badge warn">No prices</span></>}</small>
+                            ? <small><Link to={`/spice-lab/${l.blendId}`} className="muted"><Icon.starburst /> {l.category}, batch of {qty(l.packSize)} {l.uom}</Link>{c?.missingPrice && <> <span className="badge warn">No prices</span></>}</small>
                             : c?.missingPrice
                               ? <span className="badge warn">No purchase price</span>
                               : isLabor(l)
@@ -309,7 +342,7 @@ export default function RecipeBuilder() {
                 onPick={addIngredient}
                 exclude={form.lines.map((l) => l.ingredientId ?? l.blendId)}
                 includeBlends
-                placeholder="Add an ingredient or spice blend…"
+                placeholder="Add an ingredient, spice blend or sauce…"
                 footer={(q) => q.trim() && (
                   <div className="option muted" style={{ cursor: 'default' }}>Not listed? Add “{q.trim()}” to the database with Quick add first.</div>
                 )}
@@ -342,7 +375,7 @@ export default function RecipeBuilder() {
               {costing && <span className={scaled ? 'scaled' : 'muted'}>×{toDecimal(costing.scale).toDecimalPlaces(2).toString()}</span>}
             </div>
             <div className="servings-input">
-              <label htmlFor="expected">Expected servings</label>
+              <label htmlFor="expected" title="Cost the recipe for a different number of servings; the saved recipe doesn’t change">Scale to servings</label>
               <input id="expected" className="input" inputMode="numeric" value={expected} onChange={(e) => setExpected(e.target.value)} />
             </div>
             <div className="margin-slider">
@@ -361,7 +394,7 @@ export default function RecipeBuilder() {
                 style={{ '--fill': `${(Math.min(toDecimal(form.targetMargin)?.toNumber() ?? 70, 95) / 95) * 100}%` }}
               />
               <div className="price-input">
-                <label htmlFor="target-price">Target price per serving</label>
+                <label htmlFor="target-price">Menu Price per Order</label>
                 <span className="money-input">
                   <span aria-hidden="true">$</span>
                   <input
@@ -386,18 +419,18 @@ export default function RecipeBuilder() {
               <>
                 <div className="ticket-hero">
                   <div>
-                    <span>Cost per serving</span>
+                    <span>Cost Per Order</span>
                     <b>{money(costing.costPerServing)}</b>
                   </div>
                   <div className={`hero-profit ${toDecimal(costing.profitPerServing).lt(0) ? 'loss' : ''}`}>
-                    <span>Profit per serving</span>
+                    <span>Profit Per Order</span>
                     <b>{money(costing.profitPerServing)}</b>
                   </div>
                 </div>
                 <dl className="ticket-rows">
-                  <div><dt>Total cost, {costing.expectedServings} servings</dt><span className="leader" /><dd className={scaled ? 'scaled' : ''}>{money(costing.scaledCost)}</dd></div>
-                  <div><dt>Revenue</dt><span className="leader" /><dd>{money(costing.revenue)}</dd></div>
-                  <div className={`total ${toDecimal(costing.profit).lt(0) ? 'loss' : 'profit'}`}><dt>Net profit</dt><span className="leader" /><dd>{money(costing.profit)}</dd></div>
+                  <div><dt>Total Batch Cost</dt><span className="leader" /><dd className={scaled ? 'scaled' : ''}>{money(costing.scaledCost)}</dd></div>
+                  <div><dt>Max Batch Revenue</dt><span className="leader" /><dd>{money(costing.revenue)}</dd></div>
+                  <div className={`total ${toDecimal(costing.profit).lt(0) ? 'loss' : 'profit'}`}><dt>Total Batch Profit</dt><span className="leader" /><dd>{money(costing.profit)}</dd></div>
                 </dl>
                 {costing.warnings.length > 0 && <Notice>{costing.warnings.map((w) => <div key={w}>{w}</div>)}</Notice>}
                 <p className="ticket-foot">
@@ -414,7 +447,7 @@ export default function RecipeBuilder() {
       <LeaveModal blocker={blocker} error={saveError} onSave={id ? save : undefined} saving={saving}>
         Your changes to {form.name || 'this recipe'} haven’t been saved. If you leave now, they’re lost.
       </LeaveModal>
-      {addToEvent && <AddToEventModal recipe={{ id, name: form.name, baseServings: form.baseServings }} onClose={() => setAddToEvent(false)} />}
+      {addToEvent && <AddToEventModal recipe={{ id, name: form.name, baseServings: form.baseServings, costPerServing: costing?.costPerServing, recommendedPrice: costing?.recommendedPrice }} onClose={() => setAddToEvent(false)} />}
     </main>
   );
 }

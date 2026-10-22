@@ -4,6 +4,7 @@ import { api, notifyDataChanged } from '../api.js';
 import { useApi } from '../hooks.js';
 import { date, dateTime, money, percent, todayIso } from '../format.js';
 import { Field, Icon, Menu, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
+import { DealInput, MarginCell, SalePriceInput, blankOrCount, blankOrPrice, priceText, pricingFor } from '../components/EventPricing.jsx';
 
 export default function RecipeGallery() {
   const { data, error, loading } = useApi('/recipes');
@@ -106,6 +107,8 @@ export function AddToEventModal({ recipe, onClose }) {
   const [newName, setNewName] = useState('');
   const [newDate, setNewDate] = useState(todayIso());
   const [servings, setServings] = useState(String(recipe.baseServings));
+  const [pricing, setPricing] = useState({ salePrice: '', discountAmount: '', discountQty: '' });
+  const priced = pricingFor(recipe, pricing);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
@@ -114,6 +117,8 @@ export function AddToEventModal({ recipe, onClose }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    if (!blankOrPrice(pricing.salePrice) || !blankOrPrice(pricing.discountAmount)) return setError('Prices and discounts must be amounts, like 4.50');
+    if (!blankOrCount(pricing.discountQty)) return setError('A discount applies per 1 or more servings');
     setBusy(true);
     setError(null);
     try {
@@ -122,7 +127,11 @@ export function AddToEventModal({ recipe, onClose }) {
         const created = await api('/events', { method: 'POST', body: { name: newName, date: newDate, guestCount: servings } });
         id = created.id;
       }
-      const ev = await api(`/events/${id}/recipes`, { method: 'POST', body: { recipeId: recipe.id, expectedServings: servings } });
+      // Only what was filled in: a recipe already in the event keeps its price and deal otherwise.
+      const body = { recipeId: recipe.id, expectedServings: servings };
+      if (pricing.salePrice.trim()) body.salePrice = priceText(pricing.salePrice);
+      if (pricing.discountAmount.trim()) Object.assign(body, { discountAmount: priceText(pricing.discountAmount), discountQty: pricing.discountQty.trim() });
+      const ev = await api(`/events/${id}/recipes`, { method: 'POST', body });
       notifyDataChanged();
       toast(`Added ${recipe.name} to ${ev.name}`);
       onClose();
@@ -152,6 +161,21 @@ export function AddToEventModal({ recipe, onClose }) {
         <Field label="Servings for this event" hint={`The recipe makes ${recipe.baseServings}; it will be scaled.`}>
           <input className="input num" style={{ maxWidth: 140 }} inputMode="numeric" value={servings} onChange={(e) => setServings(e.target.value)} required />
         </Field>
+        <div className="form-grid">
+          <Field label="Sale price per serving" hint="Starts at the recipe’s target price. Changing it sets the price for this event only.">
+            <SalePriceInput id="add-sale-price" value={pricing.salePrice} recipePrice={recipe.recommendedPrice} label="Sale price per serving"
+              onChange={(salePrice) => setPricing((p) => ({ ...p, salePrice }))} />
+          </Field>
+          <Field label="Discount (optional)" hint="For a deal like “buy 2, get $1 off”: $1.00 off per 2.">
+            <DealInput amount={pricing.discountAmount} qty={pricing.discountQty} label="Discount"
+              onChange={(patch) => setPricing((p) => ({ ...p, ...patch }))} />
+          </Field>
+        </div>
+        {recipe.costPerServing != null && (
+          <p className="muted" style={{ margin: 0 }}>
+            Margin per serving: <b><MarginCell pricing={priced} /></b> (cost {money(recipe.costPerServing)})
+          </p>
+        )}
         {error && <Notice kind="error">{error}</Notice>}
         <div className="form-actions">
           <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>

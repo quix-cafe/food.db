@@ -1,6 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateBlend, convertUnits, normalizeUnit, parseAmount } from '../src/calc.js';
+import { calculateBlend, convertUnits, normalizeUnit, parseAmount, unitRatio } from '../src/calc.js';
+
+test('unit ratios between ingredient units are exact and never cross weight and volume', () => {
+  assert.equal(unitRatio('oz', 'lb').toString(), '0.0625');
+  assert.equal(unitRatio('lb', 'oz').toString(), '16');
+  assert.equal(unitRatio('ml', 'L').toString(), '0.001');
+  assert.equal(unitRatio('Box', 'box').toString(), '1');
+  assert.equal(unitRatio('lb', 'tsp'), null);
+  assert.equal(unitRatio('fl oz', 'oz'), null);
+  assert.equal(unitRatio('each', 'lb'), null);
+  assert.equal(unitRatio('box', 'lb'), null);
+});
 
 test('kitchen units normalise and convert to teaspoons', () => {
   assert.equal(normalizeUnit('Tablespoons'), 'tbsp');
@@ -16,6 +27,22 @@ test('kitchen units normalise and convert to teaspoons', () => {
   assert.equal(convertUnits(1, 'tsp', 'each'), null);
 });
 
+test('a bunch converts only to itself exactly, and any unit converts to itself', () => {
+  assert.equal(normalizeUnit('Bunches'), 'bunch');
+  assert.equal(convertUnits(2, 'bunch', 'g').toString(), '150');
+  assert.equal(convertUnits(2, 'Box', 'box').toString(), '2');
+  assert.equal(unitRatio('bunch', 'lb'), null);
+  assert.equal(unitRatio('bunch', 'bunch').toString(), '1');
+});
+
+test('a sauce weighs volumes like water and its batch is its container', () => {
+  const s = calculateBlend([{ name: 'Oil', amount: '1', unit: 'cup' }], { kind: 'sauce', container: '1/4 qt' });
+  assert.equal(s.totalGrams, '236.6400'); // 48 tsp at 4.93 g
+  assert.deepEqual([s.uom, s.batchSize], ['oz', '8.0000']);
+  const b = calculateBlend([{ name: 'Salt', amount: '1', unit: 'tsp' }]);
+  assert.deepEqual([b.uom, b.batchSize], ['g', '2.5000']);
+});
+
 test('amounts accept fractions', () => {
   assert.equal(parseAmount('1 1/2').toString(), '1.5');
   assert.equal(parseAmount('3/4').toString(), '0.75');
@@ -26,14 +53,15 @@ test('amounts accept fractions', () => {
   assert.equal(parseAmount('salt'), null);
 });
 
-test('a blend breaks down by volume and costs what it can', () => {
+test('a blend breaks down by weight and costs what it can', () => {
   const b = calculateBlend([
     { name: 'Paprika', amount: '2', unit: 'tbsp', packPrice: '6', packSize: '3', uom: 'oz' }, // 6 tsp
     { name: 'Salt', amount: '1', unit: 'tsp' }, // no price
     { name: 'Cayenne', amount: '8', unit: 'pinch' }, // 0.5 tsp
     { name: 'Garlic powder', amount: '5', unit: 'g', packPrice: '4', packSize: '1', uom: 'jar' }, // 2 tsp, uom can't convert
   ]);
-  assert.equal(b.totalTsp, '9.5000');
+  assert.equal(b.totalGrams, '23.7500'); // 9.5 tsp at 2.5 g
+  assert.equal(b.items[2].grams, '1.2500');
   assert.deepEqual(b.items.map((i) => i.share), ['63.2', '10.5', '5.3', '21.1']);
   // Paprika: 6 tsp × 2.5 g = 15 g = 0.5291 oz × $2/oz
   assert.equal(b.items[0].cost, '1.0582');

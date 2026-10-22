@@ -1,13 +1,14 @@
-import { useMemo, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router';
+import { combinePurchases } from '@kitchen/shared';
 import { api, imageForm, notifyDataChanged } from '../api.js';
 import { takeDraftPhotos } from '../receiptDraft.js';
 import { useLocalImages } from '../components/ImageGallery.jsx';
-import { money, toDecimal, todayIso, Decimal } from '../format.js';
+import { date as formatDate, money, pack, perUnit, qty, toDecimal, todayIso, Decimal } from '../format.js';
 import ReviewLinesTable, { rowsSnapshot, toRow, toPurchaseItem, savedMessage } from '../components/ReviewLines.jsx';
 import { useLeaveGuard } from '../hooks.js';
 import { ReceiptImportForm } from '../components/forms.jsx';
-import { Field, LeaveModal, Notice, Spinner, useToast } from '../components/ui.jsx';
+import { Field, Icon, LeaveModal, Notice, Spinner, useToast } from '../components/ui.jsx';
 
 /** OCR "Review & Confirm": nothing is saved until each row is checked and committed. */
 export default function ReceiptReviewPage() {
@@ -42,6 +43,8 @@ function ReviewGrid({ receipt, source, draftId }) {
   const [view, setView] = useState(() => (takeDraftPhotos(draftId).length ? 0 : 'json')); // photo index or 'json'
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(null); // every save's results for this receipt, added up
+  const [done, setDone] = useState(false); // all lines saved: show the summary
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -78,21 +81,28 @@ function ReviewGrid({ receipt, source, draftId }) {
         },
       });
       notifyDataChanged();
-      toast(savedMessage(res));
+      setSaved((s) => (s
+        ? Object.fromEntries(Object.entries(s).map(([k, list]) => [k, [...list, ...(res[k] ?? [])]]))
+        : { purchases: res.purchases, createdIngredients: res.createdIngredients, aliasesSaved: res.aliasesSaved, renamedIngredients: res.renamedIngredients ?? [] }));
       const remaining = rows.filter((r) => !r.confirmed);
-      if (remaining.length) {
-        setRows(remaining);
-        setBaseline({ rows: rowsSnapshot(remaining), vendor, date, photos: photos.length });
-      } else {
-        allowLeave();
-        navigate(`/purchases/${id}`);
-      }
+      setRows(remaining);
+      setBaseline({ rows: rowsSnapshot(remaining), vendor, date, photos: photos.length });
+      if (remaining.length) toast(savedMessage(res));
+      else setDone(true);
     } catch (err) {
       setError(err.message);
     } finally {
       setBusy(false);
     }
   };
+
+  if (done) {
+    const leave = (to) => { allowLeave(); navigate(to); };
+    return (
+      <ReceiptSaved saved={saved} vendor={vendor} date={date} receiptId={receiptId} photos={photos.length}
+        onIngredients={() => leave('/ingredients')} onAnother={() => leave('/ingredients/review')} />
+    );
+  }
 
   const saveButton = (className) => (
     <button className={`btn primary ${className}`} disabled={!confirmed.length || busy} onClick={commit}>
@@ -176,6 +186,93 @@ function ReviewGrid({ receipt, source, draftId }) {
           {error && <div className="panel-pad" style={{ paddingTop: 0 }}><Notice kind="error">{error}</Notice></div>}
         </section>
       </div>
+    </main>
+  );
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/**
+ * Shown once every line of the receipt is saved: everything that was added (across all the
+ * saves for this receipt), then back to Ingredients or on to the next receipt.
+ */
+function ReceiptSaved({ saved, vendor, date, receiptId, photos, onIngredients, onAnother }) {
+  const heading = useRef(null);
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    heading.current?.focus();
+  }, []);
+  const { purchases, createdIngredients, aliasesSaved, renamedIngredients } = saved;
+  const created = new Set(createdIngredients.map((c) => c.id));
+  const total = purchases.reduce((sum, p) => sum.plus(p.totalCost), new Decimal(0));
+  const byIngredient = new Map();
+  for (const p of purchases) byIngredient.set(p.ingredientId, [...(byIngredient.get(p.ingredientId) ?? []), p]);
+  const averaged = [...byIngredient.values()]
+    .filter((lines) => lines.length > 1)
+    .map((lines) => ({ name: lines[0].ingredientName, uom: lines[0].uom, lines: lines.length, unitPrice: combinePurchases(lines).unitPrice }));
+  const facts = [
+    createdIngredients.length > 0 && plural(createdIngredients.length, 'new ingredient'),
+    aliasesSaved.length > 0 && `${plural(aliasesSaved.length, 'receipt name')} remembered`,
+    renamedIngredients.length > 0 && `${plural(renamedIngredients.length, 'ingredient')} renamed`,
+    photos > 0 && `${plural(photos, 'photo')} kept with the receipt`,
+  ].filter(Boolean);
+
+  return (
+    <main className="page">
+      <section className="panel panel-pad receipt-saved">
+        <div className="saved-head">
+          <span className="saved-check" aria-hidden="true"><Icon.check /></span>
+          <div>
+            <h1 ref={heading} tabIndex={-1}>Receipt saved</h1>
+            <p className="muted">
+              {plural(purchases.length, 'purchase')} from {vendor || 'an unnamed store'}{date ? ` on ${formatDate(date)}` : ''}, {money(total)} in all.
+            </p>
+          </div>
+        </div>
+        {facts.length > 0 && <ul className="saved-facts">{facts.map((f) => <li key={f} className="badge">{f}</li>)}</ul>}
+
+        <div className="panel table-wrap">
+          <table className="grid">
+            <thead><tr><th>Ingredient</th><th className="num">Bought</th><th className="num">Per unit</th><th className="num">Total</th></tr></thead>
+            <tbody>
+              {purchases.map((p) => (
+                <tr key={p.id}>
+                  <td>
+                    <Link to={`/ingredients?open=${p.ingredientId}`} style={{ color: 'inherit', fontWeight: 650 }}>{p.ingredientName}</Link>
+                    {created.has(p.ingredientId) && <> <span className="badge new">New ingredient</span></>}
+                    {p.receiptName && <div className="muted" style={{ fontSize: '0.85rem' }}>Receipt: “{p.receiptName}”</div>}
+                  </td>
+                  <td className="num nowrap">{qty(p.quantity)} × {pack(p.packSize, p.uom)}</td>
+                  <td className="num nowrap">{perUnit(p.unitPrice, p.uom)}</td>
+                  <td className="num">{money(p.totalCost)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot><tr><td>{plural(purchases.length, 'purchase')}</td><td /><td /><td className="num">{money(total)}</td></tr></tfoot>
+          </table>
+        </div>
+
+        {averaged.length > 0 && (
+          <p className="muted" style={{ margin: 0 }}>
+            Bought more than once on this receipt, so its price is the average, not a price change:{' '}
+            {averaged.map((a) => `${a.name} (${a.lines} lines, ${perUnit(a.unitPrice, a.uom)})`).join(', ')}.
+          </p>
+        )}
+        {aliasesSaved.length > 0 && (
+          <p className="muted" style={{ margin: 0 }}>
+            Next time, these receipt names match by themselves: {aliasesSaved.map((a) => `“${a.alias}” → ${a.ingredient}`).join(', ')}.
+          </p>
+        )}
+        {renamedIngredients.length > 0 && (
+          <p className="muted" style={{ margin: 0 }}>Renamed: {renamedIngredients.map((r) => r.name).join(', ')}.</p>
+        )}
+
+        <div className="saved-actions">
+          <button className="btn primary" onClick={onIngredients}>Back to Ingredients</button>
+          <button className="btn" onClick={onAnother}><Icon.plus /> Add another receipt</button>
+          <Link className="link-btn" to={`/purchases/${receiptId}`}>View this receipt</Link>
+        </div>
+      </section>
     </main>
   );
 }

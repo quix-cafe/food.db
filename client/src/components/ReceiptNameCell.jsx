@@ -93,7 +93,19 @@ export default function ReceiptNameCell({ row, index, onChange }) {
         )}
       </div>
 
-      {!renamed && !row.resolved && row.suggestion && !editing && (
+      {!renamed && !row.resolved && row.choices?.length > 0 && !editing && (
+        <div className="name-status">
+          <span className="muted">
+            {row.ambiguous === 'receipt' ? 'On several lines here' : `“${row.source}” has meant different items`}, so it isn’t matched automatically. Saved before as:
+          </span>
+          {row.choices.map((c) => (
+            <button key={c.id} type="button" className="link-btn" onClick={() => onChange({ keep: false, name: c.name, ingredientId: c.id, ingredientUom: c.uom, category: c.category ?? row.category, confirmed: true })}>
+              {c.name}{c.times > 1 ? ` (${c.times}×)` : ''}
+            </button>
+          ))}
+        </div>
+      )}
+      {!renamed && !row.resolved && !row.choices?.length && row.suggestion && !editing && (
         <div className="name-status">
           <span className="muted">Similar to {row.suggestion.name}.</span>
           <button type="button" className="link-btn" onClick={() => onChange({ keep: false, name: row.suggestion.name, ingredientId: row.suggestion.id, ingredientUom: row.suggestion.uom, category: row.suggestion.category ?? row.category, confirmed: true })}>Use it</button>

@@ -3,8 +3,8 @@
 //   backup.json        { app, format, createdAt, migrations, counts, tables: { name: rows } }
 //   uploads/<file>     each image referenced by the `images` table
 //
-// Restores accept backups from this or an older schema (missing columns take their
-// defaults); a backup from a newer schema is refused.
+// Restores accept backups whose migrations this build has (missing columns take their
+// defaults); any other backup is refused.
 
 import { randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -18,17 +18,15 @@ import pg from 'pg';
 import { pool, tx } from './db.js';
 import { repoRoot, uploadDir } from './images.js';
 import { HttpError } from './validate.js';
-import { currentNames } from './migrate.js';
 
 const APP = 'food.db';
 const FORMAT = 1;
-/** Oldest schema a backup can come from: 007 dropped the columns earlier backups depend on. */
-const MIN_MIGRATION = '007_drop_legacy_columns.sql';
 
 /** Insert order respects foreign keys; TRUNCATE takes them all at once. */
 export const TABLES = [
-  'ingredients', 'ingredient_aliases', 'receipts', 'ingredient_purchases', 'receipt_lines',
-  'spice_blends', 'spice_blend_items', 'recipes', 'recipe_ingredients', 'events', 'event_recipes', 'event_amounts', 'images',
+  'ingredients', 'ingredient_aliases', 'ingredient_pair_dismissals', 'receipts', 'ingredient_purchases', 'receipt_lines',
+  'spice_blends', 'spice_blend_items', 'recipes', 'recipe_ingredients', 'events', 'event_recipes', 'event_amounts', 'event_blends',
+  'event_sales', 'event_sale_items', 'images',
 ];
 
 const IMAGE_FILE = /^[A-Za-z0-9-]+\.(jpg|png|webp|gif)$/;
@@ -160,15 +158,12 @@ async function validate(data, files) {
     throw new HttpError(400, 'That archive isn’t a food.db backup.');
   }
   if (data.format !== FORMAT) throw new HttpError(400, `Backup format ${data.format} isn’t supported by this version.`);
-  // Restore fills in anything a backup from 007 on lacks (missing columns take their defaults).
-  const migrations = currentNames(data.migrations, MIN_MIGRATION);
-  if (!migrations) {
-    throw new HttpError(409, 'This backup is from a version older than the units-of-measure update and can’t be restored.');
-  }
+  // Restore fills in anything a backup from an older schema lacks (missing columns take their defaults).
+  const { migrations } = data;
   const known = new Set(await currentMigrations());
-  const newer = migrations.filter((m) => !known.has(m));
-  if (newer.length) {
-    throw new HttpError(409, `This backup was made by a newer version of food.db (it includes ${newer.join(', ')}). Update the app, then restore.`);
+  const unknown = migrations.filter((m) => !known.has(m));
+  if (unknown.length) {
+    throw new HttpError(409, `This backup was made by a version of food.db that this one can’t restore (it lists ${unknown.join(', ')}). Restore it with the matching version.`);
   }
 
   const warnings = [];
