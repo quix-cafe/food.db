@@ -131,6 +131,15 @@ export function ReceiptImportForm({ onDone }) {
     if (file.type.startsWith('image/')) return setPhotos((p) => [...p, file]);
     setText(await file.text());
   };
+  const readFiles = (files) => {
+    const json = files.filter((f) => !f.type.startsWith('image/'));
+    if (json.length > 1) {
+      setError(`That’s ${json.length} receipt files. Only one receipt can be imported at a time: drop one .json file, save it, then import the next.`);
+      return;
+    }
+    setError(null);
+    files.forEach(readFile);
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -140,6 +149,10 @@ export function ReceiptImportForm({ onDone }) {
       parsed = JSON.parse(text);
     } catch (err) {
       return setError(`That isn't valid JSON: ${err.message}`);
+    }
+    // A list of whole receipts (each with its own items) would be read as one receipt's lines.
+    if (Array.isArray(parsed) && parsed.filter((r) => r && typeof r === 'object' && Array.isArray(r.items)).length > 1) {
+      return setError(`That’s ${parsed.length} receipts. Only one receipt can be imported at a time: paste one, save it, then import the next.`);
     }
     setBusy(true);
     try {
@@ -158,22 +171,22 @@ export function ReceiptImportForm({ onDone }) {
   return (
     <form onSubmit={submit} className="modal-body" style={{ padding: 0 }}>
       <div className="prompt-tip">
-        <span>Give the receipt photo to your model (e.g. qwen) and ask it to <q>{RECEIPT_PROMPT}</q>, then paste its reply below.</span>
+        <span><b>One receipt at a time.</b> Give that receipt’s photo to your model (e.g. qwen) and ask it to <q>{RECEIPT_PROMPT}</q>, then paste its reply below. To add another receipt, import it after saving this one.</span>
         <button type="button" className="btn small" onClick={copyPrompt}>{copied ? 'Copied' : 'Copy prompt'}</button>
       </div>
       <div
         className={`dropzone ${over ? 'over' : ''}`}
         onDragOver={(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave={() => setOver(false)}
-        onDrop={(e) => { e.preventDefault(); setOver(false); [...e.dataTransfer.files].forEach(readFile); }}
+        onDrop={(e) => { e.preventDefault(); setOver(false); readFiles([...e.dataTransfer.files]); }}
       >
-        Drop a receipt <b>.json</b> file and its photos here, or{' '}
+        Drop one receipt’s <b>.json</b> file and its photos here, or{' '}
         <label style={{ color: 'var(--basil)', fontWeight: 650, cursor: 'pointer' }}>
           choose files
-          <input type="file" accept=".json,application/json,image/*" multiple className="visually-hidden" onChange={(e) => [...e.target.files].forEach(readFile)} />
+          <input type="file" accept=".json,application/json,image/*" multiple className="visually-hidden" onChange={(e) => readFiles([...e.target.files])} />
         </label>
       </div>
-      <Field label="Receipt JSON" hint="Most key names work: vendor or merchant, items with name or description, quantity, unit_price, and total or price.">
+      <Field label="Receipt JSON (one receipt)" hint="Paste the JSON for a single receipt. Most key names work: vendor or merchant, items with name or description, quantity, unit_price, and total or price.">
         <textarea className="input" rows={9} value={text} onChange={(e) => setText(e.target.value)} spellCheck={false}
           placeholder={'{\n  "vendor": "Restaurant Depot",\n  "date": "2026-10-14",\n  "items": [{ "name": "Flour 50 lb", "quantity": 1, "total": 28.90 }]\n}'} />
       </Field>

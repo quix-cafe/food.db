@@ -151,6 +151,7 @@ test('receipt lines skipped during review can be saved later', { skip }, async (
   });
   assert.equal(first.status, 201);
   assert.equal(first.data.purchases[0].receiptLine, 0);
+  assert.deepEqual([first.data.purchases[0].ingredientName, first.data.purchases[0].receiptName], ['Flour, all-purpose', 'FLR AP']);
 
   let detail = (await api('GET', `/receipts/${receipt.id}`)).data;
   assert.deepEqual(detail.pendingLines.map((l) => l.name), ['LMNS', 'DONATION']);

@@ -10,7 +10,7 @@ function ChartTooltip({ active, payload, unit }) {
     <div className="chart-tip">
       <b>{date(p.date)}</b>
       <div><span style={{ color: p.color }}>●</span> {perUnit(p.raw, unit)}</div>
-      <div className="muted">{p.vendor}</div>
+      <div className="muted">{p.vendor}{p.lines > 1 ? ` · average of ${p.lines} lines` : ''}</div>
     </div>
   );
 }
@@ -19,8 +19,9 @@ const VendorDot = ({ cx, cy, payload, active }) =>
   cx == null ? null : <circle cx={cx} cy={cy} r={active ? 6 : 4} fill={payload.color} stroke="#fff" strokeWidth={2} />;
 
 /**
- * Price per unit of measure over time: one line through every purchase, so a move between
- * stores or pack sizes shows as price movement. Points are colored by vendor.
+ * Price per unit of measure over time: one line through every trip (a receipt's lines of the
+ * ingredient, averaged), so a move between stores or pack sizes shows as price movement but
+ * two packs of different weights on one receipt don't. Points are colored by vendor.
  */
 export default function PriceChart({ purchases, uom }) {
   const unit = uom ?? 'unit';
@@ -32,7 +33,7 @@ export default function PriceChart({ purchases, uom }) {
       if (!vendorOrder.includes(vendor)) vendorOrder.push(vendor);
       const color = SERIES[vendorOrder.indexOf(vendor)] ?? OTHER;
       // `i` keeps two purchases on the same day as separate points.
-      return { i, date: p.date, vendor, color, cost: Number(p.unitPrice), raw: p.unitPrice }; // Number for plotting only
+      return { i, date: p.date, vendor, color, lines: p.lines, cost: Number(p.unitPrice), raw: p.unitPrice }; // Number for plotting only
     });
     return { rows, vendors: vendorOrder };
   }, [purchases]);

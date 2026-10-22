@@ -15,6 +15,7 @@ export const Icon = {
   print: () => <svg {...s}><path d="M6.5 9V3h11v6" /><rect x="3" y="9" width="18" height="8" rx="2" /><path d="M6.5 14h11v7h-11z" /></svg>,
   search: () => <svg {...s}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>,
   plus: () => <svg {...s}><path d="M12 5v14M5 12h14" /></svg>,
+  check: () => <svg {...s}><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>,
   close: () => <svg {...s}><path d="M6 6l12 12M18 6 6 18" /></svg>,
   dots: () => <svg {...s}><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></svg>,
   grip: () => <svg {...s} strokeWidth="2.5"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" /></svg>,
@@ -64,7 +65,7 @@ export function LeaveModal({ blocker, children, error, onSave, saving }) {
   );
 }
 
-export function Modal({ title, onClose, children }) {
+export function Modal({ title, onClose, children, className = '' }) {
   const ref = useRef(null);
   const id = useId();
   useEscape(onClose);
@@ -72,7 +73,7 @@ export function Modal({ title, onClose, children }) {
   return (
     <>
       <div className="scrim" onClick={onClose} />
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby={id} ref={ref} tabIndex={-1}>
+      <div className={`modal ${className}`} role="dialog" aria-modal="true" aria-labelledby={id} ref={ref} tabIndex={-1}>
         <div className="modal-head">
           <h2 id={id}>{title}</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close"><Icon.close /></button>

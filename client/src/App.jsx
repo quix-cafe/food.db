@@ -30,6 +30,7 @@ function QuickAdd({ onClose }) {
         />
         <Link to="/recipes/new" className="tab" onClick={onClose}>New recipe</Link>
         <Link to="/spice-lab/new" className="tab" onClick={onClose}>New spice blend</Link>
+        <Link to="/spice-lab/new-sauce" className="tab" onClick={onClose}>New sauce</Link>
       </div>
       {tab === 'manual' ? <NewIngredientForm onDone={onClose} /> : <ReceiptImportForm onDone={onClose} />}
     </Modal>
@@ -109,7 +110,8 @@ export default function App() {
             <Route path="/events/:id" element={<EventPlanner />} />
             <Route path="/backup" element={<BackupPage />} />
             <Route path="/spice-lab" element={<SpiceLabPage />} />
-            <Route path="/spice-lab/new" element={<BlendEditor />} />
+            <Route path="/spice-lab/new" element={<BlendEditor key="new" />} />
+            <Route path="/spice-lab/new-sauce" element={<BlendEditor key="new-sauce" kind="sauce" />} />
             <Route path="/spice-lab/:id" element={<BlendEditor />} />
             <Route path="*" element={<main className="page"><div className="panel empty"><h2>Page not found</h2><Link className="btn" to="/ingredients">Go to ingredients</Link></div></main>} />
           </Routes>

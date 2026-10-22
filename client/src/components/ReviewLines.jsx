@@ -18,6 +18,8 @@ export const toRow = (item, line = item.line ?? null) => ({
   keep: !!item.name, // use the receipt's wording as-is
   resolved: item.match ?? null, // what that wording resolves to (saved alias or exact name)
   suggestion: item.suggestion ?? null,
+  choices: item.choices ?? null, // a saved receipt name too generic to apply: what it was saved as before
+  ambiguous: item.ambiguous ?? null, // why: 'receipt' (several lines here) or 'history'
   name: '', // the rename, when not keeping the receipt wording
   ingredientId: null,
   category: item.category ?? '',
@@ -65,6 +67,7 @@ export function toPurchaseItem(r) {
     ingredientId: t.kind === 'existing' ? t.id : undefined,
     name: t.name, // with an id, a capitalization change renames the ingredient
     alias: t.alias ? r.source : undefined,
+    skipAlias: t.kind === 'new' && r.keep && r.choices?.length ? true : undefined, // as shown: not matched through it
     category: r.category,
     quantity: r.quantity,
     packSize: r.packSize,

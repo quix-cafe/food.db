@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { Cell, Pie, PieChart, Tooltip } from 'recharts';
-import { BLEND_UNITS, SPICE_GRAMS_PER_TSP, calculateBlend, normalizeUnit, parseAmount } from '@kitchen/shared';
+import { BLEND_UNITS, BLEND_UOM, SAUCE_CONTAINERS, SAUCE_GRAMS_PER_TSP, SAUCE_UNITS, SAUCE_UOM, SPICE_GRAMS_PER_TSP, calculateBlend, normalizeUnit, parseAmount } from '@kitchen/shared';
 import { api, notifyDataChanged } from '../api.js';
 import { useApi, useLeaveGuard, useRowReorder } from '../hooks.js';
 import { Decimal, money, qty, toDecimal, unitMoney } from '../format.js';
@@ -13,21 +13,21 @@ import { Field, Icon, LeaveModal, Modal, Notice, Spinner, TestBadge, useToast } 
 const colorAt = (i) => SERIES[i] ?? OTHER;
 
 /**
- * Donut of a blend by volume. items: calculateBlend items, in blend order. Spices beyond the
+ * Donut of a blend by weight. items: calculateBlend items, in blend order. Spices beyond the
  * palette are folded into one "Other" slice rather than given made-up colors.
  */
-function BlendPie({ items, totalTsp, size = 220, interactive = true }) {
+function BlendPie({ items, totalGrams, size = 220, interactive = true }) {
   const slices = [];
   let other = 0;
   items.forEach((it, i) => {
-    const tsp = toDecimal(it.tsp);
-    if (!tsp || tsp.isZero()) return;
-    if (i < SERIES.length) slices.push({ name: it.name || 'Unnamed spice', value: tsp.toNumber(), share: it.share, label: `${it.amount} ${it.unit}`, color: colorAt(i) });
-    else other += tsp.toNumber();
+    const grams = toDecimal(it.grams);
+    if (!grams || grams.isZero()) return;
+    if (i < SERIES.length) slices.push({ name: it.name || 'Unnamed spice', value: grams.toNumber(), share: it.share, label: `${it.amount} ${it.unit}`, color: colorAt(i) });
+    else other += grams.toNumber();
   });
   if (other) {
-    const share = toDecimal(totalTsp)?.isZero() ? null : ((other / Number(totalTsp)) * 100).toFixed(1);
-    slices.push({ name: 'Other spices', value: other, share, label: `${qty(other)} tsp`, color: OTHER });
+    const share = toDecimal(totalGrams)?.isZero() ? null : ((other / Number(totalGrams)) * 100).toFixed(1);
+    slices.push({ name: 'Other spices', value: other, share, label: `${qty(other)} g`, color: OTHER });
   }
   if (!slices.length) {
     return <div className="blend-pie-empty" style={{ width: size, height: size }}>Add spices to see the breakdown</div>;
@@ -43,8 +43,8 @@ function BlendPie({ items, totalTsp, size = 220, interactive = true }) {
       </PieChart>
       {interactive && (
         <div className="blend-pie-center" aria-hidden="true">
-          <b>{qty(totalTsp)}</b>
-          <span>tsp</span>
+          <b>{qty(totalGrams)}</b>
+          <span>g</span>
         </div>
       )}
     </div>
@@ -69,15 +69,18 @@ export default function SpiceLabPage() {
       <div className="page-head">
         <div>
           <h1>Spice Lab</h1>
-          <p>Build spice blends by the pinch, teaspoon or ounce. Each blend can be added to a recipe like a single ingredient.</p>
+          <p>Build spice blends by the pinch, teaspoon or bunch, and sauces by the container. Each can be added to a recipe like a single ingredient.</p>
         </div>
-        <Link className="btn primary" to="/spice-lab/new"><Icon.plus /> New blend</Link>
+        <div className="form-actions">
+          <Link className="btn orange" to="/spice-lab/new-sauce"><Icon.plus /> New sauce</Link>
+          <Link className="btn primary" to="/spice-lab/new"><Icon.plus /> New blend</Link>
+        </div>
       </div>
       {error && <Notice kind="error">{error.message}</Notice>}
       {loading && !data && <Spinner />}
       {data && !data.length && (
         <div className="panel empty">
-          <h2>No blends yet</h2>
+          <h2>No blends or sauces yet</h2>
           <p>Start with a few spices and adjust the amounts until the balance looks right.</p>
           <Link className="btn primary" to="/spice-lab/new">Create a blend</Link>
         </div>
@@ -85,10 +88,14 @@ export default function SpiceLabPage() {
       <div className="gallery">
         {(data ?? []).map((b) => (
           <article key={b.id} className="panel recipe-card blend-card">
-            <BlendPie items={b.items} totalTsp={b.totalTsp} size={84} interactive={false} />
+            <BlendPie items={b.items} totalGrams={b.totalGrams} size={84} interactive={false} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
               <h3><Link to={`/spice-lab/${b.id}`}>{b.name}</Link> <TestBadge item={b} /></h3>
-              <span className="muted">{b.items.length} spice{b.items.length === 1 ? '' : 's'}, {qty(b.totalTsp)} tsp per batch</span>
+              <span className="muted">
+                {b.kind === 'sauce'
+                  ? `Sauce: ${b.items.length} ingredient${b.items.length === 1 ? '' : 's'}, ${b.container} (${qty(b.batchSize)} oz) per batch`
+                  : `${b.items.length} spice${b.items.length === 1 ? '' : 's'}, ${qty(b.totalGrams)} g per batch`}
+              </span>
               <div className="blend-swatches">
                 {b.items.slice(0, SERIES.length).map((it, i) => <span key={i}><i style={{ background: colorAt(i) }} />{it.name}</span>)}
                 {b.items.length > SERIES.length && <span><i style={{ background: OTHER }} />+{b.items.length - SERIES.length} more</span>}
@@ -102,10 +109,12 @@ export default function SpiceLabPage() {
 }
 
 let nextKey = 1;
-const blank = { name: '', notes: '', servings: '1', items: [] };
+const blankFor = (kind) => ({ name: '', kind, container: kind === 'sauce' ? '1 qt' : null, notes: '', servings: '1', items: [] });
 
 const fromServer = (b) => ({
   name: b.name,
+  kind: b.kind,
+  container: b.container,
   notes: b.notes ?? '',
   servings: String(b.servings),
   isTest: b.isTest,
@@ -122,12 +131,15 @@ const fromServer = (b) => ({
 });
 
 const apiItems = (items) => items.map(({ ingredientId, name, amount, unit }) => (ingredientId ? { ingredientId, amount, unit } : { name, amount, unit }));
-const savedShape = (f) => JSON.stringify({ name: f.name, notes: f.notes, servings: f.servings, items: apiItems(f.items) });
+const apiBody = (f) => ({ name: f.name, kind: f.kind, container: f.container, notes: f.notes, servings: f.servings, items: apiItems(f.items) });
+const savedShape = (f) => JSON.stringify(apiBody(f));
 const wholeNumber = (v) => /^\d+$/.test(String(v).trim()) && Number(v) > 0;
 const amountProblem = (it) => { const a = parseAmount(it.amount); return !a || a.lte(0); };
 
-export function BlendEditor() {
+/** Edits a spice blend, or a sauce (`kind="sauce"` for a new one; a saved one keeps its kind). */
+export function BlendEditor({ kind: newKind = 'spice' }) {
   const { id } = useParams();
+  const blank = useMemo(() => blankFor(newKind), [newKind]);
   const [form, setForm] = useState(id ? null : blank);
   const [saved, setSaved] = useState(id ? null : savedShape(blank));
   const [loadError, setLoadError] = useState(null);
@@ -164,7 +176,7 @@ export function BlendEditor() {
       })
       .catch((err) => !stale && setLoadError(err.message));
     return () => { stale = true; };
-  }, [id]);
+  }, [id, blank]);
 
   const dirty = !!form && saved !== savedShape(form);
   const { blocker, allowLeave } = useLeaveGuard(dirty, id);
@@ -173,7 +185,7 @@ export function BlendEditor() {
   const breakdown = useMemo(() => form && calculateBlend(form.items.map((it) => ({
     ...it,
     amount: parseAmount(it.amount)?.toString() ?? '0',
-  }))), [form]);
+  })), form), [form]);
 
   if (loadError) return <main className="page"><Notice kind="error">{loadError}</Notice><Link to="/spice-lab">Back to the Spice Lab</Link></main>;
   if (!form) return <main className="page"><Spinner /></main>;
@@ -181,10 +193,15 @@ export function BlendEditor() {
   const setItem = (key, patch) => setForm((f) => ({ ...f, items: f.items.map((it) => (it.key === key ? { ...it, ...patch } : it)) }));
   const removeItem = (key) => setForm((f) => ({ ...f, items: f.items.filter((it) => it.key !== key) }));
   const addItem = (item) => {
-    setForm((f) => ({ ...f, items: [...f.items, { key: nextKey++, amount: '1', unit: 'tsp', ...item }] }));
+    setForm((f) => ({ ...f, items: [...f.items, { key: nextKey++, amount: '1', unit: form.kind === 'sauce' ? 'fl oz' : BLEND_UOM, ...item }] }));
     setSearch('');
   };
+  const sauce = form.kind === 'sauce';
+  const noun = sauce ? 'ingredient' : 'spice';
+  const thing = sauce ? 'sauce' : 'blend';
   const addIngredient = (ing) => addItem({
+    // A sauce's ingredients start in their own unit (a bunch of cilantro); spices in grams.
+    ...(sauce && ing.uom ? { unit: normalizeUnit(ing.uom) ?? ing.uom.trim().toLowerCase() } : {}),
     ingredientId: ing.id, name: ing.name, packPrice: ing.latestPackPrice, packSize: ing.latestPackSize, uom: ing.uom,
   });
 
@@ -199,12 +216,12 @@ export function BlendEditor() {
     setSaving(true);
     setSaveError(null);
     try {
-      const b = await api(id ? `/blends/${id}` : '/blends', { method: id ? 'PUT' : 'POST', body: { name: form.name, notes: form.notes, servings: form.servings, items: apiItems(form.items) } });
+      const b = await api(id ? `/blends/${id}` : '/blends', { method: id ? 'PUT' : 'POST', body: apiBody(form) });
       const f = fromServer(b);
       setForm(f);
       setSaved(savedShape(f));
       notifyDataChanged();
-      toast(id ? 'Blend saved' : 'Blend created');
+      toast(id ? `${sauce ? 'Sauce' : 'Blend'} saved` : `${sauce ? 'Sauce' : 'Blend'} created`);
       if (!id) {
         allowLeave();
         navigate(`/spice-lab/${b.id}`, { replace: true });
@@ -232,19 +249,21 @@ export function BlendEditor() {
   };
 
   const costed = breakdown.items.filter((it) => it.cost).length;
-  const grams = toDecimal(breakdown.totalTsp).times(SPICE_GRAMS_PER_TSP);
+  const grams = toDecimal(breakdown.totalGrams);
+  const tsp = grams.div(SPICE_GRAMS_PER_TSP);
+  const batch = toDecimal(breakdown.batchSize);
 
   return (
     <main className="page">
       <div className="page-head">
         <div>
           <Link to="/spice-lab" className="muted">Spice Lab</Link>
-          <h1>{form.name || 'New blend'}<TestBadge item={form} /></h1>
+          <h1>{form.name || `New ${thing}`}<TestBadge item={form} /></h1>
         </div>
         <div className="form-actions">
           {id && <button className="btn ghost" onClick={() => setDeleting(true)}><Icon.trash /> Delete</button>}
           <button className="btn primary" disabled={!dirty || saving || problems} onClick={save}>
-            {saving && <Spinner />} {id ? (dirty ? 'Save changes' : 'Saved') : 'Create blend'}
+            {saving && <Spinner />} {id ? (dirty ? 'Save changes' : 'Saved') : `Create ${thing}`}
           </button>
         </div>
       </div>
@@ -252,8 +271,15 @@ export function BlendEditor() {
 
       <section className="panel panel-pad">
         <div className="form-grid">
-          <Field label="Blend name" className="span-2"><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. House rub" /></Field>
-          <Field label="Notes" className="span-2"><textarea className="input" rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Grind, toast, what it goes with…" /></Field>
+          <Field label={sauce ? 'Sauce name' : 'Blend name'} className="span-2"><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={sauce ? 'e.g. Cilantro sauce' : 'e.g. House rub'} /></Field>
+          <Field label="Notes" className="span-2"><textarea className="input" rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder={sauce ? 'Blend, strain, how long it keeps…' : 'Grind, toast, what it goes with…'} /></Field>
+          {sauce && (
+            <Field label="Container" hint="One batch fills one; recipes use the sauce in oz">
+              <select className="select" value={form.container} onChange={(e) => setForm({ ...form, container: e.target.value })}>
+                {Object.entries(SAUCE_CONTAINERS).map(([c, oz]) => <option key={c} value={c}>{c} ({oz} oz)</option>)}
+              </select>
+            </Field>
+          )}
           <Field label="One batch makes" hint="Servings, saved with the blend">
             <input className="input num" inputMode="numeric" value={form.servings} aria-invalid={!wholeNumber(form.servings)} onChange={(e) => setForm({ ...form, servings: e.target.value })} />
           </Field>
@@ -276,24 +302,43 @@ export function BlendEditor() {
 
       <section className="panel">
         <div className="blend-summary">
-          <BlendPie items={breakdown.items} totalTsp={breakdown.totalTsp} />
+          <BlendPie items={breakdown.items} totalGrams={breakdown.totalGrams} />
           <div className="blend-facts">
-            <div><span>One batch ({base} serving{base === 1 ? '' : 's'})</span><b>{qty(breakdown.totalTsp)} tsp</b><small>about {grams.toDecimalPlaces(0).toString()} g</small></div>
-            <div>
-              <span>For {wholeNumber(needed) ? needed : base} serving{(wholeNumber(needed) ? Number(needed) : base) === 1 ? '' : 's'}</span>
-              <b className={scaled ? 'scaled' : ''}>{qty(toDecimal(breakdown.totalTsp).times(scale))} tsp</b>
-              <small>about {grams.times(scale).toDecimalPlaces(0).toString()} g</small>
-            </div>
-            <div><span>Spices</span><b>{form.items.length}</b></div>
+            {sauce ? (
+              <>
+                <div><span>One batch ({base} serving{base === 1 ? '' : 's'})</span><b>{qty(batch)} {SAUCE_UOM}</b><small>{form.container} container</small></div>
+                <div>
+                  <span>For {wholeNumber(needed) ? needed : base} serving{(wholeNumber(needed) ? Number(needed) : base) === 1 ? '' : 's'}</span>
+                  <b className={scaled ? 'scaled' : ''}>{qty(batch.times(scale))} {SAUCE_UOM}</b>
+                  <small>{qty(scale, 2)} container{scale.eq(1) ? '' : 's'}</small>
+                </div>
+              </>
+            ) : (
+              <>
+                <div><span>One batch ({base} serving{base === 1 ? '' : 's'})</span><b>{qty(grams)} g</b><small>about {qty(tsp, 1)} tsp</small></div>
+                <div>
+                  <span>For {wholeNumber(needed) ? needed : base} serving{(wholeNumber(needed) ? Number(needed) : base) === 1 ? '' : 's'}</span>
+                  <b className={scaled ? 'scaled' : ''}>{qty(grams.times(scale))} g</b>
+                  <small>about {qty(tsp.times(scale), 1)} tsp</small>
+                </div>
+              </>
+            )}
+            <div><span>{sauce ? 'Ingredients' : 'Spices'}</span><b>{form.items.length}</b></div>
             <div>
               <span>Cost</span>
               <b>{breakdown.cost ? money(breakdown.cost) : '—'}</b>
               <small>
-                {breakdown.cost && breakdown.costPerTsp ? `${unitMoney(breakdown.costPerTsp)} / tsp. ` : ''}
-                {form.items.length ? `${costed} of ${form.items.length} spices priced` : ''}
+                {sauce
+                  ? (breakdown.cost && batch ? `${unitMoney(toDecimal(breakdown.cost).div(batch))} / ${SAUCE_UOM}. ` : '')
+                  : (breakdown.cost && breakdown.costPerGram ? `${unitMoney(breakdown.costPerGram)} / g. ` : '')}
+                {form.items.length ? `${costed} of ${form.items.length} ${noun}s priced` : ''}
               </small>
             </div>
-            <p className="muted">Slices are by volume. Weights (g, oz) count as about {SPICE_GRAMS_PER_TSP} g per tsp, typical for ground spices.</p>
+            <p className="muted">
+              {sauce
+                ? `Slices are by weight. Spoons and cups count as water, about ${SAUCE_GRAMS_PER_TSP} g per tsp; a bunch of herbs about 75 g.`
+                : `Slices are by weight. Spoons and pinches count as about ${SPICE_GRAMS_PER_TSP} g per tsp, typical for ground spices; a bunch of herbs about 75 g.`}
+            </p>
           </div>
         </div>
 
@@ -302,20 +347,22 @@ export function BlendEditor() {
             <thead>
               <tr>
                 <th style={{ width: 28 }}><span className="visually-hidden">Reorder</span></th>
-                <th style={{ minWidth: 200 }}>Spice</th>
+                <th style={{ minWidth: 200 }}>{sauce ? 'Ingredient' : 'Spice'}</th>
                 <th className="num">Amount</th>
                 <th>Unit</th>
-                <th className="num">In tsp</th>
-                <th className="num" title="Amount × servings needed ÷ servings one batch makes">Scaled volume</th>
+                <th className="num">In g</th>
+                <th className="num" title="Amount × servings needed ÷ servings one batch makes">Scaled amount</th>
                 <th className="num">Share</th>
-                <th className="num" title="From the spice's latest purchase, when it's in the ingredient database">Cost</th>
+                <th className="num" title={`From the ${noun}'s latest purchase, when it's in the ingredient database`}>Cost</th>
                 <th><span className="visually-hidden">Remove</span></th>
               </tr>
             </thead>
             <tbody>
               {form.items.map((it, i) => {
                 const b = breakdown.items[i];
-                const units = BLEND_UNITS.includes(it.unit) ? BLEND_UNITS : [...BLEND_UNITS, it.unit];
+                // Offer the linked ingredient's own unit too, so a "box" of garlic can be costed.
+                const own = it.uom ? normalizeUnit(it.uom) ?? it.uom.trim().toLowerCase() : null;
+                const units = [...new Set([...(sauce ? SAUCE_UNITS : BLEND_UNITS), own, it.unit].filter(Boolean))];
                 return (
                   <tr key={it.key} {...rowProps(i)}>
                     <td>
@@ -338,7 +385,7 @@ export function BlendEditor() {
                         {units.map((u) => <option key={u} value={u}>{u}</option>)}
                       </select>
                     </td>
-                    <td className="num muted">{b?.tsp ? qty(b.tsp) : '—'}</td>
+                    <td className="num muted">{b?.grams ? qty(b.grams) : '—'}</td>
                     <td className={`num nowrap ${scaled ? 'scaled' : ''}`}>{amountProblem(it) ? '—' : `${qty(parseAmount(it.amount).times(scale))} ${it.unit}`}</td>
                     <td className="num" style={{ fontWeight: 650 }}>{b?.share ? `${b.share}%` : '—'}</td>
                     <td className="num muted">{b?.cost ? money(b.cost) : it.ingredientId ? <span title="No price, or its unit can't be converted from kitchen measures">—</span> : ''}</td>
@@ -346,22 +393,22 @@ export function BlendEditor() {
                   </tr>
                 );
               })}
-              {!form.items.length && <tr><td colSpan={9} className="muted" style={{ padding: 18 }}>Add spices from the ingredient database, or type any spice name below.</td></tr>}
+              {!form.items.length && <tr><td colSpan={9} className="muted" style={{ padding: 18 }}>Add {noun}s from the ingredient database, or type any {noun} name below.</td></tr>}
             </tbody>
           </table>
         </div>
         <div className="panel-pad">
           <IngredientCombobox
-            ariaLabel="Add a spice"
+            ariaLabel={`Add ${sauce ? 'an ingredient' : 'a spice'}`}
             value={search}
             onInput={setSearch}
             onPick={addIngredient}
             exclude={form.items.map((it) => it.ingredientId).filter(Boolean)}
-            placeholder="Add a spice…"
+            placeholder={`Add ${sauce ? 'an ingredient' : 'a spice'}…`}
             footer={(q, close) => q.trim() && (
               <div className="option" role="option" aria-selected="false"
                 onMouseDown={(e) => { e.preventDefault(); addItem({ ingredientId: null, name: q.trim() }); close(); }}>
-                <span>Add “{q.trim()}” as a spice without a price</span>
+                <span>Add “{q.trim()}” as {sauce ? 'an ingredient' : 'a spice'} without a price</span>
               </div>
             )}
           />
@@ -369,14 +416,14 @@ export function BlendEditor() {
       </section>
 
       <LeaveModal blocker={blocker} error={saveError} onSave={id && !problems ? save : undefined} saving={saving}>
-        Your changes to {form.name || 'this blend'} haven’t been saved. If you leave now, they’re lost.
+        Your changes to {form.name || `this ${thing}`} haven’t been saved. If you leave now, they’re lost.
       </LeaveModal>
       {deleting && (
         <Modal title={`Delete ${form.name}?`} onClose={() => setDeleting(false)}>
-          <p>The blend will be deleted. Blends used in a recipe can’t be deleted until they’re removed from it.</p>
+          <p>The {thing} will be deleted. A {thing} used in a recipe can’t be deleted until it’s removed from it.</p>
           <div className="form-actions">
             <button className="btn ghost" onClick={() => setDeleting(false)}>Keep it</button>
-            <button className="btn danger" onClick={remove}>Delete blend</button>
+            <button className="btn danger" onClick={remove}>Delete {thing}</button>
           </div>
         </Modal>
       )}

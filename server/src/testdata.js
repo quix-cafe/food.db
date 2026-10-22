@@ -20,7 +20,8 @@ async function clearIn(c) {
   const files = await filenames(`recipe_id IN (SELECT id FROM recipes WHERE ${recipes})`);
   deleted.recipes = await count(`DELETE FROM recipes WHERE ${recipes}`);
   deleted.blends = await count(`DELETE FROM spice_blends b WHERE is_test
-    AND NOT EXISTS (SELECT 1 FROM recipe_ingredients ri WHERE ri.blend_id = b.id)`);
+    AND NOT EXISTS (SELECT 1 FROM recipe_ingredients ri WHERE ri.blend_id = b.id)
+    AND NOT EXISTS (SELECT 1 FROM event_blends eb WHERE eb.blend_id = b.id)`);
   deleted.ingredients = await count(`DELETE FROM ingredients i WHERE is_test
     AND NOT EXISTS (SELECT 1 FROM recipe_ingredients ri WHERE ri.ingredient_id = i.id)
     AND NOT EXISTS (SELECT 1 FROM spice_blend_items bi WHERE bi.ingredient_id = i.id)`);

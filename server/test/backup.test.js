@@ -88,8 +88,8 @@ test('backup → change everything → restore brings it all back', { skip }, as
 
   const summary = (await api('GET', '/backup/summary')).data;
   assert.deepEqual(summary.counts, {
-    ingredients: 1, ingredient_aliases: 1, receipts: 1, ingredient_purchases: 2, receipt_lines: 2, spice_blends: 0, spice_blend_items: 0,
-    recipes: 1, recipe_ingredients: 1, events: 1, event_recipes: 1, event_amounts: 0, images: 2,
+    ingredients: 1, ingredient_aliases: 1, ingredient_pair_dismissals: 0, receipts: 1, ingredient_purchases: 2, receipt_lines: 2, spice_blends: 0, spice_blend_items: 0,
+    recipes: 1, recipe_ingredients: 1, events: 1, event_recipes: 1, event_amounts: 0, event_blends: 0, event_sales: 0, event_sale_items: 0, images: 2,
   });
 
   const stampsSql = 'SELECT id, created_at::text AS t FROM ingredient_purchases ORDER BY id';
@@ -153,31 +153,17 @@ test('bad uploads and newer-version backups are refused without changes', { skip
   const future = await repack(original.archive, (d) => ({ ...d, migrations: [...d.migrations, '999_future.sql'] }));
   const refused = await inspect(future);
   assert.equal(refused.status, 409);
-  assert.match(refused.data.error, /newer version/);
+  assert.match(refused.data.error, /can’t restore/);
 
   assert.equal((await api('GET', '/backup/snapshots/..%2F..%2Fetc%2Fpasswd')).status, 404);
   assert.deepEqual((await api('GET', '/backup/summary')).data.counts, before);
 });
 
-// Migrations 001–010 were squashed into 001_schema.sql; backups made before list them by name.
-const legacy = (upTo) => ['001_init.sql', '002_ingredient_aliases.sql', '003_receipts_and_images.sql', '004_receipt_lines.sql',
-  '005_used_multiplier_and_price.sql', '006_units_of_measure.sql', '007_drop_legacy_columns.sql', '008_event_amounts.sql',
-  '009_spice_blends.sql', '010_blend_servings.sql'].filter((m) => m.slice(0, 3) <= upTo);
-
-test('backups from before the legacy columns were dropped are refused', { skip }, async () => {
+test('backups from before the migrations were combined are refused', { skip }, async () => {
   const before = (await api('GET', '/backup/summary')).data.counts;
-  const old = await repack(original.archive, (d) => ({ ...d, migrations: legacy('006') }));
+  const old = await repack(original.archive, (d) => ({ ...d, migrations: ['001_schema.sql', '011_test_data.sql', '022_event_sauce_servings.sql'] }));
   const refused = await inspect(old);
   assert.equal(refused.status, 409);
-  assert.match(refused.data.error, /older than the units-of-measure update/);
+  assert.match(refused.data.error, /011_test_data\.sql/);
   assert.deepEqual((await api('GET', '/backup/summary')).data.counts, before);
-});
-
-test('backups listing the migrations from before the squash are accepted', { skip }, async () => {
-  for (const upTo of ['007', '010']) { // 1.0.0 made backups at 010
-    const old = await repack(original.archive, (d) => ({ ...d, migrations: legacy(upTo) }));
-    const res = await inspect(old);
-    assert.equal(res.status, 200, res.data.error);
-    assert.equal(res.data.olderVersion, true);
-  }
 });
