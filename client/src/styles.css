@@ -16,6 +16,8 @@
   --basil-wash: #e2efe7;
   --saffron: #b9831a;
   --carrot: #c2541a;
+  --blue: #2b62b0;
+  --blue-dark: #1f4d8f;
   --carrot-dark: #a5450f;
   --saffron-wash: #fbf0d6;
   --tomato: #c03c2b;
@@ -105,6 +107,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn.primary:hover:not(:disabled) { background: var(--basil-dark); }
 .btn.orange { background: var(--carrot); border-color: var(--carrot); color: #fff; }
 .btn.orange:hover:not(:disabled) { background: var(--carrot-dark); border-color: var(--carrot-dark); }
+/* Quick add: the one blue button, on every page. */
+.btn.quick-add-btn {
+  background: linear-gradient(180deg, #3a74c4, var(--blue)); border-color: var(--blue-dark); color: #fff;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 2px 6px rgba(31, 77, 143, 0.28);
+}
+.btn.quick-add-btn:hover { background: linear-gradient(180deg, var(--blue), var(--blue-dark)); border-color: var(--blue-dark); }
+.btn.quick-add-btn:active { box-shadow: 0 1px 2px rgba(31, 77, 143, 0.3) inset; }
+.btn.quick-add-btn:focus-visible { outline-color: var(--blue); }
 .btn.danger { color: var(--tomato); }
 .btn.danger:hover { border-color: var(--tomato); }
 .btn.danger-solid { background: var(--tomato); border-color: var(--tomato); color: #fff; }
@@ -112,6 +122,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn.ghost { background: transparent; border-color: transparent; }
 .btn.ghost:hover { background: var(--steel-2); }
 .btn.small { padding: 4px 10px; font-size: 0.9rem; }
+.btn.big { padding: 11px 26px; font-size: 1.05rem; }
 .icon-btn {
   display: inline-grid; place-items: center; width: 32px; height: 32px;
   border: 0; border-radius: var(--radius); background: transparent; cursor: pointer; color: var(--ink-2);
@@ -223,14 +234,32 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 }
 @keyframes slide-in { from { transform: translateX(24px); opacity: 0; } }
 .drawer-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--line-soft); }
-.drawer-body { overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 22px; }
+.drawer-body { overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 16px; }
+.drawer .stat { padding: 8px 10px; }
+.drawer .stat b { font-size: 1.15rem; }
+.drawer .grid th, .drawer .grid td { padding-top: 6px; padding-bottom: 6px; }
+/* Ingredient drawer: name, category and unit on one row (stacked on a phone). */
+.ingredient-details { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.3fr) minmax(0, 1fr); column-gap: 10px; }
+.ingredient-details > .field { grid-row: span 2; display: grid; grid-template-rows: subgrid; gap: 4px; }
+.ingredient-details > .field > span { align-self: end; }
+@media (max-width: 640px) { .ingredient-details { grid-template-columns: 1fr 1fr; } .ingredient-details > :first-child { grid-column: 1 / -1; } }
+.unit-weight { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.unit-weight label { font-size: 0.85rem; font-weight: 600; color: var(--ink-2); }
+.unit-weight .input { width: 90px; }
+.unit-weight .select { width: auto; }
+.unit-weight small { flex-basis: 100%; }
+.used-in { display: flex; flex-direction: column; gap: 6px; }
+.used-in ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.used-in li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; padding: 5px 0; border-bottom: 1px solid var(--line-soft); }
+.used-in li:last-child { border-bottom: 0; }
+.used-in li > .muted:last-child { margin-left: auto; font-size: 0.85rem; }
 
 .modal {
   position: fixed; z-index: 51; left: 50%; top: 8vh; transform: translateX(-50%);
   width: min(640px, calc(100vw - 32px)); max-height: 84vh; overflow-y: auto;
   background: var(--paper); border-radius: 10px; box-shadow: 0 20px 48px rgba(28, 42, 51, 0.25);
 }
-.modal-head { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--line-soft); }
+.modal-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px 10px 20px; border-bottom: 1px solid var(--line-soft); }
 .modal-body { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
 
 .menu { position: relative; }
@@ -257,10 +286,9 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 .tab { all: unset; cursor: pointer; padding: 10px 14px; font-weight: 600; color: var(--ink-2); border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .tab[aria-selected='true'] { color: var(--ink); border-color: var(--ink); }
 .tab:focus-visible { outline: 2px solid var(--basil); }
-.quick-add-tabs { display: flex; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-.quick-add-tabs .tabs { border-bottom: 0; }
-.quick-add-tabs .tab { margin-bottom: 0; }
-.quick-add-tabs > a.tab { text-decoration: none; }
+.quick-add-tabs { display: flex; align-items: center; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.quick-add-tabs [role='tablist'] { display: flex; flex-wrap: wrap; }
+.quick-add-tabs .tab { margin-bottom: -1px; text-decoration: none; }
 
 .toast {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 60;
@@ -398,8 +426,15 @@ body:has(.sales-modal) .toast { bottom: auto; top: 16px; }
 .recipe-card h3 a::after { content: ''; position: absolute; inset: 0; }
 .recipe-card .menu { position: absolute; top: 10px; right: 8px; z-index: 2; }
 .recipe-card .menu > .icon-btn { background: rgba(255, 255, 255, 0.9); }
-.card-figure { display: flex; align-items: baseline; gap: 6px; }
-.card-figure b { font-size: 1.7rem; font-stretch: 75%; font-weight: 760; }
+/* Per-serving cost, price and profit side by side, then smaller pills. */
+.card-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; border: 1px solid var(--line-soft); border-radius: var(--radius); }
+.card-figures > div { padding: 7px 10px; min-width: 0; }
+.card-figures > div + div { border-left: 1px solid var(--line-soft); }
+.card-figures dt { font-size: 0.72rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.card-figures dd { margin: 0; font-size: 1.35rem; font-stretch: 75%; font-weight: 760; white-space: nowrap; }
+.card-figures .profit dd { color: var(--basil); }
+.card-figures .loss dd { color: var(--tomato); }
+.card-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-top: -4px; }
 .card-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 0.86rem; color: var(--ink-2); border-top: 1px dashed var(--line); padding-top: 10px; flex-wrap: wrap; }
 
 /* Recipe header: one row of fields; subgrid lines up labels, inputs and hints across columns. */
@@ -412,6 +447,14 @@ body:has(.sales-modal) .toast { bottom: auto; top: 16px; }
 }
 .builder { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
 .builder-lines td, .builder-lines th { padding-left: 8px; padding-right: 8px; }
+.line-name { position: relative; font: inherit; font-weight: 600; color: inherit; text-decoration: none; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.line-name:hover, .line-name:focus-visible { color: var(--basil); text-decoration: underline; }
+/* A small tip beside a link, from its data-tip, on hover or keyboard focus. */
+[data-tip]:hover::after, [data-tip]:focus-visible::after {
+  content: attr(data-tip); position: absolute; left: calc(100% + 8px); top: 50%; transform: translateY(-50%); z-index: 5;
+  padding: 3px 7px; border-radius: 4px; background: var(--ink); color: #fff; font-size: 0.75rem; font-weight: 600;
+  white-space: nowrap; pointer-events: none;
+}
 .builder-lines td { padding-top: 6px; padding-bottom: 6px; }
 .builder-lines .input { padding: 5px 7px; }
 .builder-lines tr.dragging td, .blend-grid tr.dragging td { opacity: 0.4; }
@@ -541,8 +584,10 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 .price-input { display: grid; grid-template-columns: 1fr 150px; gap: 10px; align-items: center; margin-top: 6px; }
 .price-input label { font-weight: 650; }
 /* The menu price reads at the same size as the cost and profit figures below it. */
-.price-input .money-input > span { font-size: 1.4rem; }
-.price-input .money-input .input { font-size: clamp(2rem, 4vw, 2.75rem); font-weight: 820; font-stretch: 62%; line-height: 1; letter-spacing: -0.01em; padding: 4px 8px 4px 26px; text-align: right; }
+.price-input .money-input > span, .price-input .money-input .input { font-size: clamp(2rem, 4vw, 2.75rem); font-weight: 820; font-stretch: 62%; line-height: 1; letter-spacing: -0.01em; }
+.price-input .money-input > span { color: var(--ink); }
+/* Left-aligned so the $ sits against the number, as in "$12.50" below. */
+.price-input .money-input .input { padding: 4px 8px 4px calc(10px + 0.42em); text-align: left; }
 .money-input { position: relative; display: block; }
 .money-input > span { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font-weight: 650; pointer-events: none; }
 .money-input .input { width: 100%; padding-left: 22px; font-size: 1.1rem; font-weight: 750; font-stretch: 80%; }
@@ -703,6 +748,99 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
   .form-grid .span-2 { grid-column: auto; }
   .event-row { grid-template-columns: 60px 1fr; }
   .event-row > :last-child { grid-column: 2; }
+}
+
+/* ---------- Phones ---------- */
+
+/* .hide-sm / .show-sm swap what a phone shows: chips for a dropdown, long tab labels for short ones. */
+.show-sm { display: none !important; }
+.event-head .save-state { display: flex; margin-top: 4px; }
+.page-foot { display: flex; justify-content: flex-end; border-top: 1px dashed var(--line); padding-top: 14px; }
+
+@media (max-width: 640px) {
+  .hide-sm { display: none !important; }
+  .show-sm { display: revert !important; }
+
+  /* The top of every page: a slimmer search bar, Quick add as a + button, and the page title
+     beside its main button, without the description underneath. */
+  .topbar { padding: 8px 12px; gap: 8px; }
+  .quick-add-btn { padding: 8px 11px; }
+  .quick-add-btn .btn-label { display: none; }
+  .page { padding: 14px 12px 24px; gap: 14px; }
+  h1 { font-size: 1.45rem; }
+  .page-head { align-items: center; gap: 8px 12px; }
+  .page-head p { display: none; }
+  .page-head .btn { padding: 7px 12px; }
+  .page-head .form-actions { gap: 6px; }
+  .event-head { flex-wrap: nowrap; align-items: flex-start; }
+  .event-head > div { min-width: 0; }
+
+  /* Quick add: the six "New" choices as a 3 × 2 grid of buttons. */
+  .quick-add-tabs { flex-direction: column; align-items: stretch; gap: 6px; border-bottom: 0; }
+  .quick-add-tabs [role='tablist'] { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .quick-add-tabs .tab { margin: 0; padding: 8px 4px; text-align: center; border: 1px solid var(--line); border-radius: var(--radius); }
+  .quick-add-tabs .tab[aria-selected='true'] { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+  /* Ingredients: category dropdown and name filter share one row. */
+  .toolbar { padding: 10px 12px; gap: 8px; flex-wrap: nowrap; }
+  .toolbar .category-select { flex: 1; width: auto; min-width: 0; }
+  .toolbar .name-filter { flex: 1; min-width: 0; max-width: none !important; }
+
+  /* Tables: tighter cells, so the columns a phone keeps fit across. */
+  table.grid { font-size: 0.88rem; }
+  .grid th, .grid td { padding-left: 8px; padding-right: 8px; }
+  .grid th:first-child, .grid td:first-child { padding-left: 12px; }
+  .grid th:last-child, .grid td:last-child { padding-right: 12px; }
+
+  /* Receipt import: no key-name tip under the JSON box, and a full-width Review items. */
+  .receipt-json small { display: none; }
+  .btn.big { width: 100%; }
+
+  /* Recipe header: room between a hint and the next row's label. */
+  .recipe-header { row-gap: 12px; }
+
+  /* Event tabs as a segmented control, with short labels. */
+  .tabs.segmented-sm { border: 0; background: var(--steel-2); padding: 3px; border-radius: 8px; gap: 2px; }
+  .tabs.segmented-sm .tab { flex: 1; text-align: center; padding: 8px 4px; margin: 0; border: 0; border-radius: 6px; font-size: 0.9rem; }
+  .tabs.segmented-sm .tab[aria-selected='true'] { background: var(--paper); box-shadow: 0 1px 3px rgba(28, 42, 51, 0.18); }
+
+  /* Event figures: three to a row. */
+  .figures { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .figure { padding: 10px; }
+  .figure span { font-size: 0.75rem; }
+  .figure b { font-size: 1.35rem; }
+
+  /* The event's recipe table becomes one card per recipe: name and servings, then its figures
+     (labelled from data-label), then price and deal. Unchosen rows show just their figures. */
+  .recipe-pick.cards-sm, .recipe-pick.cards-sm tbody { display: block; }
+  .recipe-pick.cards-sm thead { display: none; }
+  .recipe-pick.cards-sm tr {
+    display: grid; grid-template-columns: 26px repeat(3, minmax(0, 1fr)); column-gap: 10px; row-gap: 8px;
+    grid-template-areas: 'check name name serv' '. makes cost margin' '. price deal deal';
+    padding: 12px; border-bottom: 1px solid var(--line-soft); align-items: start;
+  }
+  .recipe-pick.cards-sm tr.off { grid-template-areas: 'check name name name' '. makes cost price'; row-gap: 4px; padding: 10px 12px; }
+  .recipe-pick.cards-sm td { display: block; padding: 0; border: 0; text-align: left; }
+  .recipe-pick.cards-sm td[data-label]::before {
+    content: attr(data-label); display: block; margin-bottom: 2px;
+    font-size: 0.68rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
+  }
+  .recipe-pick.cards-sm .c-check { grid-area: check; align-self: center; }
+  .recipe-pick.cards-sm .c-name { grid-area: name; align-self: center; }
+  .recipe-pick.cards-sm .c-serv { grid-area: serv; }
+  .recipe-pick.cards-sm .c-makes { grid-area: makes; }
+  .recipe-pick.cards-sm .c-cost { grid-area: cost; }
+  .recipe-pick.cards-sm .c-margin { grid-area: margin; }
+  .recipe-pick.cards-sm .c-price { grid-area: price; }
+  .recipe-pick.cards-sm .c-deal { grid-area: deal; }
+  .recipe-pick.cards-sm tr.off .c-deal, .recipe-pick.cards-sm tr.off .c-serv, .recipe-pick.cards-sm tr.off .c-margin, .recipe-pick.cards-sm .c-none { display: none; }
+  .recipe-pick.cards-sm .c-serv .input, .recipe-pick.cards-sm .c-makes .select { width: 100% !important; }
+  .recipe-pick.cards-sm .c-name .badge { margin-left: 2px; }
+  .recipe-pick.cards-sm .sale-price { align-items: flex-start; }
+  .recipe-pick.cards-sm .sale-price small { white-space: normal; }
+  .recipe-pick.cards-sm .deal-input .money-input .input { width: 76px; }
+  .recipe-pick.cards-sm tr.group-row { display: block; padding: 8px 12px; background: #f3f6f7; }
+  .recipe-pick.cards-sm tr.group-row td { background: none; padding: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

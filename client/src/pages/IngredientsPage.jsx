@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
-import { isLabor, laborLast } from '@kitchen/shared';
+import { convertUnits, isLabor, laborLast, normalizeUnit } from '@kitchen/shared';
 import { useApi, useDebounced } from '../hooks.js';
 import { Decimal, date, money, pack, perUnit, qty, signedPercent, toDecimal, todayIso, unitMoney } from '../format.js';
 import { CategoryInput, NewIngredientForm, PurchaseFields, UomInput, emptyPurchase } from '../components/forms.jsx';
@@ -18,6 +18,7 @@ const COLUMNS = [
   { key: 'latestVendor', label: 'Vendor' },
   { key: 'latestPurchaseDate', label: 'Last bought' },
   { key: 'purchaseCount', label: 'Purchases', num: true },
+  { key: 'recipeCount', label: 'Recipes', num: true, title: 'Recipes using it, directly or in a Spice Lab blend or sauce' },
 ];
 
 const PAGE_SIZES = [25, 50, 100];
@@ -114,11 +115,7 @@ export default function IngredientsPage() {
           <h1>Ingredients</h1>
           <p>Every ingredient with its most recent purchase price. Open one to see its price history by vendor.</p>
         </div>
-        <div className="form-actions">
-          <a className="btn" href="/api/export/ingredients.csv" download title="Every ingredient with its latest price, as a spreadsheet file"><Icon.download /> Ingredients CSV</a>
-          <a className="btn" href="/api/export/purchases.csv" download title="Every purchase ever recorded, as a spreadsheet file"><Icon.download /> Price history CSV</a>
-          <button className="btn primary" onClick={() => setAdding(true)}><Icon.plus /> New ingredient</button>
-        </div>
+        <button className="btn primary" onClick={() => setAdding(true)}><Icon.plus /> New ingredient</button>
       </div>
       {adding && (
         <Modal title="New ingredient" onClose={() => setAdding(false)}>
@@ -130,13 +127,18 @@ export default function IngredientsPage() {
 
       <section className="panel" ref={tableRef}>
         <div className="toolbar">
-          <div className="chips" role="group" aria-label="Filter by category">
+          {/* Chips on a wide screen; on a phone, where they'd take several rows, a dropdown. */}
+          <div className="chips hide-sm" role="group" aria-label="Filter by category">
             <button className="chip" aria-pressed={!category} onClick={() => setCategory(null)}>All</button>
             {(categories ?? []).filter((c) => !isLabor({ category: c })).map((c) => (
               <button key={c} className="chip" aria-pressed={category === c} onClick={() => setCategory(category === c ? null : c)}>{c}</button>
             ))}
           </div>
-          <input className="input" style={{ maxWidth: 260 }} type="search" placeholder="Filter by name" aria-label="Filter ingredients by name" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          <select className="select show-sm category-select" aria-label="Filter by category" value={category ?? ''} onChange={(e) => setCategory(e.target.value || null)}>
+            <option value="">All categories</option>
+            {(categories ?? []).filter((c) => !isLabor({ category: c })).map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <input className="input name-filter" style={{ maxWidth: 260 }} type="search" placeholder="Filter by name" aria-label="Filter ingredients by name" value={filter} onChange={(e) => setFilter(e.target.value)} />
         </div>
 
         {error && <div className="panel-pad"><Notice kind="error">{error.message}</Notice></div>}
@@ -155,7 +157,7 @@ export default function IngredientsPage() {
               <thead>
                 <tr>
                   {COLUMNS.map((c) => (
-                    <th key={c.key} className={c.num ? 'num' : ''} aria-sort={sort.key === c.key ? (sort.dir > 0 ? 'ascending' : 'descending') : 'none'}>
+                    <th key={c.key} className={c.num ? 'num' : ''} title={c.title} aria-sort={sort.key === c.key ? (sort.dir > 0 ? 'ascending' : 'descending') : 'none'}>
                       <button className="sort-btn" onClick={() => toggleSort(c.key)}>
                         {c.label}
                         {sort.key === c.key && (sort.dir > 0 ? <Icon.up /> : <Icon.down />)}
@@ -179,6 +181,7 @@ export default function IngredientsPage() {
                     <td>{r.latestVendor ?? '—'}</td>
                     <td className="nowrap">{isLabor(r) ? <span className="muted">Service rate</span> : date(r.latestPurchaseDate)}</td>
                     <td className="num">{isLabor(r) ? '—' : r.purchaseCount}</td>
+                    <td className="num">{r.recipeCount || <span className="muted">—</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -253,7 +256,11 @@ function DuplicatesNotice({ duplicates, onReview, onDismiss }) {
   );
 }
 
-function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMerge }) {
+/**
+ * An ingredient's detail panel: prices, details, where it's used, purchases. Also opened over the
+ * recipe builder, which passes no `onMerge` (merging needs this page) and no duplicates.
+ */
+export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMerge }) {
   const { data, error, reload } = useApi(`/ingredients/${id}/history`);
   const { data: vendors } = useApi('/ingredients/vendors');
   const [form, setForm] = useState(null);
@@ -266,10 +273,13 @@ function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMerge }) {
 
   const ing = data?.ingredient;
   useEffect(() => {
-    if (ing) setForm({ name: ing.name, category: ing.category ?? '', uom: ing.uom ?? '' });
-  }, [ing?.id, ing?.name, ing?.category, ing?.uom]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (ing) setForm({ name: ing.name, category: ing.category ?? '', uom: ing.uom ?? '', weight: weightOf(ing), weightUnit: 'oz' });
+  }, [ing?.id, ing?.name, ing?.category, ing?.uom, ing?.unitGrams]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const dirty = form && ing && (form.name !== ing.name || form.category !== (ing.category ?? '') || form.uom !== (ing.uom ?? ''));
+  const weightChanged = form && ing && (form.weight !== weightOf(ing) || (form.weight.trim() !== '' && form.weightUnit !== 'oz'));
+  const dirty = form && ing && (form.name !== ing.name || form.category !== (ing.category ?? '') || form.uom !== (ing.uom ?? '') || weightChanged);
+  // A unit kitchen measures can't reach (box, can, each) can be given a weight, for the Spice Lab.
+  const needsWeight = form && !isLabor(ing) && form.uom.trim() !== '' && !normalizeUnit(form.uom);
 
   const run = async (fn, ok) => {
     setSaving(true);
@@ -289,7 +299,14 @@ function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMerge }) {
 
   const save = (e) => {
     e.preventDefault();
-    run(() => api(`/ingredients/${id}`, { method: 'PATCH', body: form }), 'Ingredient saved');
+    const body = { name: form.name, category: form.category, uom: form.uom };
+    // Sent only when edited, so saving a rename doesn't round the stored grams through oz.
+    if (weightChanged) {
+      const grams = form.weight.trim() === '' ? null : convertUnits(form.weight, form.weightUnit, 'g');
+      if (form.weight.trim() !== '' && !grams?.gt(0)) { setFormError('The weight must be a number above 0'); return; }
+      body.unitGrams = grams ? grams.toFixed(4) : '';
+    }
+    run(() => api(`/ingredients/${id}`, { method: 'PATCH', body }), 'Ingredient saved');
   };
 
   const addPurchase = async (e) => {
@@ -372,20 +389,34 @@ function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMerge }) {
           </section>
           </>)}
 
-          <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <h3>Details</h3>
-            <div className="form-grid">
-              <Field label="Name" className="span-2"><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
+            <div className="ingredient-details">
+              <Field label="Name"><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
               <Field label="Category"><CategoryInput value={form.category} onChange={(category) => setForm((f) => ({ ...f, category }))} /></Field>
-              <Field label="Unit of measurement" hint="Pack sizes and recipe amounts are in this unit. Changing it doesn’t convert them.">
+              <Field label="Unit of measurement">
                 <UomInput value={form.uom} onChange={(uom) => setForm((f) => ({ ...f, uom }))} required />
               </Field>
             </div>
+            {needsWeight && (
+              <div className="unit-weight">
+                <label htmlFor={`unit-weight-${id}`}>1 {form.uom} weighs</label>
+                <input id={`unit-weight-${id}`} className="input num" inputMode="decimal" value={form.weight} placeholder={form.weightUnit === 'g' ? '75' : form.weightUnit === 'oz' ? '2.65' : '0.17'}
+                  onChange={(e) => setForm({ ...form, weight: e.target.value })} />
+                <select className="select" aria-label="Weight unit" value={form.weightUnit} onChange={(e) => setForm({ ...form, weightUnit: e.target.value })}>
+                  {['g', 'oz', 'lb'].map((u) => <option key={u}>{u}</option>)}
+                </select>
+                <small className="muted">For the Spice Lab’s weights and costs; until it’s set, about 75 g is assumed.</small>
+              </div>
+            )}
             {formError && <Notice kind="error">{formError}</Notice>}
-            <div className="form-actions">
-              <button className="btn primary" disabled={!dirty || saving}>Save changes</button>
+            <div className="form-actions" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+              <small className="muted">Pack sizes and recipe amounts are in this unit; changing it doesn’t convert them.</small>
+              <button className="btn primary small" disabled={!dirty || saving}>Save changes</button>
             </div>
           </form>
+
+          <UsedIn usedIn={data.usedIn} ing={ing} />
 
           {!labor && (<>
           <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -485,7 +516,7 @@ function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMerge }) {
               </>
             ) : (
               <>
-                {!labor && (
+                {!labor && onMerge && (
                   <button className="btn" onClick={() => onMerge({ first: { ...ing, purchaseCount: data.purchases.length } })}>
                     Merge into another ingredient…
                   </button>
@@ -545,6 +576,41 @@ function VendorInput({ purchase, ingredientId, run }) {
       aria-label={`Vendor for the purchase on ${date(purchase.date)}`} title={purchase.receiptId ? 'Changes this purchase only, not the receipt' : undefined}
       onChange={(e) => setValue(e.target.value)} onBlur={commit}
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') undo(e, value, saved, setValue); }} />
+  );
+}
+
+/** What one of the ingredient's units weighs, in oz for the details form ('' when not set). */
+const weightOf = (ing) => (ing.unitGrams ? convertUnits(ing.unitGrams, 'g', 'oz').toDecimalPlaces(2).toString() : '');
+
+/** The recipes an ingredient is in, directly or through a Spice Lab blend or sauce. */
+function UsedIn({ usedIn, ing }) {
+  const { recipes, blends } = usedIn;
+  return (
+    <section className="used-in">
+      <h3>Used in</h3>
+      {!recipes.length && !blends.length ? (
+        <small className="muted">No recipes or Spice Lab blends use {ing.name} yet.</small>
+      ) : (
+        <ul>
+          {recipes.map((r) => (
+            <li key={r.id}>
+              <Link to={`/recipes/${r.id}`}>{r.name}</Link> <TestBadge item={r} />
+              <span className="muted">{qty(r.amount)} {ing.uom}</span>
+            </li>
+          ))}
+          {blends.map((b) => (
+            <li key={b.id}>
+              <Link to={`/spice-lab/${b.id}`}>{b.name}</Link> <span className="badge">{b.kind === 'sauce' ? 'Sauce' : 'Spice blend'}</span>
+              <span className="muted">
+                {b.recipes.length
+                  ? <>in {b.recipes.map((r, i) => <Fragment key={r.id}>{i > 0 && ', '}<Link to={`/recipes/${r.id}`}>{r.name}</Link></Fragment>)}</>
+                  : 'not in a recipe yet'}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

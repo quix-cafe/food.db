@@ -14,7 +14,7 @@ export async function loadBlends(ids = null, client = { query }) {
   if (!blends.length) return [];
   const { rows: items } = await client.query(
     `SELECT si.blend_id AS "blendId", si.position, si.ingredient_id AS "ingredientId",
-            coalesce(i.name, si.name) AS name, si.amount, si.unit, i.uom, i.category,
+            coalesce(i.name, si.name) AS name, si.amount, si.unit, i.uom, i.unit_grams AS "unitGrams", i.category,
             lp.unit_cost AS "packPrice", lp.pack_size AS "packSize", lp.vendor
      FROM spice_blend_items si
      LEFT JOIN ingredients i ON i.id = si.ingredient_id

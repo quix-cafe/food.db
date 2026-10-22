@@ -102,7 +102,9 @@ router.get('/', async (req, res) => {
           missingPrices: lines.filter((l) => l.packPrice === null).length,
           costPerServing: costing.costPerServing,
           recommendedPrice: costing.recommendedPrice,
+          profitPerServing: costing.profitPerServing,
           baseCost: costing.baseCost,
+          batchProfit: costing.profit, // the batch as written, sold at the recommended price
         };
       }),
   );

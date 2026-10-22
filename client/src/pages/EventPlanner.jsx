@@ -194,20 +194,17 @@ export default function EventPlanner() {
 
   return (
     <main className="page">
-      <div className="page-head">
+      <div className="page-head event-head">
         <div>
           <Link to="/events" className="muted">Events</Link>
           <h1>{form.name || 'Untitled event'}<TestBadge item={form} /></h1>
-        </div>
-        <div className="form-actions" style={{ alignItems: 'center' }}>
           <span className="save-state" role="status" style={status === 'invalid' || status === 'error' ? { color: 'var(--tomato)' } : undefined}>
             {status === 'saving' && <Spinner />}{statusText}
           </span>
-          <button className="btn primary" onClick={() => setSelling(true)} disabled={!anyChosen} title={anyChosen ? 'Count servings sold and given away during the event' : 'Add recipes first'}>
-            <Icon.cart /> Record sales
-          </button>
-          <button className="btn danger" onClick={() => setDeleting(true)}><Icon.trash /> Delete</button>
         </div>
+        <button className="btn primary" onClick={() => setSelling(true)} disabled={!anyChosen} title={anyChosen ? 'Count servings sold and given away during the event' : 'Add recipes first'}>
+          <Icon.cart /> Record sales
+        </button>
       </div>
       {selling && (
         s ? <SalesModal eventId={id} eventName={form.name || 'Untitled event'} items={menu} onClose={() => setSelling(false)} /> : <Spinner />
@@ -230,7 +227,7 @@ export default function EventPlanner() {
       <section className="panel">
         <div className="panel-head">
           <h2>Recipes <span className="muted" style={{ fontWeight: 500 }}>({selectedCount} selected{sauceCount ? `, ${sauceCount} sauce${sauceCount === 1 ? '' : 's'}` : ''})</span></h2>
-          <button className="btn small" disabled={!isInt(form.guestCount) || !selectedCount} onClick={applyGuests}>
+          <button className="btn small hide-sm" disabled={!isInt(form.guestCount) || !selectedCount} onClick={applyGuests}>
             Set all servings to {isInt(form.guestCount) ? form.guestCount : 'guest count'}
           </button>
         </div>
@@ -238,7 +235,7 @@ export default function EventPlanner() {
           <div className="empty"><p>There are no recipes yet.</p><Link className="btn" to="/recipes/new">Create a recipe</Link></div>
         ) : (
           <div className="table-wrap">
-            <table className="grid recipe-pick">
+            <table className="grid recipe-pick cards-sm">
               <thead>
                 <tr>
                   <th style={{ width: 40 }}><span className="visually-hidden">Include</span></th>
@@ -257,22 +254,22 @@ export default function EventPlanner() {
                   const p = form.prices[r.id] ?? noPricing();
                   return (
                     <tr key={r.id} className={on ? '' : 'off'}>
-                      <td><input type="checkbox" checked={on} onChange={() => toggle(r)} aria-label={`Include ${r.name}`} style={{ width: 18, height: 18, accentColor: 'var(--basil)' }} /></td>
-                      <td><Link to={`/recipes/${r.id}`} style={{ color: 'inherit', fontWeight: 600 }}>{r.name}</Link></td>
-                      <td className="num">{r.baseServings}</td>
-                      <td className="num">{money(r.costPerServing)}</td>
-                      <td className="num">
+                      <td className="c-check"><input type="checkbox" checked={on} onChange={() => toggle(r)} aria-label={`Include ${r.name}`} style={{ width: 18, height: 18, accentColor: 'var(--basil)' }} /></td>
+                      <td className="c-name"><Link to={`/recipes/${r.id}`} style={{ color: 'inherit', fontWeight: 600 }}>{r.name}</Link></td>
+                      <td className="num c-makes" data-label="Makes">{r.baseServings}</td>
+                      <td className="num c-cost" data-label="Cost">{money(r.costPerServing)}</td>
+                      <td className="num c-price" data-label="Price">
                         {on
                           ? <SalePriceInput value={p.salePrice} recipePrice={r.recommendedPrice} label={`Sale price per serving of ${r.name}`} onChange={(v) => setPrice(r.id, { salePrice: v })} />
                           : money(r.recommendedPrice)}
                       </td>
-                      <td>
+                      <td className="c-deal" data-label="Deal">
                         {on
                           ? <DealInput amount={p.discountAmount} qty={p.discountQty} label={r.name} onChange={(patch) => setPrice(r.id, patch)} />
                           : '—'}
                       </td>
-                      <td className="num nowrap"><MarginCell pricing={pricingFor(r, on ? p : undefined)} /></td>
-                      <td className="num">
+                      <td className="num nowrap c-margin" data-label="Margin"><MarginCell pricing={pricingFor(r, on ? p : undefined)} /></td>
+                      <td className="num c-serv" data-label="Servings">
                         {on ? (
                           <input className="input num" style={{ width: 96, marginLeft: 'auto' }} inputMode="numeric" value={form.servings[r.id]}
                             aria-label={`Servings of ${r.name}`} aria-invalid={!isInt(form.servings[r.id])} onChange={(e) => setServings(r.id, e.target.value)} />
@@ -292,25 +289,25 @@ export default function EventPlanner() {
                   const containers = c && isCount(x.servings) ? Math.ceil(Number(x.servings) / Number(c.servingsPerContainer)) : null;
                   return (
                     <tr key={b.id} className={on ? '' : 'off'}>
-                      <td><input type="checkbox" checked={on} onChange={() => toggleSauce(b)} aria-label={`Include ${b.name}`} style={{ width: 18, height: 18, accentColor: 'var(--basil)' }} /></td>
-                      <td><Link to={`/spice-lab/${b.id}`} style={{ color: 'inherit', fontWeight: 600 }}>{b.name}</Link> <span className="badge">Sauce</span></td>
-                      <td className="num">
+                      <td className="c-check"><input type="checkbox" checked={on} onChange={() => toggleSauce(b)} aria-label={`Include ${b.name}`} style={{ width: 18, height: 18, accentColor: 'var(--basil)' }} /></td>
+                      <td className="c-name"><Link to={`/spice-lab/${b.id}`} style={{ color: 'inherit', fontWeight: 600 }}>{b.name}</Link> <span className="badge">Sauce</span></td>
+                      <td className="num c-makes" data-label="Container">
                         {on ? (
                           <select className="select" value={x.container} aria-label={`Container for ${b.name}`} onChange={(e) => setSauce(b.id, { container: e.target.value })}>
-                            {Object.entries(SAUCE_CONTAINERS).map(([k, oz]) => <option key={k} value={k}>{k} ({oz} oz)</option>)}
+                            {Object.keys(SAUCE_CONTAINERS).map((k) => <option key={k} value={k}>{k}</option>)}
                           </select>
                         ) : b.container}
-                        {c && <div><small className="muted">{qty(c.servingsPerContainer, 1)} servings each</small></div>}
+                        {c && <div><small className="muted">{c.containerOz} oz, {qty(c.servingsPerContainer, 1)} servings each</small></div>}
                       </td>
-                      <td className="num">{c?.costPerServing ? money(c.costPerServing) : '—'}</td>
-                      <td className="num">
+                      <td className="num c-cost" data-label="Cost">{c?.costPerServing ? money(c.costPerServing) : '—'}</td>
+                      <td className="num c-price" data-label="Price">
                         {on
                           ? <SalePriceInput value={x.salePrice} recipePrice={c?.recommendedPrice} label={`Sale price per serving of ${b.name}`} onChange={(v) => setSauce(b.id, { salePrice: v })} />
                           : c?.recommendedPrice ? money(c.recommendedPrice) : '—'}
                       </td>
-                      <td className="muted">—</td>
-                      <td className="num nowrap"><MarginCell pricing={costed ? pricingFor(costed, on ? { salePrice: x.salePrice } : undefined) : null} /></td>
-                      <td className="num">
+                      <td className="muted c-deal c-none">—</td>
+                      <td className="num nowrap c-margin" data-label="Margin"><MarginCell pricing={costed ? pricingFor(costed, on ? { salePrice: x.salePrice } : undefined) : null} /></td>
+                      <td className="num c-serv" data-label="Servings">
                         {on ? (
                           <>
                             <input className="input num" style={{ width: 96, marginLeft: 'auto' }} inputMode="numeric" value={x.servings}
@@ -335,7 +332,12 @@ export default function EventPlanner() {
       </section>
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Tabs value={tab} onChange={setTab} tabs={[{ value: 'financials', label: 'Financials' }, { value: 'shopping', label: 'Shopping list' }, { value: 'sales', label: 'Sales' }, { value: 'results', label: 'After the event' }]} />
+        <Tabs className="segmented-sm" value={tab} onChange={setTab} tabs={[
+          { value: 'financials', label: 'Financials' },
+          { value: 'shopping', label: 'Shopping list', short: 'Shopping' },
+          { value: 'sales', label: 'Sales' },
+          { value: 'results', label: 'After the event', short: 'Results' },
+        ]} />
         {summary.error && <Notice kind="error">{summary.error.message}</Notice>}
         {!s ? <Spinner /> : !s.recipes.length && !s.sauces.length ? (
           <div className="panel empty"><p>Select recipes or sauces above to project costs and build the shopping list.</p></div>
@@ -345,6 +347,10 @@ export default function EventPlanner() {
           : <ShoppingList s={s} eventId={id} title={form.name || 'Untitled event'} date={form.date} guests={form.guestCount} />}
         {s?.warnings.length > 0 && <Notice>{s.warnings.map((w) => <div key={w}>{w}</div>)}</Notice>}
       </section>
+
+      <div className="page-foot">
+        <button className="btn small danger" onClick={() => setDeleting(true)}><Icon.trash /> Delete event</button>
+      </div>
 
       {deleting && (
         <Modal title={`Delete ${form.name}?`} onClose={() => setDeleting(false)}>
@@ -375,19 +381,19 @@ function Financials({ s }) {
         <table className="grid">
           <thead>
             <tr>
-              <th>Recipe</th><th className="num">Servings</th><th className="num">Cost / serving</th><th className="num">Price / serving</th>
-              {deals && <th className="num" title="Deals taken off revenue, as if every serving sells on the deal">Discounts</th>}
+              <th>Recipe</th><th className="num hide-sm">Servings</th><th className="num hide-sm">Cost / serving</th><th className="num hide-sm">Price / serving</th>
+              {deals && <th className="num hide-sm" title="Deals taken off revenue, as if every serving sells on the deal">Discounts</th>}
               <th className="num">Cost</th><th className="num">Revenue</th><th className="num">Profit</th>
             </tr>
           </thead>
           <tbody>
             {s.recipes.map((r) => (
               <tr key={r.recipeId}>
-                <td>{r.name}</td>
-                <td className="num">{r.expectedServings}</td>
-                <td className="num">{money(r.costPerServing)}</td>
-                <td className="num">{money(r.salePrice)}{r.priceSet && <small className="muted" title={`The recipe’s target price is ${money(r.recommendedPrice)}`}> (set)</small>}</td>
-                {deals && <td className="num">{toDecimal(r.discount).isZero() ? '—' : `−${money(r.discount)}`}</td>}
+                <td>{r.name}<div className="show-sm"><small className="muted">{r.expectedServings} servings</small></div></td>
+                <td className="num hide-sm">{r.expectedServings}</td>
+                <td className="num hide-sm">{money(r.costPerServing)}</td>
+                <td className="num hide-sm">{money(r.salePrice)}{r.priceSet && <small className="muted" title={`The recipe’s target price is ${money(r.recommendedPrice)}`}> (set)</small>}</td>
+                {deals && <td className="num hide-sm">{toDecimal(r.discount).isZero() ? '—' : `−${money(r.discount)}`}</td>}
                 <td className="num">{money(r.scaledCost)}</td>
                 <td className="num">{money(r.revenue)}</td>
                 <td className="num">{money(r.profit)}</td>
@@ -395,11 +401,11 @@ function Financials({ s }) {
             ))}
             {s.sauces.map((b) => (
               <tr key={b.blendId}>
-                <td>{b.name} <span className="badge">Sauce</span></td>
-                <td className="num nowrap">{b.expectedServings} <small className="muted">({b.containers} × {b.container})</small></td>
-                <td className="num">{money(b.costPerServing)}</td>
-                <td className="num">{money(b.salePrice)}{b.priceSet && <small className="muted"> (set)</small>}</td>
-                {deals && <td className="num">{toDecimal(b.discount).isZero() ? '—' : `−${money(b.discount)}`}</td>}
+                <td>{b.name} <span className="badge">Sauce</span><div className="show-sm"><small className="muted">{b.expectedServings} servings, {b.containers} × {b.container}</small></div></td>
+                <td className="num nowrap hide-sm">{b.expectedServings} <small className="muted">({b.containers} × {b.container})</small></td>
+                <td className="num hide-sm">{money(b.costPerServing)}</td>
+                <td className="num hide-sm">{money(b.salePrice)}{b.priceSet && <small className="muted"> (set)</small>}</td>
+                {deals && <td className="num hide-sm">{toDecimal(b.discount).isZero() ? '—' : `−${money(b.discount)}`}</td>}
                 <td className="num">{money(b.scaledCost)}</td>
                 <td className="num">{money(b.revenue)}</td>
                 <td className="num">{money(b.profit)}</td>
@@ -407,7 +413,8 @@ function Financials({ s }) {
             ))}
             {!toDecimal(s.adjustment).isZero() && (
               <tr className="labor-row">
-                <td colSpan={deals ? 5 : 4}>Labor set on the shopping list <span className="muted">(instead of scaling with servings)</span></td>
+                <td>Labor set on the shopping list <span className="muted">(instead of scaling with servings)</span></td>
+                <td className="hide-sm" colSpan={deals ? 4 : 3} />
                 <td className="num">{toDecimal(s.adjustment).gt(0) ? '+' : '−'}{money(toDecimal(s.adjustment).abs())}</td>
                 <td />
                 <td className="num">{toDecimal(s.adjustment).gt(0) ? '−' : '+'}{money(toDecimal(s.adjustment).abs())}</td>
@@ -415,13 +422,15 @@ function Financials({ s }) {
             )}
             {!toDecimal(s.vendorFee).isZero() && (
               <tr className="fee-row">
-                <td colSpan={deals ? 7 : 6}>Vendor fee</td>
+                <td>Vendor fee</td>
+                <td className="hide-sm" colSpan={deals ? 4 : 3} />
+                <td /><td />
                 <td className="num">−{money(s.vendorFee)}</td>
               </tr>
             )}
           </tbody>
           <tfoot>
-            <tr><td>Total</td><td className="num">{[...s.recipes, ...s.sauces].reduce((a, r) => a + Number(r.expectedServings), 0)}</td><td /><td />{deals && <td className="num">−{money([...s.recipes, ...s.sauces].reduce((a, r) => a.plus(r.discount), new Decimal(0)))}</td>}<td className="num">{money(s.totalCost)}</td><td className="num">{money(s.revenue)}</td><td className="num">{money(s.profit)}</td></tr>
+            <tr><td>Total</td><td className="num hide-sm">{[...s.recipes, ...s.sauces].reduce((a, r) => a + Number(r.expectedServings), 0)}</td><td className="hide-sm" /><td className="hide-sm" />{deals && <td className="num hide-sm">−{money([...s.recipes, ...s.sauces].reduce((a, r) => a.plus(r.discount), new Decimal(0)))}</td>}<td className="num">{money(s.totalCost)}</td><td className="num">{money(s.revenue)}</td><td className="num">{money(s.profit)}</td></tr>
           </tfoot>
         </table>
       </div>
@@ -616,12 +625,12 @@ function ShoppingList({ s, eventId, title, date: day, guests }) {
           <tr>
             <th>Ingredient</th>
             <th className="num" title="Total amount used across recipes, in the ingredient's unit of measurement">Needed</th>
-            <th className="num" title="Whole store packs, at the latest purchase's pack size">Packs to buy</th>
-            <th>Pack size</th>
+            <th className="num" title="Whole store packs, at the latest purchase's pack size"><span className="hide-sm">Packs to buy</span><span className="show-sm">Packs</span></th>
+            <th className="hide-sm">Pack size</th>
             <th className="num" title="Packs to buy × the latest pack price: what you'll pay">Total cost</th>
-            <th className="num" title="Cost of the amount the recipes use; matches the recipes' total cost">Used cost</th>
-            <th className="num" title="What's left of the packs you buy after the recipes: packs × pack size − needed">Leftover</th>
-            <th>Used in</th>
+            <th className="num hide-sm" title="Cost of the amount the recipes use; matches the recipes' total cost">Used cost</th>
+            <th className="num hide-sm" title="What's left of the packs you buy after the recipes: packs × pack size − needed">Leftover</th>
+            <th className="hide-sm">Used in</th>
           </tr>
         </thead>
         <tbody>
@@ -630,19 +639,31 @@ function ShoppingList({ s, eventId, title, date: day, guests }) {
               <td style={{ fontWeight: 600 }}>
                 {l.name}{l.missingPrice && <> <span className="badge warn">No price</span></>}
                 {l.blendId && <div><small className="muted" style={{ fontWeight: 400 }}>{l.category ?? 'Spice blend'}: make {l.packsToBuy} batch{l.packsToBuy === '1' ? '' : 'es'}</small></div>}
+                <div className="show-sm"><small className="muted" style={{ fontWeight: 400 }}>{l.recipes.join(', ')}</small></div>
               </td>
               <td className="num nowrap">{isLabor(l) ? <NeededInput key={`${l.ingredientId}:${l.amount}`} line={l} eventId={eventId} /> : `${qty(l.amount, 2)} ${l.uom}`}</td>
-              <td className="num" style={{ fontWeight: 700 }}>{l.packsToBuy}</td>
-              <td className="nowrap">{l.packSize ? `${pack(l.packSize, l.uom, 2)}${l.blendId ? ' batch' : ''}` : '—'}</td>
+              <td className="num" style={{ fontWeight: 700 }}>
+                {l.packsToBuy}
+                {l.packSize && <div className="show-sm"><small className="muted" style={{ fontWeight: 400 }}>× {pack(l.packSize, l.uom, 2)}</small></div>}
+              </td>
+              <td className="nowrap hide-sm">{l.packSize ? `${pack(l.packSize, l.uom, 2)}${l.blendId ? ' batch' : ''}` : '—'}</td>
               <td className="num" style={{ fontWeight: 650 }}>{l.purchaseCost ? money(l.purchaseCost) : '—'}</td>
-              <td className="num">{money(l.usedCost)}</td>
-              <td className="num nowrap muted">{qty(l.leftover, 2)} {l.uom}</td>
-              <td className="muted">{l.recipes.join(', ')}</td>
+              <td className="num hide-sm">{money(l.usedCost)}</td>
+              <td className="num nowrap muted hide-sm">{qty(l.leftover, 2)} {l.uom}</td>
+              <td className="muted hide-sm">{l.recipes.join(', ')}</td>
             </tr>
           ))}
         </tbody>
         <tfoot>
-          <tr><td>{s.shoppingList.length} items</td><td /><td /><td /><td className="num">{money(s.purchaseCost)}</td><td className="num">{money(s.totalCost)}</td><td /><td /></tr>
+          <tr>
+            <td>Total <span className="muted" style={{ fontWeight: 500 }}>({s.shoppingList.length} items)</span></td><td /><td /><td className="hide-sm" />
+            <td className="num">
+              {money(s.purchaseCost)}
+              {/* The Used cost column is hidden on a phone; its total goes here. */}
+              <div className="show-sm"><small className="muted" style={{ fontWeight: 600 }}>Used {money(s.totalCost)}</small></div>
+            </td>
+            <td className="num hide-sm">{money(s.totalCost)}</td><td className="hide-sm" /><td className="hide-sm" />
+          </tr>
         </tfoot>
       </table>
     </div>

@@ -139,12 +139,13 @@ export function Menu({ label, items }) {
   );
 }
 
-export function Tabs({ tabs, value, onChange }) {
+/** tabs: [{ value, label, short? }]; `short` is the label on a phone. */
+export function Tabs({ tabs, value, onChange, className = '' }) {
   return (
-    <div className="tabs" role="tablist">
+    <div className={`tabs ${className}`} role="tablist">
       {tabs.map((t) => (
-        <button key={t.value} role="tab" className="tab" aria-selected={value === t.value} onClick={() => onChange(t.value)}>
-          {t.label}
+        <button key={t.value} role="tab" className="tab" aria-selected={value === t.value} onClick={() => onChange(t.value)} aria-label={t.short ? t.label : undefined}>
+          {t.short ? <><span className="hide-sm">{t.label}</span><span className="show-sm">{t.short}</span></> : t.label}
         </button>
       ))}
     </div>

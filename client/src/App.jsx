@@ -4,35 +4,41 @@ import UniversalSearch from './components/UniversalSearch.jsx';
 import { setTestMode } from './api.js';
 import { useTestMode } from './hooks.js';
 import { NewIngredientForm, ReceiptImportForm } from './components/forms.jsx';
-import { Icon, Modal, Tabs, ToastProvider } from './components/ui.jsx';
+import { Icon, Modal, ToastProvider } from './components/ui.jsx';
 import IngredientsPage from './pages/IngredientsPage.jsx';
 import ReceiptReviewPage from './pages/ReceiptReviewPage.jsx';
 import RecipeGallery from './pages/RecipeGallery.jsx';
 import RecipeBuilder from './pages/RecipeBuilder.jsx';
-import EventsPage from './pages/EventsPage.jsx';
+import EventsPage, { NewEventForm } from './pages/EventsPage.jsx';
 import EventPlanner from './pages/EventPlanner.jsx';
 import PurchasesPage, { ReceiptDetailPage } from './pages/PurchasesPage.jsx';
 import BackupPage from './pages/BackupPage.jsx';
 import SpiceLabPage, { BlendEditor } from './pages/SpiceLabPage.jsx';
+
+// What Quick add makes, in order: a tab shows its form here, a link opens its page.
+const QUICK_ADD = [
+  { tab: 'receipt', label: 'Receipt' },
+  { tab: 'ingredient', label: 'Ingredient' },
+  { to: '/recipes/new', label: 'Recipe' },
+  { to: '/spice-lab/new', label: 'Blend' },
+  { to: '/spice-lab/new-sauce', label: 'Sauce' },
+  { tab: 'event', label: 'Event' },
+];
 
 function QuickAdd({ onClose }) {
   const [tab, setTab] = useState('receipt');
   return (
     <Modal title="Quick add" onClose={onClose}>
       <div className="quick-add-tabs">
-        <Tabs
-          value={tab}
-          onChange={setTab}
-          tabs={[
-            { value: 'receipt', label: 'Import receipt' },
-            { value: 'manual', label: 'New ingredient' },
-          ]}
-        />
-        <Link to="/recipes/new" className="tab" onClick={onClose}>New recipe</Link>
-        <Link to="/spice-lab/new" className="tab" onClick={onClose}>New spice blend</Link>
-        <Link to="/spice-lab/new-sauce" className="tab" onClick={onClose}>New sauce</Link>
+        <div role="tablist" aria-label="New">
+          {QUICK_ADD.map((q) => (q.tab
+            ? <button key={q.label} role="tab" className="tab" aria-selected={tab === q.tab} onClick={() => setTab(q.tab)}>{q.label}</button>
+            : <Link key={q.label} to={q.to} className="tab" onClick={onClose}>{q.label}</Link>))}
+        </div>
       </div>
-      {tab === 'manual' ? <NewIngredientForm onDone={onClose} /> : <ReceiptImportForm onDone={onClose} />}
+      {tab === 'ingredient' ? <NewIngredientForm onDone={onClose} />
+        : tab === 'event' ? <NewEventForm bare onCancel={onClose} />
+        : <ReceiptImportForm onDone={onClose} />}
     </Modal>
   );
 }
@@ -90,8 +96,8 @@ export default function App() {
           <TestModeBar />
           <header className="topbar">
             <UniversalSearch />
-            <button className="btn primary" onClick={() => setQuickAdd(true)}>
-              <Icon.plus /> Quick add
+            <button className="btn quick-add-btn" onClick={() => setQuickAdd(true)} aria-label="Quick add">
+              <Icon.plus /> <span className="btn-label">Quick add</span>
             </button>
           </header>
           <Routes>

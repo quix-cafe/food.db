@@ -69,7 +69,8 @@ export default function EventsPage() {
   );
 }
 
-function NewEventForm({ onCancel }) {
+/** A new event's name, date and guests; creating it opens the planner. `bare` drops the panel (in Quick add). */
+export function NewEventForm({ onCancel, bare = false }) {
   const [name, setName] = useState('');
   const [date, setDate] = useState(todayIso());
   const [guests, setGuests] = useState('');
@@ -81,6 +82,7 @@ function NewEventForm({ onCancel }) {
     try {
       const ev = await api('/events', { method: 'POST', body: { name, date, guestCount: guests } });
       notifyDataChanged();
+      onCancel?.();
       navigate(`/events/${ev.id}`);
     } catch (err) {
       setError(err.message);
@@ -88,7 +90,7 @@ function NewEventForm({ onCancel }) {
   };
 
   return (
-    <form className="panel panel-pad" onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <form className={bare ? '' : 'panel panel-pad'} onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div className="form-grid">
         <Field label="Event name" className="span-2"><input className="input" value={name} onChange={(e) => setName(e.target.value)} required autoFocus /></Field>
         <Field label="Date"><input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} required /></Field>

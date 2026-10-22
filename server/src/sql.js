@@ -26,7 +26,7 @@ export const LATEST_PURCHASE = `
   ) lp ON true`;
 
 export const INGREDIENT_COLUMNS = `
-  i.id, i.name, i.category, i.uom,
+  i.id, i.name, i.category, i.uom, i.unit_grams AS "unitGrams",
   i.created_at AS "createdAt", i.is_test AS "isTest",
   lp.unit_cost AS "latestPackPrice",
   lp.pack_size AS "latestPackSize",

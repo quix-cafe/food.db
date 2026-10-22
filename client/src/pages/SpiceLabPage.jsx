@@ -127,6 +127,7 @@ const fromServer = (b) => ({
     packPrice: it.packPrice,
     packSize: it.packSize,
     uom: it.uom,
+    unitGrams: it.unitGrams,
   })),
 });
 
@@ -202,7 +203,7 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
   const addIngredient = (ing) => addItem({
     // A sauce's ingredients start in their own unit (a bunch of cilantro); spices in grams.
     ...(sauce && ing.uom ? { unit: normalizeUnit(ing.uom) ?? ing.uom.trim().toLowerCase() } : {}),
-    ingredientId: ing.id, name: ing.name, packPrice: ing.latestPackPrice, packSize: ing.latestPackSize, uom: ing.uom,
+    ingredientId: ing.id, name: ing.name, packPrice: ing.latestPackPrice, packSize: ing.latestPackSize, uom: ing.uom, unitGrams: ing.unitGrams,
   });
 
   const problems = form.items.some(amountProblem) || !form.name.trim() || !wholeNumber(form.servings);
@@ -336,8 +337,8 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
             </div>
             <p className="muted">
               {sauce
-                ? `Slices are by weight. Spoons and cups count as water, about ${SAUCE_GRAMS_PER_TSP} g per tsp; a bunch of herbs about 75 g.`
-                : `Slices are by weight. Spoons and pinches count as about ${SPICE_GRAMS_PER_TSP} g per tsp, typical for ground spices; a bunch of herbs about 75 g.`}
+                ? `Slices are by weight. Spoons and cups count as water, about ${SAUCE_GRAMS_PER_TSP} g per tsp; a bunch, box or can about 75 g unless its ingredient says what it weighs.`
+                : `Slices are by weight. Spoons and pinches count as about ${SPICE_GRAMS_PER_TSP} g per tsp, typical for ground spices; a bunch, box or can about 75 g unless its ingredient says what it weighs.`}
             </p>
           </div>
         </div>
@@ -388,7 +389,7 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
                     <td className="num muted">{b?.grams ? qty(b.grams) : '—'}</td>
                     <td className={`num nowrap ${scaled ? 'scaled' : ''}`}>{amountProblem(it) ? '—' : `${qty(parseAmount(it.amount).times(scale))} ${it.unit}`}</td>
                     <td className="num" style={{ fontWeight: 650 }}>{b?.share ? `${b.share}%` : '—'}</td>
-                    <td className="num muted">{b?.cost ? money(b.cost) : it.ingredientId ? <span title="No price, or its unit can't be converted from kitchen measures">—</span> : ''}</td>
+                    <td className="num muted">{b?.cost ? money(b.cost) : it.ingredientId ? <span title={`No price, or ${it.unit} can’t be converted to ${it.uom}: set what 1 ${it.uom} weighs in the ingredient’s details`}>—</span> : ''}</td>
                     <td><button className="icon-btn" aria-label={`Remove ${it.name || `spice ${i + 1}`}`} onClick={() => removeItem(it.key)}><Icon.trash /></button></td>
                   </tr>
                 );
