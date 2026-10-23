@@ -19,10 +19,10 @@ import SpiceLabPage, { BlendEditor } from './pages/SpiceLabPage.jsx';
 const QUICK_ADD = [
   { tab: 'receipt', label: 'Receipt' },
   { tab: 'ingredient', label: 'Ingredient' },
+  { tab: 'event', label: 'Event' },
   { to: '/recipes/new', label: 'Recipe' },
   { to: '/spice-lab/new', label: 'Blend' },
   { to: '/spice-lab/new-sauce', label: 'Sauce' },
-  { tab: 'event', label: 'Event' },
 ];
 
 function QuickAdd({ onClose }) {
@@ -59,6 +59,22 @@ function OldReceiptRedirect() {
   return <Navigate to={`/purchases/${id}`} replace />;
 }
 
+// Light unless switched to dark; remembered per browser (index.html applies it before the first paint).
+function ThemeToggle() {
+  const [dark, setDark] = useState(() => document.documentElement.dataset.theme === 'dark');
+  const toggle = () => {
+    const next = dark ? 'light' : 'dark';
+    try { localStorage.setItem('theme', next); } catch { /* not remembered, still applied */ }
+    document.documentElement.dataset.theme = next;
+    setDark(!dark);
+  };
+  return (
+    <button type="button" className="theme-switch" role="switch" aria-checked={dark} aria-label="Dark mode" title={dark ? 'Switch to light mode' : 'Switch to dark mode'} onClick={toggle}>
+      <Icon.sun /><Icon.moon /><span className="knob" aria-hidden="true" />
+    </button>
+  );
+}
+
 export default function App() {
   const [quickAdd, setQuickAdd] = useState(false);
   // On phones the menu collapses behind a button; it closes on navigation, Escape or a tap outside.
@@ -79,6 +95,7 @@ export default function App() {
             <img src="/favicon.svg" width="28" height="28" alt="" />
             <span className="brand-name">food.db</span>
           </Link>
+          <ThemeToggle />
           <button className="icon-btn menu-toggle" aria-expanded={menuOpen} aria-controls="main-menu" aria-label={menuOpen ? 'Close menu' : 'Open menu'} onClick={() => setMenuOpen((o) => !o)}>
             {menuOpen ? <Icon.close /> : <Icon.menu />}
           </button>
@@ -88,8 +105,8 @@ export default function App() {
             <NavLink to="/recipes" title="Recipes"><Icon.chefHat /> <span>Recipes</span></NavLink>
             <NavLink to="/purchases" title="Purchases"><Icon.cart /> <span>Purchases</span></NavLink>
             <NavLink to="/events" title="Events"><Icon.calendar /> <span>Events</span></NavLink>
-            <NavLink to="/backup" title="Backup"><Icon.history /> <span>Backup</span></NavLink>
             <NavLink to="/spice-lab" title="Spice Lab"><Icon.starburst /> <span>Spice Lab</span></NavLink>
+            <NavLink to="/backup" title="Backup"><Icon.history /> <span>Backup</span></NavLink>
           </div>
         </nav>
         <div className="main">

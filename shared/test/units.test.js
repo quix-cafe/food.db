@@ -79,9 +79,10 @@ test('an ingredient sold by the box converts through what one box weighs', () =>
   assert.equal(inUom.toFixed(4), '0.3335');
   // Measured in boxes: the pie chart gets its weight too.
   assert.equal(itemAmounts('0.1', 'box', garlic).grams.toFixed(1), '8.5');
-  // No weight set: a box is taken as about 75 g, like a bunch, so it still has a slice and a price.
-  assert.equal(itemAmounts(1, 'oz', { uom: 'box' }).inUom.toFixed(4), '0.3780');
-  assert.equal(itemAmounts(1, 'box', { uom: 'box' }).grams.toString(), '75');
+  // No weight set: a box is taken as about 750 g, so it still has a slice and a price.
+  assert.equal(itemAmounts(1, 'oz', { uom: 'box' }).inUom.toFixed(4), '0.0378');
+  assert.equal(itemAmounts(1, 'box', { uom: 'box' }).grams.toString(), '750');
+  assert.equal(itemAmounts(2, 'can', { uom: 'can' }).grams.toString(), '150'); // other units: 75 g
   assert.equal(itemAmounts(1, 'tsp', { uom: 'each' }).inUom.toFixed(4), '0.0333'); // 2.5 g of a 75 g each
   const b = calculateBlend([{ name: 'Garlic', amount: '1', unit: 'oz', ...garlic }], { kind: 'sauce', container: '1 qt' });
   assert.equal(b.cost, '1.9978'); // 28.3495 / 85 of a box × $5.99

@@ -379,7 +379,7 @@ test('renaming an ingredient keeps its old name as a receipt name', { skip }, as
 test('what one box weighs lets a sauce price an ingredient sold by the box', { skip }, async () => {
   const garlic = (await api('POST', '/ingredients', { name: 'Garlic box', uom: 'box', purchase: { quantity: 1, packSize: 1, totalCost: 5.99 } })).data;
   const sauce = (await api('POST', '/blends', { name: 'Garlic sauce', kind: 'sauce', container: '1 qt', items: [{ ingredientId: garlic.id, amount: 1, unit: 'oz' }] })).data;
-  assert.equal(sauce.cost, '2.2642'); // until it's set, a box is taken as 75 g: 28.3495 / 75 × $5.99
+  assert.equal(sauce.cost, '0.2264'); // until it's set, a box is taken as 750 g: 28.3495 / 750 × $5.99
   const set = await api('PATCH', `/ingredients/${garlic.id}`, { unitGrams: '85' });
   assert.equal(set.data.unitGrams, '85.0000');
   assert.equal((await api('GET', `/blends/${sauce.id}`)).data.cost, '1.9978');

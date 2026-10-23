@@ -104,21 +104,27 @@ export function parseAmount(text) {
   return d;
 }
 
-/** One of a unit kitchen measures can't reach (box, can) is taken to weigh about this, like a bunch. */
+/** One of a unit kitchen measures can't reach is taken to weigh about this: a box 750 g, anything else (can, jar, each) 75 g like a bunch. */
 export const ESTIMATED_UNIT_GRAMS = COUNT_GRAMS.bunch;
+const ESTIMATED_GRAMS_BY_UNIT = { box: 750, boxes: 750 };
+
+/** The estimated weight in grams of one `unit` when its ingredient doesn't say. */
+export function estimatedUnitGrams(unit) {
+  return ESTIMATED_GRAMS_BY_UNIT[String(unit ?? '').trim().toLowerCase()] ?? ESTIMATED_UNIT_GRAMS;
+}
 
 /**
  * An item's `amount` in `unit` as grams (for a blend's pie chart) and in its ingredient's `uom`
  * (for its cost), each null when it can't be worked out. `unitGrams` is what one of the
  * ingredient's units weighs ("1 box = 85 g"), for units like box that kitchen units can't reach;
- * without it one weighs ESTIMATED_UNIT_GRAMS.
+ * without it one weighs estimatedUnitGrams (a box 750 g, others 75 g).
  */
 export function itemAmounts(amount, unit, { uom = null, unitGrams = null } = {}, gramsPerTsp = SPICE_GRAMS_PER_TSP) {
   const a = toDecimal(amount);
-  const per = toDecimal(unitGrams) ?? new Decimal(ESTIMATED_UNIT_GRAMS);
+  const per = toDecimal(unitGrams) ?? new Decimal(estimatedUnitGrams(uom));
   let grams = convertUnits(amount, unit, BLEND_UOM, gramsPerTsp);
   if (!grams && a !== null && String(unit ?? '').trim() && !normalizeUnit(unit)) {
-    grams = a.times(sameUnit(unit, uom) ? per : ESTIMATED_UNIT_GRAMS);
+    grams = a.times(sameUnit(unit, uom) ? per : estimatedUnitGrams(unit));
   }
   let inUom = uom ? convertUnits(amount, unit, uom, gramsPerTsp) : null;
   if (!inUom && grams && uom && !normalizeUnit(uom)) inUom = grams.div(per);

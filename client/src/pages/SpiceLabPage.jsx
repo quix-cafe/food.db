@@ -337,8 +337,8 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
             </div>
             <p className="muted">
               {sauce
-                ? `Slices are by weight. Spoons and cups count as water, about ${SAUCE_GRAMS_PER_TSP} g per tsp; a bunch, box or can about 75 g unless its ingredient says what it weighs.`
-                : `Slices are by weight. Spoons and pinches count as about ${SPICE_GRAMS_PER_TSP} g per tsp, typical for ground spices; a bunch, box or can about 75 g unless its ingredient says what it weighs.`}
+                ? `Slices are by weight. Spoons and cups count as water, about ${SAUCE_GRAMS_PER_TSP} g per tsp; a box about 750 g and a bunch or can about 75 g, unless its ingredient says what it weighs.`
+                : `Slices are by weight. Spoons and pinches count as about ${SPICE_GRAMS_PER_TSP} g per tsp, typical for ground spices; a box about 750 g and a bunch or can about 75 g, unless its ingredient says what it weighs.`}
             </p>
           </div>
         </div>

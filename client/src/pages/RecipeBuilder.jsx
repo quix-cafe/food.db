@@ -6,7 +6,7 @@ import { useLeaveGuard, useRowReorder } from '../hooks.js';
 import ImageGallery, { useLocalImages } from '../components/ImageGallery.jsx';
 import { date, money, pack, percent, perUnit, qty, unitMoney, toDecimal } from '../format.js';
 import IngredientCombobox from '../components/IngredientCombobox.jsx';
-import { Field, Icon, LeaveModal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
+import { Field, Icon, LeaveModal, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
 import { AddToEventModal } from './RecipeGallery.jsx';
 import { IngredientDrawer } from './IngredientsPage.jsx';
 
@@ -63,6 +63,7 @@ export default function RecipeBuilder() {
   const [saved, setSaved] = useState(id ? null : savedShape(blank));
   const [expected, setExpected] = useState(id ? '' : blank.baseServings);
   const [loadError, setLoadError] = useState(null);
+  const [removing, setRemoving] = useState(null); // the line waiting on "Remove it?"
   const [saveError, setSaveError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [viewing, setViewing] = useState(null); // ingredient id whose detail panel is open over the recipe
@@ -355,7 +356,7 @@ export default function RecipeBuilder() {
                         <td className="num" style={{ fontWeight: 650 }}>{c ? money(c.baseCost) : '—'}</td>
                         {scaled && <td className="num scaled nowrap">{c ? `${qty(c.scaledAmount)} ${l.uom ?? ''}` : '—'}</td>}
                         {scaled && <td className="num scaled">{c ? money(c.scaledCost) : '—'}</td>}
-                        <td><button className="icon-btn" aria-label={`Remove ${l.name}`} onClick={() => removeLine(l.key)}><Icon.trash /></button></td>
+                        <td><button className="icon-btn" aria-label={`Remove ${l.name}`} onClick={() => (l.name ? setRemoving(l) : removeLine(l.key))}><Icon.trash /></button></td>
                       </tr>
                     );
                   })}
@@ -475,6 +476,15 @@ export default function RecipeBuilder() {
         </aside>
       </div>
 
+      {removing && (
+        <Modal title={`Remove ${removing.name}?`} onClose={() => setRemoving(null)}>
+          <p>It comes out of this recipe only; the ingredient and its prices are kept. Nothing is saved until you save the recipe.</p>
+          <div className="form-actions">
+            <button className="btn ghost" onClick={() => setRemoving(null)}>Keep it</button>
+            <button className="btn danger" onClick={() => { removeLine(removing.key); setRemoving(null); }}>Remove</button>
+          </div>
+        </Modal>
+      )}
       {viewing && <IngredientDrawer id={viewing} onClose={() => closeIngredient(viewing)} />}
       <LeaveModal blocker={blocker} error={saveError} onSave={id ? save : undefined} saving={saving}>
         Your changes to {form.name || 'this recipe'} haven’t been saved. If you leave now, they’re lost.

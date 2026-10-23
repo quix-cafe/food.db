@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
-import { convertUnits, isLabor, laborLast, normalizeUnit } from '@kitchen/shared';
+import { isLabor, laborLast } from '@kitchen/shared';
 import { useApi, useDebounced } from '../hooks.js';
 import { Decimal, date, money, pack, perUnit, qty, signedPercent, toDecimal, todayIso, unitMoney } from '../format.js';
 import { CategoryInput, NewIngredientForm, PurchaseFields, UomInput, emptyPurchase } from '../components/forms.jsx';
@@ -273,13 +273,10 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
 
   const ing = data?.ingredient;
   useEffect(() => {
-    if (ing) setForm({ name: ing.name, category: ing.category ?? '', uom: ing.uom ?? '', weight: weightOf(ing), weightUnit: 'oz' });
-  }, [ing?.id, ing?.name, ing?.category, ing?.uom, ing?.unitGrams]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (ing) setForm({ name: ing.name, category: ing.category ?? '', uom: ing.uom ?? '' });
+  }, [ing?.id, ing?.name, ing?.category, ing?.uom]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const weightChanged = form && ing && (form.weight !== weightOf(ing) || (form.weight.trim() !== '' && form.weightUnit !== 'oz'));
-  const dirty = form && ing && (form.name !== ing.name || form.category !== (ing.category ?? '') || form.uom !== (ing.uom ?? '') || weightChanged);
-  // A unit kitchen measures can't reach (box, can, each) can be given a weight, for the Spice Lab.
-  const needsWeight = form && !isLabor(ing) && form.uom.trim() !== '' && !normalizeUnit(form.uom);
+  const dirty = form && ing && (form.name !== ing.name || form.category !== (ing.category ?? '') || form.uom !== (ing.uom ?? ''));
 
   const run = async (fn, ok) => {
     setSaving(true);
@@ -299,14 +296,7 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
 
   const save = (e) => {
     e.preventDefault();
-    const body = { name: form.name, category: form.category, uom: form.uom };
-    // Sent only when edited, so saving a rename doesn't round the stored grams through oz.
-    if (weightChanged) {
-      const grams = form.weight.trim() === '' ? null : convertUnits(form.weight, form.weightUnit, 'g');
-      if (form.weight.trim() !== '' && !grams?.gt(0)) { setFormError('The weight must be a number above 0'); return; }
-      body.unitGrams = grams ? grams.toFixed(4) : '';
-    }
-    run(() => api(`/ingredients/${id}`, { method: 'PATCH', body }), 'Ingredient saved');
+    run(() => api(`/ingredients/${id}`, { method: 'PATCH', body: { name: form.name, category: form.category, uom: form.uom } }), 'Ingredient saved');
   };
 
   const addPurchase = async (e) => {
@@ -398,17 +388,6 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
                 <UomInput value={form.uom} onChange={(uom) => setForm((f) => ({ ...f, uom }))} required />
               </Field>
             </div>
-            {needsWeight && (
-              <div className="unit-weight">
-                <label htmlFor={`unit-weight-${id}`}>1 {form.uom} weighs</label>
-                <input id={`unit-weight-${id}`} className="input num" inputMode="decimal" value={form.weight} placeholder={form.weightUnit === 'g' ? '75' : form.weightUnit === 'oz' ? '2.65' : '0.17'}
-                  onChange={(e) => setForm({ ...form, weight: e.target.value })} />
-                <select className="select" aria-label="Weight unit" value={form.weightUnit} onChange={(e) => setForm({ ...form, weightUnit: e.target.value })}>
-                  {['g', 'oz', 'lb'].map((u) => <option key={u}>{u}</option>)}
-                </select>
-                <small className="muted">For the Spice Lab’s weights and costs; until it’s set, about 75 g is assumed.</small>
-              </div>
-            )}
             {formError && <Notice kind="error">{formError}</Notice>}
             <div className="form-actions" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
               <small className="muted">Pack sizes and recipe amounts are in this unit; changing it doesn’t convert them.</small>
@@ -580,7 +559,6 @@ function VendorInput({ purchase, ingredientId, run }) {
 }
 
 /** What one of the ingredient's units weighs, in oz for the details form ('' when not set). */
-const weightOf = (ing) => (ing.unitGrams ? convertUnits(ing.unitGrams, 'g', 'oz').toDecimalPlaces(2).toString() : '');
 
 /** The recipes an ingredient is in, directly or through a Spice Lab blend or sauce. */
 function UsedIn({ usedIn, ing }) {

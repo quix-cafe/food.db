@@ -18,6 +18,31 @@ const blankOrAmount = (v) => v.trim() === '' || (toDecimal(v.replace(/[$,]/g, ''
 const amountOf = (v) => (v.trim() === '' ? '' : v.replace(/[$,]/g, '').trim());
 const noPricing = () => ({ salePrice: '', discountAmount: '', discountQty: '' });
 
+/** Servings in `count` containers of a sauce: whole servings, at least 1. */
+function sauceServings(b, count, container) {
+  const per = Number(containerOf(b, container)?.servingsPerContainer ?? 1);
+  return String(Math.max(1, Math.floor(Number(count) * per)));
+}
+
+/** How many containers a sauce's saved servings take. */
+function containersOf(b, x) {
+  const per = Number(containerOf(b, x.container)?.servingsPerContainer ?? 1);
+  return Math.max(1, Math.ceil(Number(x.servings) / per));
+}
+
+/** Scroll the window to `to` in about a quarter-second, easing out (at once when motion is reduced). */
+function quickScroll(to) {
+  const from = window.scrollY;
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { window.scrollTo(0, to); return; }
+  const start = performance.now();
+  const step = (now) => {
+    const k = Math.min(1, (now - start) / 260);
+    window.scrollTo(0, from + (to - from) * (1 - (1 - k) ** 3));
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 export default function EventPlanner() {
   const { id } = useParams();
   const [form, setForm] = useState(null);
@@ -25,6 +50,20 @@ export default function EventPlanner() {
   const [status, setStatus] = useState('saved'); // saved | pending | saving | invalid | error
   const [saveError, setSaveError] = useState(null);
   const [tab, setTab] = useState('financials');
+  const tabsRef = useRef(null);
+  // The phone's jump menu under the event's details: open a tab and scroll down to it, quickly. (`always: false`: only
+  // when the tab bar is above the screen, as when picking a tab from far down a long one.)
+  const jumpTo = (t, { always = true } = {}) => {
+    setTab(t);
+    const el = tabsRef.current;
+    if (!el) return;
+    const from = window.scrollY;
+    // Land just below the bar that stays stuck to the top: the menu bar on a phone, the search bar on a wider screen.
+    const bar = document.querySelector(window.innerWidth <= 800 ? '.sidebar' : '.topbar')?.offsetHeight ?? 0;
+    const to = from + el.getBoundingClientRect().top - bar - 8;
+    if (!always && to >= from) return;
+    quickScroll(to);
+  };
   const [deleting, setDeleting] = useState(false);
   const { data: recipes } = useApi('/recipes');
   const { data: blends } = useApi('/blends');
@@ -87,6 +126,7 @@ export default function EventPlanner() {
       form.guestCount !== '' && !isInt(form.guestCount) ? 'Guests must be a whole number' :
       !blankOrAmount(form.vendorFee) ? 'Vendor fee must be an amount' :
       Object.values(form.servings).some((s) => !isInt(s)) ? 'Servings must be whole numbers' :
+      Object.values(form.sauces).some((x) => x.count !== undefined && !isCount(x.count)) ? 'Sauce containers must be whole numbers, 1 or more' :
       Object.values(form.sauces).some((x) => !isCount(x.servings)) ? 'Sauce servings must be whole numbers, 1 or more' :
       allPrices.some((p) => !blankOrPrice(p.salePrice)) ? 'Sale prices must be amounts' :
       allPrices.some((p) => !blankOrPrice(p.discountAmount)) ? 'Discounts must be amounts' :
@@ -154,11 +194,14 @@ export default function EventPlanner() {
   const toggleSauce = (b) => setForm((f) => {
     const sauces = { ...f.sauces };
     if (b.id in sauces) delete sauces[b.id];
-    else {
-      const perContainer = containerOf(b, b.container)?.servingsPerContainer;
-      sauces[b.id] = { servings: isInt(f.guestCount) ? f.guestCount : String(Math.max(1, Math.floor(Number(perContainer ?? 1)))), container: b.container, salePrice: '' };
-    }
+    else sauces[b.id] = { count: '1', container: b.container, servings: sauceServings(b, '1', b.container), salePrice: '' };
     return { ...f, sauces };
+  });
+  // A sauce's servings follow from what's made: containers × the servings one container holds.
+  const setSauceMake = (b, patch) => setForm((f) => {
+    const x = { ...f.sauces[b.id], ...patch };
+    const count = x.count ?? containersOf(b, f.sauces[b.id]);
+    return { ...f, sauces: { ...f.sauces, [b.id]: { ...x, count, servings: isCount(count) ? sauceServings(b, count, x.container) : x.servings } } };
   });
   const setSauce = (bid, patch) => setForm((f) => ({ ...f, sauces: { ...f.sauces, [bid]: { ...f.sauces[bid], ...patch } } }));
   const setServings = (rid, v) => setForm((f) => ({ ...f, servings: { ...f.servings, [rid]: v } }));
@@ -224,6 +267,12 @@ export default function EventPlanner() {
         </div>
       </section>
 
+      <nav className="jump-menu show-sm" aria-label="Jump to">
+        {[['financials', 'Financials'], ['shopping', 'Shopping'], ['sales', 'Sales'], ['results', 'Results']].map(([t, label]) => (
+          <button key={t} type="button" className="btn small" onClick={() => jumpTo(t)}>{label}</button>
+        ))}
+      </nav>
+
       <section className="panel">
         <div className="panel-head">
           <h2>Recipes <span className="muted" style={{ fontWeight: 500 }}>({selectedCount} selected{sauceCount ? `, ${sauceCount} sauce${sauceCount === 1 ? '' : 's'}` : ''})</span></h2>
@@ -286,16 +335,21 @@ export default function EventPlanner() {
                   const x = form.sauces[b.id] ?? { container: b.container, servings: '', salePrice: '' };
                   const c = containerOf(b, x.container);
                   const costed = c && { costPerServing: c.costPerServing ?? '0', recommendedPrice: c.recommendedPrice };
-                  const containers = c && isCount(x.servings) ? Math.ceil(Number(x.servings) / Number(c.servingsPerContainer)) : null;
+                  const count = x.count ?? (on ? String(containersOf(b, x)) : '');
                   return (
-                    <tr key={b.id} className={on ? '' : 'off'}>
+                    <tr key={b.id} className={`sauce-row ${on ? '' : 'off'}`}>
                       <td className="c-check"><input type="checkbox" checked={on} onChange={() => toggleSauce(b)} aria-label={`Include ${b.name}`} style={{ width: 18, height: 18, accentColor: 'var(--basil)' }} /></td>
                       <td className="c-name"><Link to={`/spice-lab/${b.id}`} style={{ color: 'inherit', fontWeight: 600 }}>{b.name}</Link> <span className="badge">Sauce</span></td>
-                      <td className="num c-makes" data-label="Container">
+                      <td className="num c-makes" data-label="Containers">
                         {on ? (
-                          <select className="select" value={x.container} aria-label={`Container for ${b.name}`} onChange={(e) => setSauce(b.id, { container: e.target.value })}>
-                            {Object.keys(SAUCE_CONTAINERS).map((k) => <option key={k} value={k}>{k}</option>)}
-                          </select>
+                          <span className="sauce-make">
+                            <input className="input num" inputMode="numeric" value={count} aria-label={`Containers of ${b.name}`} aria-invalid={!isCount(count)}
+                              onChange={(e) => setSauceMake(b, { count: e.target.value })} />
+                            <span aria-hidden="true">×</span>
+                            <select className="select" value={x.container} aria-label={`Container for ${b.name}`} onChange={(e) => setSauceMake(b, { container: e.target.value, count })}>
+                              {Object.keys(SAUCE_CONTAINERS).map((k) => <option key={k} value={k}>{k}</option>)}
+                            </select>
+                          </span>
                         ) : b.container}
                         {c && <div><small className="muted">{c.containerOz} oz, {qty(c.servingsPerContainer, 1)} servings each</small></div>}
                       </td>
@@ -310,9 +364,8 @@ export default function EventPlanner() {
                       <td className="num c-serv" data-label="Servings">
                         {on ? (
                           <>
-                            <input className="input num" style={{ width: 96, marginLeft: 'auto' }} inputMode="numeric" value={x.servings}
-                              aria-label={`Servings of ${b.name}`} aria-invalid={!isCount(x.servings)} onChange={(e) => setSauce(b.id, { servings: e.target.value })} />
-                            {containers && <div><small className="muted nowrap">make {containers} × {x.container}</small></div>}
+                            <b className="sauce-servings" title="Containers × the servings one holds">{x.servings}</b>
+                            <div><small className="muted nowrap">from {count || '?'} × {x.container}</small></div>
                           </>
                         ) : '—'}
                       </td>
@@ -331,8 +384,8 @@ export default function EventPlanner() {
         )}
       </section>
 
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <Tabs className="segmented-sm" value={tab} onChange={setTab} tabs={[
+      <section ref={tabsRef} className="event-tabs-area">
+        <Tabs className="segmented-sm" value={tab} onChange={(t) => jumpTo(t, { always: false })} tabs={[
           { value: 'financials', label: 'Financials' },
           { value: 'shopping', label: 'Shopping list', short: 'Shopping' },
           { value: 'sales', label: 'Sales' },
@@ -349,6 +402,7 @@ export default function EventPlanner() {
       </section>
 
       <div className="page-foot">
+        <button className="btn small" onClick={() => quickScroll(0)}><Icon.up /> Back to top</button>
         <button className="btn small danger" onClick={() => setDeleting(true)}><Icon.trash /> Delete event</button>
       </div>
 
@@ -654,7 +708,7 @@ function ShoppingList({ s, eventId, title, date: day, guests }) {
             </tr>
           ))}
         </tbody>
-        <tfoot>
+        <tfoot className="shop-total">
           <tr>
             <td>Total <span className="muted" style={{ fontWeight: 500 }}>({s.shoppingList.length} items)</span></td><td /><td /><td className="hide-sm" />
             <td className="num">
