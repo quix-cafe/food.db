@@ -106,7 +106,7 @@ export function NewIngredientForm({ onDone }) {
  * normalise it and suggest matching ingredients, then opens the review grid.
  * Optional receipt photos are shown beside the grid and stored with the receipt on save.
  */
-const RECEIPT_PROMPT = 'return this as JSON';
+const RECEIPT_PROMPT = 'return this receipt as JSON';
 
 export function ReceiptImportForm({ onDone }) {
   const [text, setText] = useState('');
@@ -171,7 +171,7 @@ export function ReceiptImportForm({ onDone }) {
   return (
     <form onSubmit={submit} className="modal-body" style={{ padding: 0 }}>
       <div className="prompt-tip">
-        <span><b>One receipt at a time.</b> Give that receipt’s photo to your model (e.g. qwen) and ask it to <q>{RECEIPT_PROMPT}</q>, then paste its reply below. To add another receipt, import it after saving this one.</span>
+        <span><b>One receipt at a time.</b> Ask qwen to <q>{RECEIPT_PROMPT}</q> and paste its reply below.</span>
         <button type="button" className="btn small" onClick={copyPrompt}>{copied ? 'Copied' : 'Copy prompt'}</button>
       </div>
       <div
@@ -186,7 +186,7 @@ export function ReceiptImportForm({ onDone }) {
           <input type="file" accept=".json,application/json,image/*" multiple className="visually-hidden" onChange={(e) => readFiles([...e.target.files])} />
         </label>
       </div>
-      <Field label="Receipt JSON (one receipt)" hint="Paste the JSON for a single receipt. Most key names work: vendor or merchant, items with name or description, quantity, unit_price, and total or price.">
+      <Field label="Receipt JSON (one receipt)" className="receipt-json" hint="Paste the JSON for a single receipt. Most key names work: vendor or merchant, items with name or description, quantity, unit_price, and total or price.">
         <textarea className="input" rows={9} value={text} onChange={(e) => setText(e.target.value)} spellCheck={false}
           placeholder={'{\n  "vendor": "Restaurant Depot",\n  "date": "2026-10-14",\n  "items": [{ "name": "Flour 50 lb", "quantity": 1, "total": 28.90 }]\n}'} />
       </Field>
@@ -198,7 +198,7 @@ export function ReceiptImportForm({ onDone }) {
       )}
       {error && <Notice kind="error">{error}</Notice>}
       <div className="form-actions">
-        <button className="btn primary" disabled={busy || !text.trim()}>{busy ? <Spinner /> : null} Review items</button>
+        <button className="btn primary big" disabled={busy || !text.trim()}>{busy ? <Spinner /> : null} Review items</button>
       </div>
     </form>
   );

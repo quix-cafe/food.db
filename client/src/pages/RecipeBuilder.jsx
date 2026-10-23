@@ -6,8 +6,9 @@ import { useLeaveGuard, useRowReorder } from '../hooks.js';
 import ImageGallery, { useLocalImages } from '../components/ImageGallery.jsx';
 import { date, money, pack, percent, perUnit, qty, unitMoney, toDecimal } from '../format.js';
 import IngredientCombobox from '../components/IngredientCombobox.jsx';
-import { Field, Icon, LeaveModal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
+import { Field, Icon, LeaveModal, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
 import { AddToEventModal } from './RecipeGallery.jsx';
+import { IngredientDrawer } from './IngredientsPage.jsx';
 
 let nextKey = 1;
 const blank = { name: '', baseServings: '4', servingSize: '', totalYield: '', yieldUnit: '', targetMargin: String(DEFAULT_MARGIN), lines: [] };
@@ -62,8 +63,10 @@ export default function RecipeBuilder() {
   const [saved, setSaved] = useState(id ? null : savedShape(blank));
   const [expected, setExpected] = useState(id ? '' : blank.baseServings);
   const [loadError, setLoadError] = useState(null);
+  const [removing, setRemoving] = useState(null); // the line waiting on "Remove it?"
   const [saveError, setSaveError] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [viewing, setViewing] = useState(null); // ingredient id whose detail panel is open over the recipe
   const [search, setSearch] = useState('');
   const { rowProps, handleProps } = useRowReorder((from, to) => setForm((f) => {
     if (to < 0 || to >= f.lines.length || from === to) return f;
@@ -81,6 +84,30 @@ export default function RecipeBuilder() {
   const [photoError, setPhotoError] = useState(null);
   const navigate = useNavigate();
   const toast = useToast();
+
+  // After the ingredient panel closes, its lines pick up any rename or new price; amounts and
+  // unsaved edits stay as they are.
+  const closeIngredient = async (ingredientId) => {
+    setViewing(null);
+    try {
+      const ing = await api(`/ingredients/${ingredientId}`);
+      setForm((f) => ({
+        ...f,
+        lines: f.lines.map((l) => (l.ingredientId === ingredientId ? {
+          ...l,
+          name: ing.name,
+          category: ing.category,
+          uom: ing.uom,
+          packSize: ing.latestPackSize,
+          packPrice: ing.latestPackPrice,
+          vendor: ing.latestVendor,
+          priceDate: ing.latestPurchaseDate,
+        } : l)),
+      }));
+    } catch {
+      // Deleted from the panel: the line stays, and saving reports it.
+    }
+  };
 
   useEffect(() => {
     if (!id) {
@@ -303,7 +330,12 @@ export default function RecipeBuilder() {
                           <button className="icon-btn drag-handle" aria-label={`Move ${l.name} (drag, or use arrow keys)`} {...handleProps(i)}><Icon.grip /></button>
                         </td>
                         <td>
-                          <div style={{ fontWeight: 600 }}>{l.name}</div>
+                          <div>
+                            {l.blendId
+                              // A blend opens in the Spice Lab; the leave guard asks first when the recipe has unsaved changes.
+                              ? <Link className="line-name" data-tip="View/edit" aria-label={`${l.name}: view/edit`} to={`/spice-lab/${l.blendId}`}>{l.name}</Link>
+                              : <button type="button" className="line-name" data-tip="View/edit" aria-label={`${l.name}: view/edit`} onClick={() => setViewing(l.ingredientId)}>{l.name}</button>}
+                          </div>
                           {l.blendId
                             ? <small><Link to={`/spice-lab/${l.blendId}`} className="muted"><Icon.starburst /> {l.category}, batch of {qty(l.packSize)} {l.uom}</Link>{c?.missingPrice && <> <span className="badge warn">No prices</span></>}</small>
                             : c?.missingPrice
@@ -324,7 +356,7 @@ export default function RecipeBuilder() {
                         <td className="num" style={{ fontWeight: 650 }}>{c ? money(c.baseCost) : '—'}</td>
                         {scaled && <td className="num scaled nowrap">{c ? `${qty(c.scaledAmount)} ${l.uom ?? ''}` : '—'}</td>}
                         {scaled && <td className="num scaled">{c ? money(c.scaledCost) : '—'}</td>}
-                        <td><button className="icon-btn" aria-label={`Remove ${l.name}`} onClick={() => removeLine(l.key)}><Icon.trash /></button></td>
+                        <td><button className="icon-btn" aria-label={`Remove ${l.name}`} onClick={() => (l.name ? setRemoving(l) : removeLine(l.key))}><Icon.trash /></button></td>
                       </tr>
                     );
                   })}
@@ -444,6 +476,16 @@ export default function RecipeBuilder() {
         </aside>
       </div>
 
+      {removing && (
+        <Modal title={`Remove ${removing.name}?`} onClose={() => setRemoving(null)}>
+          <p>It comes out of this recipe only; the ingredient and its prices are kept. Nothing is saved until you save the recipe.</p>
+          <div className="form-actions">
+            <button className="btn ghost" onClick={() => setRemoving(null)}>Keep it</button>
+            <button className="btn danger" onClick={() => { removeLine(removing.key); setRemoving(null); }}>Remove</button>
+          </div>
+        </Modal>
+      )}
+      {viewing && <IngredientDrawer id={viewing} onClose={() => closeIngredient(viewing)} />}
       <LeaveModal blocker={blocker} error={saveError} onSave={id ? save : undefined} saving={saving}>
         Your changes to {form.name || 'this recipe'} haven’t been saved. If you leave now, they’re lost.
       </LeaveModal>

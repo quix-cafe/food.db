@@ -3,7 +3,7 @@
 // through decimal.js; numbers are returned as strings to keep JSON float-free.
 
 import DecimalBase from 'decimal.js';
-import { SAUCE_CONTAINERS, SAUCE_GRAMS_PER_TSP, SPICE_GRAMS_PER_TSP, convertUnits } from './units.js';
+import { SAUCE_CONTAINERS, SAUCE_GRAMS_PER_TSP, SPICE_GRAMS_PER_TSP, itemAmounts } from './units.js';
 
 export const Decimal = DecimalBase.clone({ precision: 40, rounding: DecimalBase.ROUND_HALF_UP });
 
@@ -362,7 +362,7 @@ export function summarizeEvent(recipes = [], amounts = {}, { vendorFee = null, s
     let used = new Decimal(0);
     for (const it of blend.items) {
       const amount = toDecimal(it.amount).times(scale);
-      const inUom = it.ingredientId && it.uom ? convertUnits(amount, it.unit, it.uom, density) : null;
+      const inUom = it.ingredientId && it.uom ? itemAmounts(amount, it.unit, it, density).inUom : null;
       const price = toDecimal(it.packPrice);
       if (inUom) {
         const itemCost = price === null ? new Decimal(0) : unitPrice(price, it.packSize).times(inUom);

@@ -16,14 +16,17 @@ CREATE FUNCTION is_labor(name text, category text) RETURNS boolean LANGUAGE sql 
 
 -- Master ingredient record; the "Asset ID" is the UUID primary key. Each ingredient is
 -- measured in one unit of measure (lb, oz, each…): purchases record their store pack size
--- in it, and recipe lines their amount used.
+-- in it, and recipe lines their amount used. unit_grams is what one of those units weighs
+-- ("1 box of garlic = 85 g"), for units like box that kitchen units can't reach; the Spice Lab
+-- and event shopping lists use it (itemAmounts in shared/src/units.js; unset: about 75 g).
 CREATE TABLE ingredients (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name       text NOT NULL,
   category   text,
   created_at timestamptz NOT NULL DEFAULT now(),
   uom        text NOT NULL DEFAULT 'each',
-  is_test    boolean NOT NULL DEFAULT is_test_default()
+  is_test    boolean NOT NULL DEFAULT is_test_default(),
+  unit_grams numeric(14,4) CHECK (unit_grams > 0)
 );
 CREATE UNIQUE INDEX ingredients_name_key ON ingredients (lower(name));
 CREATE INDEX ingredients_name_trgm ON ingredients USING gin (name gin_trgm_ops);

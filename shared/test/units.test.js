@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateBlend, convertUnits, normalizeUnit, parseAmount, unitRatio } from '../src/calc.js';
+import { calculateBlend, convertUnits, itemAmounts, normalizeUnit, parseAmount, unitRatio } from '../src/calc.js';
 
 test('unit ratios between ingredient units are exact and never cross weight and volume', () => {
   assert.equal(unitRatio('oz', 'lb').toString(), '0.0625');
@@ -58,14 +58,32 @@ test('a blend breaks down by weight and costs what it can', () => {
     { name: 'Paprika', amount: '2', unit: 'tbsp', packPrice: '6', packSize: '3', uom: 'oz' }, // 6 tsp
     { name: 'Salt', amount: '1', unit: 'tsp' }, // no price
     { name: 'Cayenne', amount: '8', unit: 'pinch' }, // 0.5 tsp
-    { name: 'Garlic powder', amount: '5', unit: 'g', packPrice: '4', packSize: '1', uom: 'jar' }, // 2 tsp, uom can't convert
+    { name: 'Garlic powder', amount: '5', unit: 'g', packPrice: '4', packSize: '1', uom: 'jar' }, // 2 tsp; a jar taken as 75 g
   ]);
   assert.equal(b.totalGrams, '23.7500'); // 9.5 tsp at 2.5 g
   assert.equal(b.items[2].grams, '1.2500');
   assert.deepEqual(b.items.map((i) => i.share), ['63.2', '10.5', '5.3', '21.1']);
   // Paprika: 6 tsp × 2.5 g = 15 g = 0.5291 oz × $2/oz
   assert.equal(b.items[0].cost, '1.0582');
-  assert.equal(b.cost, '1.0582');
+  assert.equal(b.items[3].cost, '0.2667'); // 5 g of a 75 g jar × $4
+  assert.equal(b.cost, '1.3249');
   assert.equal(b.costComplete, false);
   assert.equal(calculateBlend([]).cost, null);
+});
+
+test('an ingredient sold by the box converts through what one box weighs', () => {
+  const garlic = { uom: 'box', unitGrams: '85', packPrice: '5.99', packSize: '1' };
+  // 1 oz of a box weighing 85 g: 28.3495 / 85 of a box.
+  const { grams, inUom } = itemAmounts(1, 'oz', garlic);
+  assert.equal(grams.toFixed(4), '28.3495');
+  assert.equal(inUom.toFixed(4), '0.3335');
+  // Measured in boxes: the pie chart gets its weight too.
+  assert.equal(itemAmounts('0.1', 'box', garlic).grams.toFixed(1), '8.5');
+  // No weight set: a box is taken as about 750 g, so it still has a slice and a price.
+  assert.equal(itemAmounts(1, 'oz', { uom: 'box' }).inUom.toFixed(4), '0.0378');
+  assert.equal(itemAmounts(1, 'box', { uom: 'box' }).grams.toString(), '750');
+  assert.equal(itemAmounts(2, 'can', { uom: 'can' }).grams.toString(), '150'); // other units: 75 g
+  assert.equal(itemAmounts(1, 'tsp', { uom: 'each' }).inUom.toFixed(4), '0.0333'); // 2.5 g of a 75 g each
+  const b = calculateBlend([{ name: 'Garlic', amount: '1', unit: 'oz', ...garlic }], { kind: 'sauce', container: '1 qt' });
+  assert.equal(b.cost, '1.9978'); // 28.3495 / 85 of a box × $5.99
 });

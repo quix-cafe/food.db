@@ -12,6 +12,11 @@ export async function migrate({ log = console.log } = {}) {
   const applied = new Set(rows.map((r) => r.name));
   const files = embedded?.migrations ?? (await readdir(dir)).filter((f) => f.endsWith('.sql')).map((name) => ({ name }));
   files.sort((a, b) => a.name.localeCompare(b.name));
+  // A database made by a version whose migrations were since combined can't be brought up to date.
+  const unknown = [...applied].filter((n) => !files.some((f) => f.name === n));
+  if (unknown.length) {
+    throw new Error(`This database was made by an older version of food.db (it lists ${unknown.join(', ')}) and can’t be upgraded. Start with an empty database.`);
+  }
   for (const { name: file, sql: bundled } of files) {
     if (applied.has(file)) continue;
     const sql = bundled ?? await readFile(dir + file, 'utf8');

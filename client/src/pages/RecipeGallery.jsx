@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
 import { useApi } from '../hooks.js';
-import { date, dateTime, money, percent, todayIso } from '../format.js';
+import { date, money, percent, toDecimal, todayIso } from '../format.js';
 import { Field, Icon, Menu, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
 import { DealInput, MarginCell, SalePriceInput, blankOrCount, blankOrPrice, priceText, pricingFor } from '../components/EventPricing.jsx';
 
@@ -70,18 +70,20 @@ export default function RecipeGallery() {
                 { label: 'Delete', danger: true, onSelect: () => setDeleting(r) },
               ]}
             />
-            <div className="card-figure">
-              <b>{money(r.costPerServing)}</b>
-              <span className="muted">per serving</span>
-            </div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <dl className="card-figures" aria-label="Per serving">
+              <div><dt>Cost</dt><dd>{money(r.costPerServing)}</dd></div>
+              <div><dt>Price</dt><dd>{money(r.recommendedPrice)}</dd></div>
+              <div className={toDecimal(r.profitPerServing)?.lt(0) ? 'loss' : 'profit'}><dt>Profit</dt><dd>{money(r.profitPerServing)}</dd></div>
+            </dl>
+            <div className="card-pills">
+              <span className="badge good">{percent(r.targetMargin, 0)} margin</span>
               <span className="badge">{r.baseServings} servings</span>
-              <span className="badge good">{percent(r.targetMargin, 0)} margin, sell at {money(r.recommendedPrice)}</span>
+              <span className="badge">{money(r.batchProfit)} batch profit</span>
               {r.missingPrices > 0 && <span className="badge warn">{r.missingPrices} unpriced</span>}
             </div>
             <div className="card-meta">
               <span>{r.ingredientCount} ingredients{r.imageCount > 1 ? `, ${r.imageCount} photos` : ''}</span>
-              <span title={r.lastPriceSync ?? ''}>{r.lastPriceSync ? `Prices from ${dateTime(r.lastPriceSync)}` : 'No prices yet'}</span>
+              {!r.lastPriceSync && <span>No prices yet</span>}
             </div>
           </article>
         ))}

@@ -16,6 +16,8 @@ function ingredientFields(body, { partial = false } = {}) {
   if (!partial || 'category' in body) out.category = text(body.category, 'Category', { max: 80 });
   if (!partial || 'uom' in body) out.uom = text(body.uom, 'Unit of measurement', { max: 20 }) ?? (partial ? undefined : 'each');
   if (partial && out.uom === undefined) delete out.uom;
+  // What one unit weighs, in grams (blank clears it); only sent from the ingredient's details.
+  if ('unitGrams' in body) out.unitGrams = number(body.unitGrams, 'Weight of one unit', { min: 0, minExclusive: true });
   return out;
 }
 
@@ -77,7 +79,11 @@ router.get('/', async (req, res) => {
   }
   const { rows } = await query(
     `SELECT ${INGREDIENT_COLUMNS},
-            (SELECT count(*)::int FROM ingredient_purchases p WHERE p.ingredient_id = i.id) AS "purchaseCount"
+            (SELECT count(*)::int FROM ingredient_purchases p WHERE p.ingredient_id = i.id) AS "purchaseCount",
+            -- Recipes using it directly or through a Spice Lab blend or sauce, each once.
+            (SELECT count(DISTINCT ri.recipe_id)::int FROM recipe_ingredients ri
+              WHERE ri.ingredient_id = i.id
+                 OR ri.blend_id IN (SELECT si.blend_id FROM spice_blend_items si WHERE si.ingredient_id = i.id)) AS "recipeCount"
      FROM ingredients i ${LATEST_PURCHASE}
      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
      ORDER BY lower(i.name)`,
@@ -295,7 +301,7 @@ async function keepOldName(c, id, oldName, newName) {
 router.patch('/:id', async (req, res) => {
   const id = uuid(req.params.id, 'id');
   const fields = ingredientFields(req.body ?? {}, { partial: true });
-  const cols = { name: 'name', category: 'category', uom: 'uom' };
+  const cols = { name: 'name', category: 'category', uom: 'uom', unitGrams: 'unit_grams' };
   const keys = Object.keys(fields);
   if (keys.length) {
     try {
@@ -468,9 +474,28 @@ router.get('/:id/history', async (req, res) => {
     [id],
   );
 
+  // Where it's used: recipes listing it directly (amount in its UOM), and Spice Lab blends and
+  // sauces holding it, each with the recipes that use that blend.
+  const { rows: recipes } = await query(
+    `SELECT r.id, r.name, sum(ri.amount)::text AS amount, r.is_test AS "isTest"
+       FROM recipe_ingredients ri JOIN recipes r ON r.id = ri.recipe_id
+      WHERE ri.ingredient_id = $1 GROUP BY r.id ORDER BY lower(r.name)`,
+    [id],
+  );
+  const { rows: blends } = await query(
+    `SELECT b.id, b.name, b.kind,
+            coalesce((SELECT json_agg(json_build_object('id', r.id, 'name', r.name) ORDER BY lower(r.name))
+                        FROM recipes r WHERE r.id IN (SELECT recipe_id FROM recipe_ingredients WHERE blend_id = b.id)), '[]') AS recipes
+       FROM spice_blends b
+      WHERE b.id IN (SELECT blend_id FROM spice_blend_items WHERE ingredient_id = $1)
+      ORDER BY lower(b.name)`,
+    [id],
+  );
+
   res.json({
     ingredient,
     aliases,
+    usedIn: { recipes, blends },
     priceHikeThreshold: PRICE_HIKE_THRESHOLD,
     purchases: purchases.reverse(),
     trips: trips.reverse(),

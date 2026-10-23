@@ -233,7 +233,7 @@ export function SalesTable({ eventId, onRecord }) {
           <div className="panel table-wrap">
             <table className="grid sales-table">
               <thead>
-                <tr><th>Time</th><th>Items</th><th>Paid by</th><th className="num">Discount</th><th className="num">Amount</th><th className="num" title="Charged on top and kept by Venmo (1.9% + $0.10) or Cash App (2.6% + $0.15)">Fee</th><th><span className="visually-hidden">Actions</span></th></tr>
+                <tr><th>Time</th><th>Items</th><th>Paid by</th><th className="num hide-sm">Discount</th><th className="num">Amount</th><th className="num" title="Charged on top and kept by Venmo (1.9% + $0.10) or Cash App (2.6% + $0.15)">Fee</th><th><span className="visually-hidden">Actions</span></th></tr>
               </thead>
               <tbody>
                 {sales.map((s) => (
@@ -245,7 +245,7 @@ export function SalesTable({ eventId, onRecord }) {
                       ))}
                     </td>
                     <td className="nowrap">{METHOD_LABEL[s.paymentMethod]}</td>
-                    <td className="num">{s.items.some((i) => toDecimal(i.discount).gt(0)) ? `−${money(s.items.reduce((sum, i) => sum.plus(i.discount), new Decimal(0)))}` : '—'}</td>
+                    <td className="num hide-sm">{s.items.some((i) => toDecimal(i.discount).gt(0)) ? `−${money(s.items.reduce((sum, i) => sum.plus(i.discount), new Decimal(0)))}` : '—'}</td>
                     <td className="num" style={{ fontWeight: 650 }}>{s.paymentMethod === 'free' ? <span className="muted">Free</span> : money(s.total)}</td>
                     <td className="num muted">{toDecimal(s.fee).gt(0) ? `+${money(s.fee)}` : '—'}</td>
                     <td className="nowrap">
@@ -267,7 +267,7 @@ export function SalesTable({ eventId, onRecord }) {
                   <td>{plural(totals.sales, 'line')}</td>
                   <td>{totals.sold} sold{totals.givenAway ? `, ${totals.givenAway} given away` : ''}</td>
                   <td />
-                  <td className="num">{toDecimal(totals.discounts).gt(0) ? `−${money(totals.discounts)}` : '—'}</td>
+                  <td className="num hide-sm">{toDecimal(totals.discounts).gt(0) ? `−${money(totals.discounts)}` : '—'}</td>
                   <td className="num">{money(totals.revenue)}</td>
                   <td className="num">{toDecimal(totals.fees).gt(0) ? `+${money(totals.fees)}` : '—'}</td>
                   <td />

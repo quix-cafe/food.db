@@ -104,9 +104,36 @@ export function parseAmount(text) {
   return d;
 }
 
+/** One of a unit kitchen measures can't reach is taken to weigh about this: a box 750 g, anything else (can, jar, each) 75 g like a bunch. */
+export const ESTIMATED_UNIT_GRAMS = COUNT_GRAMS.bunch;
+const ESTIMATED_GRAMS_BY_UNIT = { box: 750, boxes: 750 };
+
+/** The estimated weight in grams of one `unit` when its ingredient doesn't say. */
+export function estimatedUnitGrams(unit) {
+  return ESTIMATED_GRAMS_BY_UNIT[String(unit ?? '').trim().toLowerCase()] ?? ESTIMATED_UNIT_GRAMS;
+}
+
+/**
+ * An item's `amount` in `unit` as grams (for a blend's pie chart) and in its ingredient's `uom`
+ * (for its cost), each null when it can't be worked out. `unitGrams` is what one of the
+ * ingredient's units weighs ("1 box = 85 g"), for units like box that kitchen units can't reach;
+ * without it one weighs estimatedUnitGrams (a box 750 g, others 75 g).
+ */
+export function itemAmounts(amount, unit, { uom = null, unitGrams = null } = {}, gramsPerTsp = SPICE_GRAMS_PER_TSP) {
+  const a = toDecimal(amount);
+  const per = toDecimal(unitGrams) ?? new Decimal(estimatedUnitGrams(uom));
+  let grams = convertUnits(amount, unit, BLEND_UOM, gramsPerTsp);
+  if (!grams && a !== null && String(unit ?? '').trim() && !normalizeUnit(unit)) {
+    grams = a.times(sameUnit(unit, uom) ? per : estimatedUnitGrams(unit));
+  }
+  let inUom = uom ? convertUnits(amount, unit, uom, gramsPerTsp) : null;
+  if (!inUom && grams && uom && !normalizeUnit(uom)) inUom = grams.div(per);
+  return { grams, inUom };
+}
+
 /**
  * Break a blend down for its pie chart and cost.
- * items: [{ name, amount, unit, packPrice?, packSize?, uom? }] — the price fields come from a
+ * items: [{ name, amount, unit, packPrice?, packSize?, uom?, unitGrams? }] — the price fields come from a
  *   linked ingredient's latest purchase. An item costs packPrice / packSize per `uom`,
  *   converted from the blend's unit; it's left out of the cost when that isn't possible
  *   (no price, or an ingredient measured "each" with the item in tsp).
@@ -120,14 +147,11 @@ export function calculateBlend(items = [], { kind: blendKind = 'spice', containe
   let cost = new Decimal(0);
   let costed = 0;
   const rows = items.map((it) => {
-    const grams = convertUnits(it.amount, it.unit, BLEND_UOM, density);
+    const { grams, inUom } = itemAmounts(it.amount, it.unit, it, density);
     if (grams) totalGrams = totalGrams.plus(grams);
     let itemCost = null;
     const price = toDecimal(it.packPrice);
-    if (price !== null && it.uom) {
-      const inUom = convertUnits(it.amount, it.unit, it.uom, density);
-      if (inUom) itemCost = unitPrice(price, it.packSize).times(inUom);
-    }
+    if (price !== null && inUom) itemCost = unitPrice(price, it.packSize).times(inUom);
     if (itemCost) {
       cost = cost.plus(itemCost);
       costed += 1;

@@ -4,35 +4,41 @@ import UniversalSearch from './components/UniversalSearch.jsx';
 import { setTestMode } from './api.js';
 import { useTestMode } from './hooks.js';
 import { NewIngredientForm, ReceiptImportForm } from './components/forms.jsx';
-import { Icon, Modal, Tabs, ToastProvider } from './components/ui.jsx';
+import { Icon, Modal, ToastProvider } from './components/ui.jsx';
 import IngredientsPage from './pages/IngredientsPage.jsx';
 import ReceiptReviewPage from './pages/ReceiptReviewPage.jsx';
 import RecipeGallery from './pages/RecipeGallery.jsx';
 import RecipeBuilder from './pages/RecipeBuilder.jsx';
-import EventsPage from './pages/EventsPage.jsx';
+import EventsPage, { NewEventForm } from './pages/EventsPage.jsx';
 import EventPlanner from './pages/EventPlanner.jsx';
 import PurchasesPage, { ReceiptDetailPage } from './pages/PurchasesPage.jsx';
 import BackupPage from './pages/BackupPage.jsx';
 import SpiceLabPage, { BlendEditor } from './pages/SpiceLabPage.jsx';
+
+// What Quick add makes, in order: a tab shows its form here, a link opens its page.
+const QUICK_ADD = [
+  { tab: 'receipt', label: 'Receipt' },
+  { tab: 'ingredient', label: 'Ingredient' },
+  { tab: 'event', label: 'Event' },
+  { to: '/recipes/new', label: 'Recipe' },
+  { to: '/spice-lab/new', label: 'Blend' },
+  { to: '/spice-lab/new-sauce', label: 'Sauce' },
+];
 
 function QuickAdd({ onClose }) {
   const [tab, setTab] = useState('receipt');
   return (
     <Modal title="Quick add" onClose={onClose}>
       <div className="quick-add-tabs">
-        <Tabs
-          value={tab}
-          onChange={setTab}
-          tabs={[
-            { value: 'receipt', label: 'Import receipt' },
-            { value: 'manual', label: 'New ingredient' },
-          ]}
-        />
-        <Link to="/recipes/new" className="tab" onClick={onClose}>New recipe</Link>
-        <Link to="/spice-lab/new" className="tab" onClick={onClose}>New spice blend</Link>
-        <Link to="/spice-lab/new-sauce" className="tab" onClick={onClose}>New sauce</Link>
+        <div role="tablist" aria-label="New">
+          {QUICK_ADD.map((q) => (q.tab
+            ? <button key={q.label} role="tab" className="tab" aria-selected={tab === q.tab} onClick={() => setTab(q.tab)}>{q.label}</button>
+            : <Link key={q.label} to={q.to} className="tab" onClick={onClose}>{q.label}</Link>))}
+        </div>
       </div>
-      {tab === 'manual' ? <NewIngredientForm onDone={onClose} /> : <ReceiptImportForm onDone={onClose} />}
+      {tab === 'ingredient' ? <NewIngredientForm onDone={onClose} />
+        : tab === 'event' ? <NewEventForm bare onCancel={onClose} />
+        : <ReceiptImportForm onDone={onClose} />}
     </Modal>
   );
 }
@@ -51,6 +57,22 @@ function TestModeBar() {
 function OldReceiptRedirect() {
   const { id } = useParams();
   return <Navigate to={`/purchases/${id}`} replace />;
+}
+
+// Light unless switched to dark; remembered per browser (index.html applies it before the first paint).
+function ThemeToggle() {
+  const [dark, setDark] = useState(() => document.documentElement.dataset.theme === 'dark');
+  const toggle = () => {
+    const next = dark ? 'light' : 'dark';
+    try { localStorage.setItem('theme', next); } catch { /* not remembered, still applied */ }
+    document.documentElement.dataset.theme = next;
+    setDark(!dark);
+  };
+  return (
+    <button type="button" className="theme-switch" role="switch" aria-checked={dark} aria-label="Dark mode" title={dark ? 'Switch to light mode' : 'Switch to dark mode'} onClick={toggle}>
+      <Icon.sun /><Icon.moon /><span className="knob" aria-hidden="true" />
+    </button>
+  );
 }
 
 export default function App() {
@@ -73,6 +95,7 @@ export default function App() {
             <img src="/favicon.svg" width="28" height="28" alt="" />
             <span className="brand-name">food.db</span>
           </Link>
+          <ThemeToggle />
           <button className="icon-btn menu-toggle" aria-expanded={menuOpen} aria-controls="main-menu" aria-label={menuOpen ? 'Close menu' : 'Open menu'} onClick={() => setMenuOpen((o) => !o)}>
             {menuOpen ? <Icon.close /> : <Icon.menu />}
           </button>
@@ -82,16 +105,16 @@ export default function App() {
             <NavLink to="/recipes" title="Recipes"><Icon.chefHat /> <span>Recipes</span></NavLink>
             <NavLink to="/purchases" title="Purchases"><Icon.cart /> <span>Purchases</span></NavLink>
             <NavLink to="/events" title="Events"><Icon.calendar /> <span>Events</span></NavLink>
-            <NavLink to="/backup" title="Backup"><Icon.history /> <span>Backup</span></NavLink>
             <NavLink to="/spice-lab" title="Spice Lab"><Icon.starburst /> <span>Spice Lab</span></NavLink>
+            <NavLink to="/backup" title="Backup"><Icon.history /> <span>Backup</span></NavLink>
           </div>
         </nav>
         <div className="main">
           <TestModeBar />
           <header className="topbar">
             <UniversalSearch />
-            <button className="btn primary" onClick={() => setQuickAdd(true)}>
-              <Icon.plus /> Quick add
+            <button className="btn quick-add-btn" onClick={() => setQuickAdd(true)} aria-label="Quick add">
+              <Icon.plus /> <span className="btn-label">Quick add</span>
             </button>
           </header>
           <Routes>

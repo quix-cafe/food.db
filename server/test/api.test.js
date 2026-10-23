@@ -376,6 +376,18 @@ test('renaming an ingredient keeps its old name as a receipt name', { skip }, as
   assert.deepEqual(await aliases(), ['Ginger Paste', 'NATIONAL GINGER OASTE']);
 });
 
+test('what one box weighs lets a sauce price an ingredient sold by the box', { skip }, async () => {
+  const garlic = (await api('POST', '/ingredients', { name: 'Garlic box', uom: 'box', purchase: { quantity: 1, packSize: 1, totalCost: 5.99 } })).data;
+  const sauce = (await api('POST', '/blends', { name: 'Garlic sauce', kind: 'sauce', container: '1 qt', items: [{ ingredientId: garlic.id, amount: 1, unit: 'oz' }] })).data;
+  assert.equal(sauce.cost, '0.2264'); // until it's set, a box is taken as 750 g: 28.3495 / 750 × $5.99
+  const set = await api('PATCH', `/ingredients/${garlic.id}`, { unitGrams: '85' });
+  assert.equal(set.data.unitGrams, '85.0000');
+  assert.equal((await api('GET', `/blends/${sauce.id}`)).data.cost, '1.9978');
+  assert.equal((await api('PATCH', `/ingredients/${garlic.id}`, { unitGrams: '-1' })).status, 400);
+  await api('PATCH', `/ingredients/${garlic.id}`, { unitGrams: '' });
+  assert.equal((await api('GET', `/ingredients/${garlic.id}`)).data.unitGrams, null);
+});
+
 test('recipe amounts can exceed a pack and margins keep 6 decimals', { skip }, async () => {
   const r = await api('POST', '/recipes', { name: 'Double', baseServings: 1, targetMargin: '70.833333', lines: [{ ingredientId: ids.flour, amount: '120' }] });
   assert.equal(r.status, 201);
@@ -468,6 +480,12 @@ test('sauces: a container batch in oz, bunches, and items in the ingredient’s 
 
   assert.equal((await api('PUT', `/events/${ev.id}`, { name: 'Market', date: '2026-12-02', sauces: [{ blendId: sauce.data.id, servings: 0 }] })).status, 400);
   assert.equal((await api('DELETE', `/blends/${sauce.data.id}`)).status, 409);
+  // The ingredient drawer lists where parsley is used: through the sauce, in the Sauced recipe.
+  const used = (await api('GET', `/ingredients/${herb.id}/history`)).data.usedIn;
+  assert.deepEqual(used.recipes, []);
+  const listed = (await api('GET', '/ingredients?q=Parsley')).data;
+  assert.equal(listed.find((i) => i.id === herb.id).recipeCount, 1); // Sauced, through the sauce
+  assert.deepEqual(used.blends.map((b) => [b.name, b.kind, b.recipes.map((r) => r.name)]), [['Green sauce', 'sauce', ['Sauced']]]);
   // Pricing left out keeps what the event had.
   const kept = await api('PUT', `/events/${ev.id}`, { name: 'Market', date: '2026-12-02', sauces: [{ blendId: sauce.data.id, servings: 10 }] });
   assert.deepEqual([kept.data.sauces[0].salePrice, kept.data.sauces[0].container], ['0.75', '1/2 qt']); // no container: the sauce's own
@@ -518,6 +536,13 @@ test('test mode marks new data, and clearing it keeps whatever real data uses', 
   assert.equal((await api('GET', `/recipes/${paella.id}`)).status, 200);
   assert.equal((await api('GET', `/ingredients/${saffron.id}`)).data.isTest, true);
   assert.equal((await api('GET', `/ingredients/${labor.id}`)).data.latestUnitPrice, '25.0000');
+});
+
+test('a database listing migrations this version doesn’t have is refused', { skip }, async () => {
+  const { migrate } = await import('../src/migrate.js');
+  await pool.query("INSERT INTO schema_migrations (name) VALUES ('011_test_data.sql')");
+  await assert.rejects(migrate({ log: () => {} }), /older version of food\.db \(it lists 011_test_data\.sql\)/);
+  await pool.query("DELETE FROM schema_migrations WHERE name = '011_test_data.sql'");
 });
 
 test('event results: set with the event, kept when a save leaves them out, cleared when blank', { skip }, async () => {

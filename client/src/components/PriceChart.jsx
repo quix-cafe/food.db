@@ -16,7 +16,7 @@ function ChartTooltip({ active, payload, unit }) {
 }
 
 const VendorDot = ({ cx, cy, payload, active }) =>
-  cx == null ? null : <circle cx={cx} cy={cy} r={active ? 6 : 4} fill={payload.color} stroke="#fff" strokeWidth={2} />;
+  cx == null ? null : <circle cx={cx} cy={cy} r={active ? 6 : 4} fill={payload.color} stroke="var(--paper)" strokeWidth={2} />;
 
 /**
  * Price per unit of measure over time: one line through every trip (a receipt's lines of the
@@ -52,10 +52,10 @@ export default function PriceChart({ purchases, uom }) {
       <div className="chart-box">
         <ResponsiveContainer>
           <LineChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
-            <CartesianGrid stroke="#e3e8ea" vertical={false} />
-            <XAxis dataKey="i" tickFormatter={(i) => (rows[i] ? date(rows[i].date).replace(/, \d{4}$/, '') : '')} tick={{ fontSize: 12, fill: '#6f7d85' }} tickLine={false} axisLine={{ stroke: '#ccd4d8' }} minTickGap={24} />
-            <YAxis tickFormatter={(v) => `$${v}`} tick={{ fontSize: 12, fill: '#6f7d85' }} tickLine={false} axisLine={false} width={56} domain={['auto', 'auto']} />
-            <Tooltip content={<ChartTooltip unit={unit} />} cursor={{ stroke: '#6f7d85', strokeDasharray: '3 3' }} />
+            <CartesianGrid stroke="var(--line-soft)" vertical={false} />
+            <XAxis dataKey="i" tickFormatter={(i) => (rows[i] ? date(rows[i].date).replace(/, \d{4}$/, '') : '')} tick={{ fontSize: 12, fill: 'var(--muted)' }} tickLine={false} axisLine={{ stroke: 'var(--line)' }} minTickGap={24} />
+            <YAxis tickFormatter={(v) => `$${v}`} tick={{ fontSize: 12, fill: 'var(--muted)' }} tickLine={false} axisLine={false} width={56} domain={['auto', 'auto']} />
+            <Tooltip content={<ChartTooltip unit={unit} />} cursor={{ stroke: 'var(--muted)', strokeDasharray: '3 3' }} />
             <Line type="linear" dataKey="cost" stroke={vendors.length > 1 ? OTHER : SERIES[0]} strokeWidth={2} isAnimationActive={false}
               dot={<VendorDot />} activeDot={<VendorDot active />} />
           </LineChart>

@@ -57,6 +57,15 @@ export default function BackupPage() {
         <RestoreCard current={summary?.counts} onRestored={reload} />
       </div>
 
+      <section className="panel panel-pad backup-card">
+        <h2>Spreadsheets</h2>
+        <p className="muted">For Excel, Numbers or Google Sheets. These are copies to read; a backup file is what restores.</p>
+        <div className="form-actions" style={{ justifyContent: 'flex-start' }}>
+          <a className="btn" href="/api/export/ingredients.csv" download title="Every ingredient with its latest price, as a spreadsheet file"><Icon.download /> Ingredients CSV</a>
+          <a className="btn" href="/api/export/purchases.csv" download title="Every purchase ever recorded, as a spreadsheet file"><Icon.download /> Price history CSV</a>
+        </div>
+      </section>
+
       <TestDataCard />
 
       <section className="panel">
