@@ -49,7 +49,7 @@ The image's `HEALTHCHECK` hits `/api/health`, which also runs `SELECT 1`. The po
 - **After the event**. Events store `actual_guests`, `actual_revenue`, `actual_cost` and `notes`; `PUT /api/events/:id` updates only the result fields present in the body (blank clears one). The Results tab compares them with the plan client-side; profit uses the projected cost until an actual spend is entered.
 - **CSV exports** go through `sendCsv` in `server/src/csv.js` (UTF-8 BOM for Excel, CRLF, and text columns marked `{ text: true }` get a `'` before a leading `= + - @` so spreadsheets don't run them as formulas). Routes: `/api/export/ingredients.csv`, `/api/export/purchases.csv` (linked from the Backup page's Spreadsheets card), `/api/events/:id/shopping-list.csv`; the client links to them with `<a download>`.
 - **Server conventions.** Routes validate input with helpers in `server/src/validate.js` (throw `HttpError`; the error middleware in `app.js` maps it, `CalcError` → 400). API JSON is camelCase via SQL aliases. Multi-statement writes use `tx()`.
-- **Search and lists.** The header search (`/api/search`) covers ingredients (name or alias), recipes, sauces, spice blends, events (name or notes) and purchases (receipt vendor). The Ingredients table's Purchases column counts trips (a receipt's lines once, like the drawer), and Used in (`useCount`) counts recipes using it (directly or through a blend) plus the blends and sauces holding it.
+- **Search and lists.** The header search (`/api/search`) covers ingredients (name or alias), recipes, sauces, spice blends, events (name or notes) and purchases (receipt vendor). The Ingredients table's Purchases column counts every purchase line (several on one receipt count separately), and Used in (`useCount`) counts recipes using it (directly or through a blend) plus the blends and sauces holding it.
 - **Client conventions.** `useApi(path)` fetches and refetches whenever `notifyDataChanged()` fires, which every mutation calls. The event planner autosaves (debounced PUT). Row reordering (recipe lines, blend spices) uses `useRowReorder` from `hooks.js`: pointer events on a handle (works on touch, unlike HTML5 drag and drop) plus arrow keys. Labor (`isLabor`) has no purchases UI: the ingredient drawer edits its rate, saved as a 1 × 1-unit price record so costing reads it like any latest price. The recipe builder and Spice Lab editor use `SaveButton` (`ui.jsx`): its labels share one grid cell so the width never changes, and on a phone, unsaved changes float a copy at the bottom once the header button scrolls away. `useStickyTableHeads` (`hooks.js`, run in `App`) keeps page tables' headers in view: a table that fits gets `data-fits="1"` and CSS sticky under the page bar (`--sticky-top`), a wider one has its header cells translated with the page scroll. Pages with unsaved edits (recipe builder, receipt review, a receipt's not-saved-yet lines) use `useLeaveGuard(dirty)` from `hooks.js` with `<LeaveModal>`; call `allowLeave()` before navigating away on purpose. It relies on the data router set up in `main.jsx`. Styling is plain CSS tokens in `client/src/styles.css`; use the tokens rather than literal colors, since `:root[data-theme='dark']` redefines them for the dark theme (screen only, so printing stays light). `ThemeToggle` in `App.jsx` (bottom of the sidebar; on phones in the top bar beside the menu button) is a sun/moon switch, light by default; it saves the choice as `theme` in localStorage, and an inline script in `index.html` applies it before the first paint. Archivo is bundled via `@fontsource-variable/archivo`. Phones (≤ 640px) get their own block at the end of it: `.hide-sm` / `.show-sm` swap what a phone shows (category chips for a dropdown, a tab's `short` label, columns of wide tables), page descriptions are hidden, and the event's recipe table (`.cards-sm`) becomes one card per row, labelled from each cell's `data-label`.
 
 `tests/receipt*.json` are real extractor outputs used as fixtures by `server/test/receipt.test.js`. They cover the main receipt shapes: a sections map, `{section, entries}` groups, discount and "PRICE YOU PAY" lines, `"2 @ $2.99 ea"` quantities, and nested totals. When a new extractor format breaks the import, add its JSON there with a test.
@@ -57,29 +57,30 @@ The image's `HEALTHCHECK` hits `/api/health`, which also runs `SELECT 1`. The po
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **food.db** (2156 symbols, 4133 relationships, 189 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **food.db** (1583 symbols, 7520 relationships, 136 execution flows).
 
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+> Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
 
 ## Always Do
 
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+- **MUST run impact before editing.** Use `impact({target: "symbolName", direction: "upstream"})` or `node .gitnexus/run.cjs impact "symbolName" --direction upstream --repo .`; report callers, processes, and risk. Never substitute grep for graph analysis.
+- **MUST analyze graph changes before committing.** Use `detect_changes({scope: "all"})` (MCP) or `node .gitnexus/run.cjs detect-changes --scope all --repo .` (CLI fallback). `partial: true` or `truncated: true` is not a clean check — a zero means unseen, not unaffected; re-run it. For regression review: `detect_changes({scope: "compare", base_ref: "main"})` or `node .gitnexus/run.cjs detect-changes --scope compare --base-ref "main" --repo .`.
+- MUST warn on HIGH/CRITICAL `risk` pre-edit; never use `riskSharedAxes` to waive a HIGH/CRITICAL `risk` warning. Compare File/symbol: MCP File omits axes; Graph-RAG expands File.
+- **MUST treat `risk: UNKNOWN` as unresolved, not as low.** An empty caller set is not evidence the symbol is unused — it can also mean the callers are not resolvable by the index (plain-object property access, dynamic dispatch, cross-language calls). `impact` pairs `UNKNOWN` with a `riskNote` saying so. Confirm with a text search before treating the symbol as safe to change or delete; do not proceed on the strength of a zero.
+- **MUST use `query({search_query: "concept"})` for concepts/flows, `context({name: "symbolName"})` for a named symbol, or `impact` for blast radius, on read-only callers, dependencies, imports, or execution flow.** Graph first; text search only for empty/`UNKNOWN`/literals.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
 
 ## Never Do
 
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+- NEVER edit a function, class, or method before MCP/CLI impact analysis.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis, and never read `UNKNOWN` as an all-clear — it means the walk could not answer, which is the one verdict that requires confirming by other means.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit before MCP/CLI graph change analysis.
 
 ## Resources
 
 | Resource | Use for |
-|----------|---------|
+| --- | --- |
 | `gitnexus://repo/food.db/context` | Codebase overview, check index freshness |
 | `gitnexus://repo/food.db/clusters` | All functional areas |
 | `gitnexus://repo/food.db/processes` | All execution flows |
@@ -88,12 +89,12 @@ This project is indexed by GitNexus as **food.db** (2156 symbols, 4133 relations
 ## CLI
 
 | Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+| --- | --- |
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->

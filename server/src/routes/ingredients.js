@@ -9,9 +9,8 @@ import { HttpError, badRequest, notFound, text, number, date, uuid, array, today
 
 const router = Router();
 
-// Purchases counted as trips, like the drawer's history: every line of one receipt is one purchase.
-const PURCHASE_COUNT = `(SELECT count(DISTINCT coalesce(p.receipt_id, p.id))::int FROM ingredient_purchases p
-                          WHERE p.ingredient_id = i.id) AS "purchaseCount"`;
+// Every purchase line counts, including several of one ingredient on the same receipt.
+const PURCHASE_COUNT = `(SELECT count(*)::int FROM ingredient_purchases p WHERE p.ingredient_id = i.id) AS "purchaseCount"`;
 const PRICE_HIKE_THRESHOLD = Number(process.env.PRICE_HIKE_THRESHOLD ?? 10);
 
 function ingredientFields(body, { partial = false } = {}) {

@@ -704,9 +704,8 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 /* The counter's header and totals are kept short, leaving the screen to the items. */
 .sales-modal .modal-head { padding-top: 4px; padding-bottom: 4px; }
 .sales-modal .modal-head h2 { font-size: 1.05rem; }
-.sales-modal .sales-totals > div { padding: 4px 6px; display: flex; align-items: baseline; justify-content: center; gap: 6px; flex-wrap: wrap; }
-.sales-modal .sales-totals b { display: inline; font-size: 1.1rem; }
-.sales-modal .sales-totals > div span { font-size: 0.75rem; }
+.sales-modal .sales-totals > div { padding: 3px 6px 4px; }
+.sales-modal .sales-totals b { line-height: 1.15; }
 .sales-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }
 .sales-totals > div { padding: 10px 6px; border: 1px solid var(--line-soft); border-radius: var(--radius); }
 .sales-totals b { display: block; font-size: 1.35rem; font-stretch: 85%; }

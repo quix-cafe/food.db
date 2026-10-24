@@ -794,8 +794,8 @@ test('several lines of one ingredient on one receipt are one averaged price, not
   assert.deepEqual(hist.trips.map((t) => [t.lines, t.unitPrice, t.changePercent, t.priceHike]), [[2, '4.2125', '5.3', false], [1, '4.0000', null, false]]);
   assert.equal(hist.trips[0].receiptId, receipt.id);
   assert.equal(hist.trips[0].totalCost, '16.8500');
-  // The Ingredients list counts purchases as trips too: three lines, two trips.
-  assert.equal((await api('GET', '/ingredients')).data.find((i) => i.id === thighs).purchaseCount, 2);
+  // The Ingredients list counts every purchase line: three, though two share a receipt.
+  assert.equal((await api('GET', '/ingredients')).data.find((i) => i.id === thighs).purchaseCount, 3);
   // The header search finds the receipt by its vendor.
   const found = (await api('GET', '/search?q=butch')).data;
   assert.deepEqual(found.purchases.map((r) => [r.id, r.lines]), [[receipt.id, 2]]);
