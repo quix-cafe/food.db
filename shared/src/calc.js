@@ -254,9 +254,9 @@ export function saleItem({ quantity, salePrice, discountAmount = null, discountQ
 
 /**
  * A sauce made at an event in `container`s (default: the sauce's own): one container is
- * `scale` of the sauce's batch and holds `servingsPerContainer` of its servings. It's sold by
- * the serving: the batch cost ÷ the batch's servings, by default priced at the default margin,
- * as a recipe's would be. blend: a loadBlends row.
+ * `scale` of the sauce's batch and holds `servingsPerContainer` servings of `servingOz` oz.
+ * It's sold by the serving: the batch cost × serving oz ÷ batch oz, by default priced at the
+ * default margin, as a recipe's would be. blend: a loadBlends row.
  */
 export function sauceContainer(blend, container = null) {
   const size = container ?? blend.container;
@@ -264,13 +264,15 @@ export function sauceContainer(blend, container = null) {
   const batch = toDecimal(blend.batchSize);
   if (!oz || !batch || batch.lte(0)) throw new CalcError(`${blend.name}: pick a container`);
   const scale = new Decimal(oz).div(batch);
-  const servings = new Decimal(blend.servings ?? 1);
-  const perServing = toDecimal(blend.cost)?.div(servings) ?? null;
+  const servingOz = toDecimal(blend.servingOz) ?? batch.div(blend.servings ?? 1);
+  if (servingOz.lte(0)) throw new CalcError(`${blend.name}: set a serving size`);
+  const perServing = toDecimal(blend.cost)?.times(servingOz).div(batch) ?? null;
   return {
     container: size,
     containerOz: oz,
     scale,
-    servingsPerContainer: servings.times(scale).toString(),
+    servingOz: cost(servingOz),
+    servingsPerContainer: new Decimal(oz).div(servingOz).toDecimalPlaces(COST_DP).toString(),
     costPerServing: perServing === null ? null : cost(perServing),
     recommendedPrice: perServing === null ? null : money(recommendedPrice(perServing, DEFAULT_MARGIN)),
   };
@@ -344,6 +346,8 @@ export function summarizeEvent(recipes = [], amounts = {}, { vendorFee = null, s
       baseServings: calc.baseServings,
       targetMargin: calc.targetMargin,
       scaledCost: calc.scaledCost,
+      // The part of scaledCost that is labor, so Financials can list labor as its own cost.
+      laborCost: cost(calc.lines.filter(isLabor).reduce((sum, l) => sum.plus(l.scaledCost), new Decimal(0))),
       costPerServing: calc.costPerServing,
       recommendedPrice: calc.recommendedPrice, // the recipe's own target price
       ...pricing, // salePrice (what it sells for here), discount, revenue, margin per serving

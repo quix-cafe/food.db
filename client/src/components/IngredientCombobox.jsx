@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { useDebounced } from '../hooks.js';
+import { useClickOutside, useDebounced } from '../hooks.js';
 import { perUnit, qty, toDecimal } from '../format.js';
 
 /**
@@ -44,11 +44,7 @@ export default function IngredientCombobox({ value, onInput, onPick, exclude = [
   const first = autoHighlight ? 0 : -1;
   useEffect(() => setActive(first), [options, first]);
 
-  useEffect(() => {
-    const close = (e) => !ref.current?.contains(e.target) && setOpen(false);
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, []);
+  useClickOutside(ref, () => setOpen(false));
 
   const pick = (opt) => {
     onPick(opt);

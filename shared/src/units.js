@@ -139,8 +139,9 @@ export function itemAmounts(amount, unit, { uom = null, unitGrams = null } = {},
  *   (no price, or an ingredient measured "each" with the item in tsp).
  * kind 'sauce' weighs volumes like water, and its batch is its container (in oz) rather
  *   than the weight of what goes in. `uom` and `batchSize` are how a recipe measures it.
+ *   Its `servingOz` is the serving size (a sauce saved without one: the container ÷ its servings).
  */
-export function calculateBlend(items = [], { kind: blendKind = 'spice', container = null } = {}) {
+export function calculateBlend(items = [], { kind: blendKind = 'spice', container = null, servings = 1, servingOz = null } = {}) {
   const sauce = blendKind === 'sauce';
   const density = sauce ? SAUCE_GRAMS_PER_TSP : SPICE_GRAMS_PER_TSP;
   let totalGrams = new Decimal(0);
@@ -158,6 +159,8 @@ export function calculateBlend(items = [], { kind: blendKind = 'spice', containe
     }
     return { ...it, grams, itemCost };
   });
+  const batch = sauce && SAUCE_CONTAINERS[container] ? new Decimal(SAUCE_CONTAINERS[container]) : null;
+  const serving = sauce ? toDecimal(servingOz) ?? (batch ? batch.div(toDecimal(servings) ?? 1) : null) : null;
   return {
     items: rows.map((r) => ({
       ...r,
@@ -168,7 +171,8 @@ export function calculateBlend(items = [], { kind: blendKind = 'spice', containe
     })),
     totalGrams: totalGrams.toFixed(4),
     uom: sauce ? SAUCE_UOM : BLEND_UOM,
-    batchSize: sauce ? (SAUCE_CONTAINERS[container] ? new Decimal(SAUCE_CONTAINERS[container]).toFixed(4) : null) : totalGrams.toFixed(4),
+    batchSize: sauce ? (batch ? batch.toFixed(4) : null) : totalGrams.toFixed(4),
+    ...(sauce ? { servingOz: serving && serving.gt(0) ? serving.toFixed(4) : null } : {}),
     cost: costed ? cost.toFixed(4) : null,
     costComplete: costed === items.length && items.length > 0,
     costPerGram: costed && !totalGrams.isZero() ? cost.div(totalGrams).toFixed(4) : null,

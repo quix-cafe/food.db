@@ -159,6 +159,13 @@ test('bad uploads and newer-version backups are refused without changes', { skip
   assert.deepEqual((await api('GET', '/backup/summary')).data.counts, before);
 });
 
+test('a backup listing a migration since combined into the schema restores', { skip }, async () => {
+  const withCombined = await repack(original.archive, (d) => ({ ...d, migrations: [...d.migrations, '002_sauce_serving_oz.sql'] }));
+  const res = await inspect(withCombined);
+  assert.equal(res.status, 200);
+  assert.equal(res.data.olderVersion, false);
+});
+
 test('backups from before the migrations were combined are refused', { skip }, async () => {
   const before = (await api('GET', '/backup/summary')).data.counts;
   const old = await repack(original.archive, (d) => ({ ...d, migrations: ['001_schema.sql', '011_test_data.sql', '022_event_sauce_servings.sql'] }));

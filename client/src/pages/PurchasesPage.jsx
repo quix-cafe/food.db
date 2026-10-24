@@ -44,11 +44,12 @@ export default function PurchasesPage() {
               {data.map((r) => (
                 <tr key={r.id}>
                   <td>
-                    <div className="receipt-thumbs">
-                      {r.images.slice(0, 3).map((img) => <img key={img.id} src={img.url} alt="" loading="lazy" />)}
-                      {!r.images.length && <span className="muted">None</span>}
-                      {r.images.length > 3 && <span className="muted">+{r.images.length - 3}</span>}
-                    </div>
+                    {r.images.length ? (
+                      <Link className="receipt-thumbs" to={`/purchases/${r.id}`} aria-label={`${r.vendor ?? 'Unknown vendor'} receipt photos`}>
+                        {r.images.slice(0, 3).map((img) => <img key={img.id} src={img.url} alt="" loading="lazy" />)}
+                        {r.images.length > 3 && <span className="muted">+{r.images.length - 3}</span>}
+                      </Link>
+                    ) : <span className="muted">None</span>}
                   </td>
                   <td><Link to={`/purchases/${r.id}`} style={{ fontWeight: 650, color: 'inherit' }}>{r.vendor ?? 'Unknown vendor'}</Link> <TestBadge item={r} /></td>
                   <td className="nowrap">{date(r.date)}</td>

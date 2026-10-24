@@ -134,6 +134,7 @@ test('labor is recognised by category or name and listed last', async () => {
     { ingredientId: 'z', name: 'Zest', packPrice: '1', amount: '1' },
   ] }]);
   assert.deepEqual(s.shoppingList.map((l) => l.name), ['Zest', 'Aaa labor']);
+  assert.deepEqual([s.recipes[0].scaledCost, s.recipes[0].laborCost], ['21.0000', '20.0000']); // labor's share, for Financials
 });
 
 test('an amount set for the event replaces the scaled total and adjusts the event cost', () => {

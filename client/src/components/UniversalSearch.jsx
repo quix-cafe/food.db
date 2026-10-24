@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { api } from '../api.js';
-import { useDebounced } from '../hooks.js';
+import { useClickOutside, useDebounced } from '../hooks.js';
 import { date } from '../format.js';
 import { Icon } from './ui.jsx';
 
@@ -28,11 +28,7 @@ export default function UniversalSearch() {
     return () => { stale = true; };
   }, [debounced]);
 
-  useEffect(() => {
-    const close = (e) => !ref.current?.contains(e.target) && setOpen(false);
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, []);
+  useClickOutside(ref, () => setOpen(false));
 
   const flat = results ? GROUPS.flatMap(([key, , href, meta]) => results[key].map((r) => ({ ...r, key, href: href(r), meta: meta(r) }))) : [];
   useEffect(() => setActive(0), [results]);
