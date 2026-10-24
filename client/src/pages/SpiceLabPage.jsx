@@ -3,11 +3,11 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { Cell, Pie, PieChart, Tooltip } from 'recharts';
 import { BLEND_UNITS, BLEND_UOM, SAUCE_CONTAINERS, SAUCE_UNITS, SAUCE_UOM, SPICE_GRAMS_PER_TSP, calculateBlend, normalizeUnit, parseAmount } from '@kitchen/shared';
 import { api, notifyDataChanged } from '../api.js';
-import { useApi, useLeaveGuard, useRowReorder } from '../hooks.js';
+import { PHONE, useApi, useLeaveGuard, useMedia, useRowReorder } from '../hooks.js';
 import { Decimal, date, money, pack, perUnit, qty, toDecimal, unitMoney } from '../format.js';
 import { OTHER, SERIES } from '../palette.js';
 import IngredientCombobox from '../components/IngredientCombobox.jsx';
-import { Field, Icon, LeaveModal, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
+import { Field, Icon, LeaveModal, Modal, Notice, SaveButton, Spinner, TestBadge, useToast } from '../components/ui.jsx';
 import { IngredientDrawer } from '../components/IngredientDrawer.jsx';
 
 /** A spice keeps the color of its position in the blend; past the palette it's "Other". */
@@ -192,6 +192,7 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
 
   const dirty = !!form && saved !== savedShape(form);
   const { blocker, allowLeave } = useLeaveGuard(dirty, id);
+  const phone = useMedia(PHONE);
 
   // Same breakdown the server computes, live as amounts change. Unparseable amounts count as 0.
   const breakdown = useMemo(() => form && calculateBlend(form.items.map((it) => ({
@@ -304,9 +305,7 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
         </div>
         <div className="form-actions">
           {id && <button className="btn ghost" onClick={() => setDeleting(true)}><Icon.trash /> Delete</button>}
-          <button className="btn primary" disabled={!dirty || saving || problems} onClick={save}>
-            {saving && <Spinner />} {id ? (dirty ? 'Save changes' : 'Saved') : `Create ${thing}`}
-          </button>
+          <SaveButton dirty={dirty} saving={saving} disabled={!dirty || saving || problems} onClick={save} isNew={!id} createLabel={`Create ${thing}`} />
         </div>
       </div>
       {saveError && <Notice kind="error">{saveError}</Notice>}
@@ -355,42 +354,6 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
       </section>
 
       <section className="panel">
-        <div className="blend-summary">
-          <BlendPie items={breakdown.items} totalGrams={breakdown.totalGrams} />
-          <div className="blend-facts">
-            {sauce ? (
-              <>
-                <div><span>One container</span><b>{qty(batch)} {SAUCE_UOM}</b><small>{form.container}</small></div>
-                <div>
-                  <span>Servings</span>
-                  <b>{perContainer ? qty(perContainer, 1) : '—'}</b>
-                  <small>{servingOz ? `${qty(servingOz)} ${SAUCE_UOM} each` : 'Set a serving size'}</small>
-                </div>
-              </>
-            ) : (
-              <>
-                <div><span>One batch ({base} serving{base === 1 ? '' : 's'})</span><b>{qty(grams)} g</b><small>about {qty(tsp, 1)} tsp</small></div>
-                <div>
-                  <span>For {wholeNumber(needed) ? needed : base} serving{(wholeNumber(needed) ? Number(needed) : base) === 1 ? '' : 's'}</span>
-                  <b className={scaled ? 'scaled' : ''}>{qty(grams.times(scale))} g</b>
-                  <small>about {qty(tsp.times(scale), 1)} tsp</small>
-                </div>
-              </>
-            )}
-            <div><span>{sauce ? 'Ingredients' : 'Spices'}</span><b>{form.items.length}</b></div>
-            <div>
-              <span>Cost</span>
-              <b>{breakdown.cost ? money(breakdown.cost) : '—'}</b>
-              <small>
-                {sauce
-                  ? (breakdown.cost && batch ? `${servingOz ? `${money(toDecimal(breakdown.cost).times(servingOz).div(batch))} / serving, ` : ''}${unitMoney(toDecimal(breakdown.cost).div(batch))} / ${SAUCE_UOM}. ` : '')
-                  : (breakdown.cost && breakdown.costPerGram ? `${unitMoney(breakdown.costPerGram)} / g. ` : '')}
-                {form.items.length ? `${costed} of ${form.items.length} ${noun}s priced` : ''}
-              </small>
-            </div>
-          </div>
-        </div>
-
         <div className="table-wrap">
           <table className="grid builder-lines blend-grid">
             <thead>
@@ -478,6 +441,42 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
             )}
           />
         </div>
+        <div className="blend-summary">
+          <BlendPie items={breakdown.items} totalGrams={breakdown.totalGrams} size={phone ? 150 : 220} />
+          <div className="blend-facts">
+            {sauce ? (
+              <>
+                <div><span>One container</span><b>{qty(batch)} {SAUCE_UOM}</b><small>{form.container}</small></div>
+                <div>
+                  <span>Servings</span>
+                  <b>{perContainer ? qty(perContainer, 1) : '—'}</b>
+                  <small>{servingOz ? `${qty(servingOz)} ${SAUCE_UOM} each` : 'Set a serving size'}</small>
+                </div>
+              </>
+            ) : (
+              <>
+                <div><span>One batch ({base} serving{base === 1 ? '' : 's'})</span><b>{qty(grams)} g</b><small>about {qty(tsp, 1)} tsp</small></div>
+                <div>
+                  <span>For {wholeNumber(needed) ? needed : base} serving{(wholeNumber(needed) ? Number(needed) : base) === 1 ? '' : 's'}</span>
+                  <b className={scaled ? 'scaled' : ''}>{qty(grams.times(scale))} g</b>
+                  <small>about {qty(tsp.times(scale), 1)} tsp</small>
+                </div>
+              </>
+            )}
+            <div><span>{sauce ? 'Ingredients' : 'Spices'}</span><b>{form.items.length}</b></div>
+            <div>
+              <span>Cost</span>
+              <b>{breakdown.cost ? money(breakdown.cost) : '—'}</b>
+              <small>
+                {sauce
+                  ? (breakdown.cost && batch ? `${servingOz ? `${money(toDecimal(breakdown.cost).times(servingOz).div(batch))} / serving, ` : ''}${unitMoney(toDecimal(breakdown.cost).div(batch))} / ${SAUCE_UOM}. ` : '')
+                  : (breakdown.cost && breakdown.costPerGram ? `${unitMoney(breakdown.costPerGram)} / g. ` : '')}
+                {form.items.length ? `${costed} of ${form.items.length} ${noun}s priced` : ''}
+              </small>
+            </div>
+          </div>
+        </div>
+
       </section>
 
       {viewing && <IngredientDrawer id={viewing} onClose={() => closeIngredient(viewing)} />}

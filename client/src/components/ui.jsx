@@ -24,6 +24,7 @@ export const Icon = {
   trash: () => <svg {...s}><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>,
   download: () => <svg {...s}><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>,
   upload: () => <svg {...s}><path d="M12 20V9M7 14l5-5 5 5M5 4h14" /></svg>,
+  copy: () => <svg {...s}><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg>,
   pencil: () => <svg {...s} width="14" height="14"><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="m13.5 6.5 4 4" /></svg>,
   up: () => <svg {...s} width="14" height="14"><path d="m6 15 6-6 6 6" /></svg>,
   down: () => <svg {...s} width="14" height="14"><path d="m6 9 6 6 6-6" /></svg>,
@@ -180,6 +181,45 @@ export function Notice({ kind = 'warn', children }) {
 }
 
 export const Spinner = () => <span className="spinner" aria-hidden="true" />;
+
+/**
+ * A page's main save button. Every label it can show is stacked in one grid cell, so switching
+ * between "Save changes" and "Saved" doesn't change its width and shift the header. With unsaved
+ * changes, a phone also shows it floating at the bottom of the screen once the header's button
+ * has scrolled away. `isNew`: the item isn't saved yet, so it reads `createLabel` and stays enabled.
+ */
+export function SaveButton({ dirty, saving, disabled, onClick, isNew = false, createLabel = 'Create' }) {
+  const ref = useRef(null);
+  const [offscreen, setOffscreen] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(([entry]) => setOffscreen(!entry.isIntersecting));
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  const labels = isNew ? [createLabel, 'Saving…'] : ['Save changes', 'Saved', 'Saving…'];
+  const current = saving ? 'Saving…' : isNew ? createLabel : dirty ? 'Save changes' : 'Saved';
+  const inner = (
+    <span className="btn-stack">
+      {labels.map((l) => (
+        <span key={l} className={l === current ? undefined : 'off'} aria-hidden={l !== current || undefined}>
+          {l === 'Saving…' && <Spinner />}{l}
+        </span>
+      ))}
+    </span>
+  );
+  return (
+    <>
+      <button ref={ref} className="btn primary" disabled={disabled} onClick={onClick}>{inner}</button>
+      {dirty && offscreen && (
+        <div className="floating-save save-float">
+          <button className="btn primary" disabled={disabled} onClick={onClick} tabIndex={-1} aria-hidden="true">{inner}</button>
+        </div>
+      )}
+    </>
+  );
+}
 
 // ---------- Toasts ----------
 

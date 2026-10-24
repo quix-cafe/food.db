@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Navigate, Route, Routes, Link, useLocation, useParams } from 'react-router';
 import UniversalSearch from './components/UniversalSearch.jsx';
 import { setTestMode } from './api.js';
-import { useTestMode } from './hooks.js';
+import { useStickyTableHeads, useTestMode } from './hooks.js';
 import { NewIngredientForm, ReceiptImportForm } from './components/forms.jsx';
 import { Icon, Modal, ToastProvider } from './components/ui.jsx';
 import IngredientsPage from './pages/IngredientsPage.jsx';
@@ -81,6 +81,7 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const { pathname } = useLocation();
   useEffect(() => setMenuOpen(false), [pathname]);
+  useStickyTableHeads();
   useEffect(() => {
     if (!menuOpen) return;
     const onKey = (e) => e.key === 'Escape' && setMenuOpen(false);

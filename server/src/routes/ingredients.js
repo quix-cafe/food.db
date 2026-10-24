@@ -8,6 +8,11 @@ import { mergeIngredients } from '../merge.js';
 import { HttpError, badRequest, notFound, text, number, date, uuid, array, today } from '../validate.js';
 
 const router = Router();
+
+// Packs bought: a line's quantity, so 2 packs on one line are 2 and several lines on one receipt
+// each count. A fractional quantity is a weighed buy (1.46 lb of tomatoes), which is one.
+const PURCHASE_COUNT = `(SELECT coalesce(sum(CASE WHEN p.quantity = trunc(p.quantity) THEN p.quantity ELSE 1 END), 0)::int
+                          FROM ingredient_purchases p WHERE p.ingredient_id = i.id) AS "purchaseCount"`;
 const PRICE_HIKE_THRESHOLD = Number(process.env.PRICE_HIKE_THRESHOLD ?? 10);
 
 function ingredientFields(body, { partial = false } = {}) {
@@ -79,11 +84,13 @@ router.get('/', async (req, res) => {
   }
   const { rows } = await query(
     `SELECT ${INGREDIENT_COLUMNS},
-            (SELECT count(*)::int FROM ingredient_purchases p WHERE p.ingredient_id = i.id) AS "purchaseCount",
-            -- Recipes using it directly or through a Spice Lab blend or sauce, each once.
+            ${PURCHASE_COUNT},
+            -- Recipes using it directly or through a Spice Lab blend or sauce, each once, plus
+            -- those blends and sauces (a sauce can be sold on its own, in no recipe).
             (SELECT count(DISTINCT ri.recipe_id)::int FROM recipe_ingredients ri
               WHERE ri.ingredient_id = i.id
-                 OR ri.blend_id IN (SELECT si.blend_id FROM spice_blend_items si WHERE si.ingredient_id = i.id)) AS "recipeCount"
+                 OR ri.blend_id IN (SELECT si.blend_id FROM spice_blend_items si WHERE si.ingredient_id = i.id))
+              + (SELECT count(DISTINCT si.blend_id)::int FROM spice_blend_items si WHERE si.ingredient_id = i.id) AS "useCount"
      FROM ingredients i ${LATEST_PURCHASE}
      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
      ORDER BY lower(i.name)`,
@@ -111,7 +118,7 @@ router.get('/vendors', async (_req, res) => {
 router.get('/duplicates', async (_req, res) => {
   const [{ rows: ingredients }, { rows: aliases }, { rows: dismissed }] = await Promise.all([
     query(`SELECT ${INGREDIENT_COLUMNS},
-             (SELECT count(*)::int FROM ingredient_purchases p WHERE p.ingredient_id = i.id) AS "purchaseCount",
+             ${PURCHASE_COUNT},
              (SELECT count(DISTINCT ri.recipe_id)::int FROM recipe_ingredients ri WHERE ri.ingredient_id = i.id) AS "recipeCount"
            FROM ingredients i ${LATEST_PURCHASE}`),
     query('SELECT ingredient_id AS "ingredientId", alias FROM ingredient_aliases'),

@@ -213,6 +213,40 @@ router.post('/:id/recipes', async (req, res) => {
   res.status(201).json(await getEvent(id));
 });
 
+// A copy of the plan (guests, vendor fee, recipes and sauces with their pricing, amounts set on
+// the shopping list) under a new name and date; results, notes and sales stay with the original.
+router.post('/:id/duplicate', async (req, res) => {
+  const id = uuid(req.params.id, 'id');
+  const name = text(req.body?.name, 'Event name');
+  const day = date(req.body?.date, 'Date');
+  const newId = await tx(async (c) => {
+    const { rows } = await c.query(
+      `INSERT INTO events (name, event_date, guest_count, vendor_fee)
+       SELECT coalesce($2, name || ' (copy)'), coalesce($3::date, event_date), guest_count, vendor_fee FROM events WHERE id = $1
+       RETURNING id`,
+      [id, name, day],
+    );
+    if (!rows[0]) throw notFound('Event');
+    const copy = rows[0].id;
+    await c.query(
+      `INSERT INTO event_recipes (event_id, recipe_id, expected_servings, sale_price, discount_amount, discount_qty)
+       SELECT $2, recipe_id, expected_servings, sale_price, discount_amount, discount_qty FROM event_recipes WHERE event_id = $1`,
+      [id, copy],
+    );
+    await c.query(
+      `INSERT INTO event_blends (event_id, blend_id, servings, container, sale_price)
+       SELECT $2, blend_id, servings, container, sale_price FROM event_blends WHERE event_id = $1`,
+      [id, copy],
+    );
+    await c.query(
+      `INSERT INTO event_amounts (event_id, ingredient_id, amount) SELECT $2, ingredient_id, amount FROM event_amounts WHERE event_id = $1`,
+      [id, copy],
+    );
+    return copy;
+  });
+  res.status(201).json(await getEvent(newId));
+});
+
 router.delete('/:id', async (req, res) => {
   const { rowCount } = await query('DELETE FROM events WHERE id = $1', [uuid(req.params.id, 'id')]);
   if (!rowCount) throw notFound('Event');

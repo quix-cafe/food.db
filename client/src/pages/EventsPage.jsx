@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
 import { useApi } from '../hooks.js';
 import { todayIso } from '../format.js';
-import { Field, Icon, Notice, Spinner, TestBadge } from '../components/ui.jsx';
+import { Field, Icon, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
 
 function DateBlock({ iso }) {
   const [y, m, d] = iso.split('-').map(Number);
@@ -19,6 +19,7 @@ function DateBlock({ iso }) {
 export default function EventsPage() {
   const { data, error, loading } = useApi('/events');
   const [creating, setCreating] = useState(false);
+  const [copying, setCopying] = useState(null);
   const today = todayIso();
   const upcoming = (data ?? []).filter((e) => e.date >= today).reverse();
   const past = (data ?? []).filter((e) => e.date < today);
@@ -50,22 +51,68 @@ export default function EventsPage() {
           <div className="panel-head"><h2>{label}</h2></div>
           <div className="event-list">
             {list.map((e) => (
-              <Link key={e.id} to={`/events/${e.id}`} className={`event-row ${e.date < today ? 'past' : ''}`}>
-                <DateBlock iso={e.date} />
-                <div>
-                  <h3>{e.name} <TestBadge item={e} /></h3>
-                  <span className="muted">{new Date(e.date + 'T00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</span>
-                </div>
-                <span className="muted">
-                  {e.recipeCount} {e.recipeCount === 1 ? 'recipe' : 'recipes'}, {e.totalServings} servings
-                  {e.guestCount != null && `, ${e.guestCount} guests`}
-                </span>
-              </Link>
+              <div key={e.id} className={`event-item ${e.date < today ? 'past' : ''}`}>
+                <Link to={`/events/${e.id}`} className="event-row">
+                  <DateBlock iso={e.date} />
+                  <div>
+                    <h3>{e.name} <TestBadge item={e} /></h3>
+                    <span className="muted">{new Date(e.date + 'T00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</span>
+                  </div>
+                  <span className="muted">
+                    {e.recipeCount} {e.recipeCount === 1 ? 'recipe' : 'recipes'}, {e.totalServings} servings
+                    {e.guestCount != null && `, ${e.guestCount} guests`}
+                  </span>
+                </Link>
+                <button className="icon-btn" onClick={() => setCopying(e)} aria-label={`Duplicate ${e.name}`} title="Duplicate"><Icon.copy /></button>
+              </div>
             ))}
           </div>
         </section>
       ))}
+      {copying && <DuplicateEventModal event={copying} onClose={() => setCopying(null)} />}
     </main>
+  );
+}
+
+/** Copy an event's plan (recipes, sauces, pricing, guests, fee) under a new name and date, then open the copy. */
+export function DuplicateEventModal({ event, onClose }) {
+  const [name, setName] = useState(`${event.name} (copy)`);
+  const [date, setDate] = useState(event.date >= todayIso() ? event.date : todayIso());
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const navigate = useNavigate();
+  const toast = useToast();
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const copy = await api(`/events/${event.id}/duplicate`, { method: 'POST', body: { name, date } });
+      notifyDataChanged();
+      toast(`Duplicated as ${copy.name}`);
+      onClose();
+      navigate(`/events/${copy.id}`);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title={`Duplicate ${event.name}`} onClose={onClose}>
+      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <p className="muted">The copy gets the same recipes, sauces, prices, guests and vendor fee. Sales, results and notes stay with this one.</p>
+        <div className="form-grid">
+          <Field label="Event name" className="span-2"><input className="input" value={name} onChange={(e) => setName(e.target.value)} required /></Field>
+          <Field label="Date"><input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} required /></Field>
+        </div>
+        {error && <Notice kind="error">{error}</Notice>}
+        <div className="form-actions">
+          <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn primary" disabled={busy}>{busy && <Spinner />} Duplicate</button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

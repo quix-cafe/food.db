@@ -54,7 +54,7 @@ function form(files, fields = {}) {
   return fd;
 }
 
-const filesOnDisk = async () => (await readdir(process.env.UPLOAD_DIR)).sort();
+const filesOnDisk = async () => (await readdir(process.env.UPLOAD_DIR)).filter((f) => f !== 'thumbs').sort();
 
 test('recipe images: upload, serve, cover order, duplicate, delete', { skip }, async () => {
   const recipe = (await api('POST', '/recipes', { name: 'Tart', baseServings: 8 })).data;
@@ -189,4 +189,37 @@ test('a receipt uploaded with photos in test mode is test data', { skip }, async
   assert.equal((await api('GET', '/receipts')).data.find((r) => r.id === created.data.id).isTest, true);
   const real = await api('POST', '/receipts', form([['r.jpg', JPEG, 'image/jpeg']], { vendor: 'Real store', date: '2026-10-03', source: '{}' }));
   assert.equal((await api('GET', '/receipts')).data.find((r) => r.id === real.data.id).isTest, false);
+});
+
+test('thumbnails are small JPEGs, made once and removed with their image', { skip }, async () => {
+  const { createJimp } = await import('@jimp/core');
+  const { default: png } = await import('@jimp/js-png');
+  const Jimp = createJimp({ formats: [png] });
+  // 1200 × 800, half see-through: the thumbnail is 640 wide and white where it was clear.
+  const big = new Jimp({ width: 1200, height: 800, color: 0x2f6b4f00 });
+  for (let x = 0; x < 600; x++) for (let y = 0; y < 800; y++) big.setPixelColor(0x2f6b4fff, x, y);
+  const pngBytes = await big.getBuffer('image/png');
+  const recipe = (await api('POST', '/recipes', { name: 'Pie', baseServings: 8 })).data;
+  const [img, broken] = (await api('POST', `/recipes/${recipe.id}/images`, form([['pie.png', pngBytes, 'image/png'], ['b.jpg', JPEG, 'image/jpeg']]))).data;
+  assert.equal(img.thumbUrl, `/api/images/${img.id}/thumb`);
+
+  const origin = base.replace('/api', '');
+  const res = await fetch(origin + img.thumbUrl);
+  assert.equal(res.headers.get('content-type'), 'image/jpeg');
+  const { default: jpeg } = await import('@jimp/js-jpeg');
+  const thumb = await createJimp({ formats: [jpeg] }).fromBuffer(Buffer.from(await res.arrayBuffer()));
+  assert.deepEqual([thumb.bitmap.width, thumb.bitmap.height], [640, 427]);
+  const [r, g, b] = thumb.bitmap.data.subarray((10 * 640 + 600) * 4); // the clear half
+  assert.ok(r > 245 && g > 245 && b > 245);
+  const thumbs = path.join(process.env.UPLOAD_DIR, 'thumbs');
+  assert.equal((await readdir(thumbs)).length, 1);
+  assert.equal((await fetch(origin + img.thumbUrl)).status, 200);
+
+  // A file that won't decode is served as it is.
+  const fallback = await fetch(origin + broken.thumbUrl);
+  assert.equal(fallback.headers.get('content-type'), 'image/jpeg');
+  assert.deepEqual(Buffer.from(await fallback.arrayBuffer()), JPEG);
+
+  assert.equal((await api('DELETE', `/images/${img.id}`)).status, 204);
+  assert.deepEqual(await readdir(thumbs), []);
 });

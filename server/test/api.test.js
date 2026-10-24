@@ -75,7 +75,15 @@ test('recurring purchases keep history and the latest price wins', { skip }, asy
 
   const list = await api('GET', '/ingredients?q=flo');
   assert.equal(list.data.length, 1);
-  assert.equal(list.data[0].purchaseCount, 2);
+  assert.equal(list.data[0].purchaseCount, 3); // two bags, then one
+  // Packs bought: 30 eggs on one line are 30; a weighed 1.46 lb is one buy.
+  const all = (await api('GET', '/ingredients')).data;
+  assert.equal(all.find((i) => i.name === 'Eggs').purchaseCount, 30);
+  const weighed = await api('POST', '/ingredients/purchase', { items: [{ name: 'Plum tomatoes', uom: 'lb', quantity: 1.46, packSize: 1, unitCost: '1.79' }] });
+  const tomato = (await api('GET', '/ingredients?q=plum')).data[0];
+  assert.equal(tomato.purchaseCount, 1);
+  await api('DELETE', `/ingredients/${weighed.data.purchases[0].ingredientId}/purchases/${weighed.data.purchases[0].id}`);
+  await api('DELETE', `/ingredients/${tomato.id}`);
 });
 
 test('purchase validation reports the row', { skip }, async () => {
@@ -260,6 +268,15 @@ test('a needed amount set on the shopping list replaces the scaled total', { ski
   assert.equal(set.adjustment, '-2.1000'); // 7 fewer eggs × 0.30
   assert.equal(set.totalCost, '5.9000');
   assert.equal((await api('PUT', `/events/${ev.id}/amounts/${ids.eggs}`, { amount: -1 })).status, 400);
+  // Duplicating copies the plan, the set amount included, under a new name and date.
+  const copy = await api('POST', `/events/${ev.id}/duplicate`, { name: 'Gala 2', date: '2027-01-02' });
+  assert.equal(copy.status, 201);
+  assert.deepEqual([copy.data.name, copy.data.date, copy.data.recipes.length], ['Gala 2', '2027-01-02', set.recipes.length]);
+  assert.equal((await api('GET', `/events/${copy.data.id}/summary`)).data.totalCost, set.totalCost);
+  const plain = (await api('POST', `/events/${ev.id}/duplicate`, {})).data;
+  assert.deepEqual([plain.name, plain.date], ['Gala (copy)', ev.date]);
+  assert.equal((await api('POST', `/events/${ids.eggs}/duplicate`, {})).status, 404);
+  for (const e of [copy.data, plain]) await api('DELETE', `/events/${e.id}`);
   assert.equal((await api('DELETE', `/events/${ev.id}/amounts/${ids.eggs}`)).status, 204);
   assert.equal((await api('GET', `/events/${ev.id}/summary`)).data.totalCost, before.totalCost);
 });
@@ -493,6 +510,10 @@ test('sauces: a container batch in oz, bunches, and items in the ingredient’s 
   assert.equal(sale.status, 201);
   assert.deepEqual([sale.data.sales[0].items[0].name, sale.data.sales[0].total], ['Green sauce', '1.50']);
   assert.equal(sale.data.totals.byRecipe[0].blendId, sauce.data.id);
+  const copied = (await api('POST', `/events/${ev.id}/duplicate`, {})).data; // the sauces, not the sales
+  assert.deepEqual(copied.sauces.map((b) => b.blendId), [sauce.data.id]);
+  assert.equal((await api('GET', `/events/${copied.id}/sales`)).data.sales.length, 0);
+  await api('DELETE', `/events/${copied.id}`);
 
   assert.equal((await api('PUT', `/events/${ev.id}`, { name: 'Market', date: '2026-12-02', sauces: [{ blendId: sauce.data.id, servings: 0 }] })).status, 400);
   assert.equal((await api('DELETE', `/blends/${sauce.data.id}`)).status, 409);
@@ -500,7 +521,10 @@ test('sauces: a container batch in oz, bunches, and items in the ingredient’s 
   const used = (await api('GET', `/ingredients/${herb.id}/history`)).data.usedIn;
   assert.deepEqual(used.recipes, []);
   const listed = (await api('GET', '/ingredients?q=Parsley')).data;
-  assert.equal(listed.find((i) => i.id === herb.id).recipeCount, 1); // Sauced, through the sauce
+  assert.equal(listed.find((i) => i.id === herb.id).useCount, 2); // the sauce, and Sauced through it
+  const found = (await api('GET', '/search?q=green')).data;
+  assert.deepEqual([found.sauces.map((b) => b.name), found.blends, found.recipes], [['Green sauce'], [], []]);
+  assert.deepEqual((await api('GET', '/search?q=50%25')).data.ingredients, []); // % is matched literally
   assert.deepEqual(used.blends.map((b) => [b.name, b.kind, b.recipes.map((r) => r.name)]), [['Green sauce', 'sauce', ['Sauced']]]);
   // Pricing left out keeps what the event had.
   const kept = await api('PUT', `/events/${ev.id}`, { name: 'Market', date: '2026-12-02', sauces: [{ blendId: sauce.data.id, servings: 10 }] });
@@ -778,6 +802,11 @@ test('several lines of one ingredient on one receipt are one averaged price, not
   assert.deepEqual(hist.trips.map((t) => [t.lines, t.unitPrice, t.changePercent, t.priceHike]), [[2, '4.2125', '5.3', false], [1, '4.0000', null, false]]);
   assert.equal(hist.trips[0].receiptId, receipt.id);
   assert.equal(hist.trips[0].totalCost, '16.8500');
+  // The Ingredients list counts every pack bought: three, though two share a receipt.
+  assert.equal((await api('GET', '/ingredients')).data.find((i) => i.id === thighs).purchaseCount, 3);
+  // The header search finds the receipt by its vendor.
+  const found = (await api('GET', '/search?q=butch')).data;
+  assert.deepEqual(found.purchases.map((r) => [r.id, r.lines]), [[receipt.id, 2]]);
   // Within the receipt, the $4.50/lb pack isn't a 12.5% hike over the $4.00/lb one.
   assert.deepEqual(hist.purchases.slice(0, 2).map((p) => [p.tripId, p.tripLines, p.changePercent, p.priceHike]),
     [[receipt.id, 2, null, false], [receipt.id, 2, null, false]]);
