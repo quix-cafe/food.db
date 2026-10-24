@@ -103,6 +103,10 @@ test('recipe costing uses latest price and scales statelessly', { skip }, async 
     lines: [{ ingredientId: ids.flour, amount: 5 }],
   });
   assert.equal(calc.data.scaledCost, '5.0000');
+  // Amounts can be fractions, as in the Spice Lab.
+  const half = await api('POST', '/recipes/calculate', { baseServings: 1, lines: [{ ingredientId: ids.flour, amount: '1 1/2' }] });
+  assert.equal(half.data.lines[0].amount, '1.5');
+  assert.equal((await api('POST', '/recipes/calculate', { baseServings: 1, lines: [{ ingredientId: ids.flour, amount: '1/0' }] })).status, 400);
 
   const again = await api('GET', `/recipes/${ids.pasta}`);
   assert.equal(again.data.baseServings, 4);
@@ -114,6 +118,15 @@ test('recipe costing uses latest price and scales statelessly', { skip }, async 
   const gallery = await api('GET', '/recipes');
   assert.equal(gallery.data.length, 2);
   assert.ok(gallery.data[0].lastPriceSync);
+  assert.deepEqual([gallery.data[0].ingredientCount, gallery.data[0].laborMinutes], [2, null]);
+
+  // The gallery lists labor as minutes, apart from the ingredient count.
+  const labor = (await api('POST', '/ingredients', { name: 'Labor', category: 'Labor', uom: 'hr', purchase: { quantity: 1, packSize: 1, totalCost: 20 } })).data;
+  const timed = (await api('POST', '/recipes', { name: 'Timed', baseServings: 1, lines: [{ ingredientId: ids.flour, amount: 1 }, { ingredientId: labor.id, amount: '0.75' }] })).data;
+  const card = (await api('GET', '/recipes')).data.find((r) => r.id === timed.id);
+  assert.deepEqual([card.ingredientCount, card.laborMinutes], [1, '45']);
+  await api('DELETE', `/recipes/${timed.id}`);
+  await api('DELETE', `/ingredients/${labor.id}`);
 });
 
 test('ingredients used by a recipe cannot be deleted', { skip }, async () => {
@@ -444,10 +457,13 @@ test('sauces: a container batch in oz, bunches, and items in the ingredient’s 
   assert.equal((await api('POST', '/blends', { name: 'X', kind: 'sauce', container: '2 qt', items: [] })).status, 400);
   assert.equal((await api('POST', '/blends', { name: 'X', items: [{ ingredientId: herb.id, amount: 1, unit: 'box' }] })).status, 400); // not its unit
 
+  // Servings given without a serving size are spread over the container: 32 in a quart are 1 oz each.
+  assert.deepEqual([sauce.data.servingOz, sauce.data.servings], ['1.0000', 32]);
+  assert.equal((await api('POST', '/blends', { name: 'X', kind: 'sauce', container: '1/4 qt', servingOz: 9, items: [] })).status, 400); // more than the container
   // Kind stays as created; the container can change.
-  const put = await api('PUT', `/blends/${sauce.data.id}`, { ...sauce.data, kind: 'spice', container: '1/2 qt', items: sauce.data.items });
+  const put = await api('PUT', `/blends/${sauce.data.id}`, { ...sauce.data, kind: 'spice', container: '1/2 qt', servingOz: '0.5', items: sauce.data.items });
   assert.equal(put.status, 200);
-  assert.deepEqual([put.data.kind, put.data.batchSize], ['sauce', '16.0000']);
+  assert.deepEqual([put.data.kind, put.data.batchSize, put.data.servings], ['sauce', '16.0000', 32]);
 
   const recipe = await api('POST', '/recipes', { name: 'Sauced', baseServings: 1, lines: [{ blendId: sauce.data.id, amount: 4 }] });
   const line = recipe.data.costing.lines[0];
@@ -543,6 +559,14 @@ test('a database listing migrations this version doesn’t have is refused', { s
   await pool.query("INSERT INTO schema_migrations (name) VALUES ('011_test_data.sql')");
   await assert.rejects(migrate({ log: () => {} }), /older version of food\.db \(it lists 011_test_data\.sql\)/);
   await pool.query("DELETE FROM schema_migrations WHERE name = '011_test_data.sql'");
+});
+
+test('a migration since combined into the schema is dropped, not refused', { skip }, async () => {
+  const { migrate } = await import('../src/migrate.js');
+  await pool.query("INSERT INTO schema_migrations (name) VALUES ('002_sauce_serving_oz.sql')");
+  await migrate({ log: () => {} });
+  const { rows } = await pool.query('SELECT name FROM schema_migrations ORDER BY name');
+  assert.deepEqual(rows.map((r) => r.name), ['001_schema.sql']);
 });
 
 test('event results: set with the event, kept when a save leaves them out, cleared when blank', { skip }, async () => {

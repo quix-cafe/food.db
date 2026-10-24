@@ -1,0 +1,51 @@
+{
+  "tax": 0,
+  "date": "10/15/26",
+  "time": "07:29pm",
+  "items": [
+    {
+      "price": 5.99,
+      "description": "WC PEAS AND CARR"
+    },
+    {
+      "total": 2.97,
+      "quantity": 3,
+      "unit_price": 0.99,
+      "description": "CILANTRO"
+    },
+    {
+      "price": 3.49,
+      "description": "LF CORN TORTILLAS"
+    },
+    {
+      "price": 3.49,
+      "description": "LF CORN TORTILLAS"
+    },
+    {
+      "note": "Regular Price 2.49, You saved 1.03",
+      "total": 2.61,
+      "weight": "1.46 lb",
+      "unit_price": 1.79,
+      "description": "PLUM TOMATO"
+    },
+    {
+      "price": 3.99,
+      "description": "KING OYSTER MUSHRO"
+    },
+    {
+      "price": 3.99,
+      "description": "KING OYSTER MUSHRO"
+    },
+    {
+      "price": 1.99,
+      "description": "HUNTS TOMATO PASTE"
+    }
+  ],
+  "phone": "(610) 734-1001",
+  "total": 28.52,
+  "address": "7050 Terminal Square, Upper Darby, PA. 19082",
+  "website": "http://www.hmart.com",
+  "store_name": "H MART",
+  "savings_message": "By Shopping at HMART you saved: on 1 Great Buy Items, 1.03 And overall, you SAVED 1.03 Today!!",
+  "total_items_sold": 10
+}

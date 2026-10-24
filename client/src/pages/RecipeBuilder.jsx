@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { calculateRecipe, DEFAULT_MARGIN, isLabor, laborLast } from '@kitchen/shared';
+import { calculateRecipe, DEFAULT_MARGIN, isLabor, laborLast, parseAmount } from '@kitchen/shared';
 import { api, imageForm, notifyDataChanged } from '../api.js';
 import { useLeaveGuard, useRowReorder } from '../hooks.js';
 import ImageGallery, { useLocalImages } from '../components/ImageGallery.jsx';
@@ -8,7 +8,7 @@ import { date, money, pack, percent, perUnit, qty, unitMoney, toDecimal } from '
 import IngredientCombobox from '../components/IngredientCombobox.jsx';
 import { Field, Icon, LeaveModal, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
 import { AddToEventModal } from './RecipeGallery.jsx';
-import { IngredientDrawer } from './IngredientsPage.jsx';
+import { IngredientDrawer } from '../components/IngredientDrawer.jsx';
 
 let nextKey = 1;
 const blank = { name: '', baseServings: '4', servingSize: '', totalYield: '', yieldUnit: '', targetMargin: String(DEFAULT_MARGIN), lines: [] };
@@ -52,8 +52,10 @@ const fromServer = (r) => ({
 // Each line's amount is in the ingredient's unit of measure (lb, oz, each…), priced from
 // its latest purchase: price per unit = store price / store pack size. A spice blend line is
 // measured in grams (a sauce in oz), its "pack" being one batch of the blend.
-const apiLines = (lines) => lines.map(({ ingredientId, blendId, amount }) => (blendId ? { blendId, amount } : { ingredientId, amount }));
-const amountProblem = (lines) => lines.some((l) => { const a = toDecimal(l.amount); return !a || a.lt(0); });
+// Amounts are typed as decimals or fractions ("1/2", "1 1/2", "½") and sent as decimals.
+const amountOf = (l) => parseAmount(l.amount)?.toString() ?? l.amount;
+const apiLines = (lines) => lines.map((l) => (l.blendId ? { blendId: l.blendId, amount: amountOf(l) } : { ingredientId: l.ingredientId, amount: amountOf(l) }));
+const amountProblem = (lines) => lines.some((l) => { const a = parseAmount(l.amount); return !a || a.lt(0); });
 
 const savedShape = (f) => JSON.stringify({ ...f, lines: apiLines(f.lines) });
 
@@ -137,11 +139,11 @@ export default function RecipeBuilder() {
   // Instant, client-side costing with the same decimal math the API uses.
   const { costing, calcError } = useMemo(() => {
     if (!form) return {};
-    if (amountProblem(form.lines)) return { calcError: 'Amount used must be a number, 0 or more (e.g. 0.25 lb, 2 each)' };
+    if (amountProblem(form.lines)) return { calcError: 'Amount used must be a number or fraction, 0 or more (e.g. 0.25 lb, 1/2 lb, 2 each)' };
     try {
       return {
         costing: calculateRecipe({
-          lines: form.lines,
+          lines: form.lines.map((l) => ({ ...l, amount: amountOf(l) })),
           baseServings: form.baseServings,
           expectedServings: toDecimal(expected) ? expected : form.baseServings,
           targetMargin: form.targetMargin,
@@ -349,7 +351,7 @@ export default function RecipeBuilder() {
                         <td className="num">{l.packPrice && !isLabor(l) ? (l.blendId ? money(l.packPrice) : unitMoney(l.packPrice)) : '—'}</td>
                         <td className="num">
                           <span className="unit-input">
-                            <input className="input num" inputMode="decimal" value={l.amount} aria-label={`${l.name} amount used, in ${l.uom ?? 'each'}`} aria-invalid={amountProblem([l])} onChange={(e) => setLine(l.key, { amount: e.target.value })} />
+                            <input className="input num" value={l.amount} title="Fractions work: 1/2, 1 1/2, ½" aria-label={`${l.name} amount used, in ${l.uom ?? 'each'}`} aria-invalid={amountProblem([l])} onChange={(e) => setLine(l.key, { amount: e.target.value })} />
                             <span aria-hidden="true">{l.uom ?? 'each'}</span>
                           </span>
                         </td>

@@ -128,6 +128,7 @@ CREATE TABLE spice_blends (
   is_test    boolean NOT NULL DEFAULT is_test_default(),
   kind       text NOT NULL DEFAULT 'spice' CHECK (kind IN ('spice', 'sauce')),
   container  text CHECK (container IN ('1/4 qt', '1/2 qt', '1 qt', '1 gal')),
+  serving_oz numeric(10,4) CHECK (serving_oz > 0), -- a sauce's serving size; servings = whole servings per container
   CONSTRAINT spice_blends_sauce_container CHECK ((kind = 'sauce') = (container IS NOT NULL))
 );
 

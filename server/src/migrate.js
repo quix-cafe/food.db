@@ -5,11 +5,21 @@ import { embedded } from './embedded.js';
 
 const dir = fileURLToPath(new URL('../migrations/', import.meta.url));
 
+/**
+ * Migrations since combined into 001_schema.sql. A database (or backup) that applied them has
+ * everything they added, so their records are dropped rather than refused.
+ */
+export const COMBINED = ['002_sauce_serving_oz.sql'];
+
 /** Apply any migrations/*.sql files not yet recorded, in filename order. */
 export async function migrate({ log = console.log } = {}) {
   await pool.query('CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
   const { rows } = await pool.query('SELECT name FROM schema_migrations');
   const applied = new Set(rows.map((r) => r.name));
+  for (const name of COMBINED.filter((n) => applied.has(n))) {
+    await pool.query('DELETE FROM schema_migrations WHERE name = $1', [name]);
+    applied.delete(name);
+  }
   const files = embedded?.migrations ?? (await readdir(dir)).filter((f) => f.endsWith('.sql')).map((name) => ({ name }));
   files.sort((a, b) => a.name.localeCompare(b.name));
   // A database made by a version whose migrations were since combined can't be brought up to date.

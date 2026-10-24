@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
 import { useApi } from '../hooks.js';
-import { date, money, percent, toDecimal, todayIso } from '../format.js';
+import { date, money, percent, qty, toDecimal, todayIso } from '../format.js';
 import { Field, Icon, Menu, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
 import { DealInput, MarginCell, SalePriceInput, blankOrCount, blankOrPrice, priceText, pricingFor } from '../components/EventPricing.jsx';
 
@@ -82,7 +82,7 @@ export default function RecipeGallery() {
               {r.missingPrices > 0 && <span className="badge warn">{r.missingPrices} unpriced</span>}
             </div>
             <div className="card-meta">
-              <span>{r.ingredientCount} ingredients{r.imageCount > 1 ? `, ${r.imageCount} photos` : ''}</span>
+              <span>{r.ingredientCount} ingredient{r.ingredientCount === 1 ? '' : 's'}{r.laborMinutes ? `, ${qty(r.laborMinutes, 1)} min labor` : ''}{r.imageCount > 1 ? `, ${r.imageCount} photos` : ''}</span>
               {!r.lastPriceSync && <span>No prices yet</span>}
             </div>
           </article>

@@ -97,3 +97,11 @@ test('tests/receipt2.json: grouped entries, coupon, quantity detail, subtotal re
   assert.equal(byName(r, 'UPUP HOUSEH')[0].category, 'Cleaning Supplies');
   assert.ok(!r.items.some((i) => /Cartwheel|Saved/.test(i.name)));
 });
+
+test('tests/receipt3.json: a weighed line sells by its weight', () => {
+  const r = normalizeReceipt(fixture('receipt3.json'));
+  assert.equal(r.vendor, 'H MART');
+  assert.deepEqual(byName(r, 'PLUM TOMATO'), [{ name: 'PLUM TOMATO', category: null, quantity: '1.46', unit: 'lb', unitCost: '1.79', totalCost: '2.61', note: null }]);
+  assert.deepEqual(byName(r, 'CILANTRO').map((i) => [i.quantity, i.unitCost, i.totalCost]), [['3', '0.99', '2.97']]);
+  assert.deepEqual(r.warnings, []); // the lines add up to the total
+});

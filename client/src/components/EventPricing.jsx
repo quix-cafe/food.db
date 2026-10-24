@@ -6,6 +6,8 @@ import { money, toDecimal } from '../format.js';
 // "Add to event" dialog. Values are the text typed; '' means "not set".
 
 export const blankOrPrice = (v) => v.trim() === '' || (toDecimal(v.replace(/[$,]/g, ''))?.gte(0) ?? false);
+/** A whole number, 0 or more. */
+export const isInt = (v) => /^\d+$/.test(String(v).trim());
 export const blankOrCount = (v) => v.trim() === '' || /^[1-9]\d*$/.test(v.trim());
 export const priceText = (v) => v.replace(/[$,]/g, '').trim();
 

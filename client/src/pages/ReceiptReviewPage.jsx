@@ -53,8 +53,9 @@ function ReviewGrid({ receipt, source, draftId }) {
   // Edits since the import (or since the last save) would be lost by leaving: line changes and
   // ticks, the vendor or date, and photos not stored yet.
   const [baseline, setBaseline] = useState(() => ({ rows: rowsSnapshot(rows), vendor, date, photos: photos.length }));
+  // Until a first save, the whole import is lost by leaving, even untouched.
   const dirty = rowsSnapshot(rows) !== baseline.rows || vendor !== baseline.vendor || date !== baseline.date
-    || (!receiptId && photos.length !== baseline.photos);
+    || (!receiptId && (photos.length !== baseline.photos || rows.length > 0));
   const { blocker, allowLeave } = useLeaveGuard(dirty);
   const lineSum = useMemo(
     () => rows.reduce((acc, r) => acc.plus(toDecimal(r.totalCost) ?? (toDecimal(r.unitCost)?.times(toDecimal(r.quantity) ?? 0) ?? 0)), new Decimal(0)),
@@ -115,7 +116,9 @@ function ReviewGrid({ receipt, source, draftId }) {
       <LeaveModal blocker={blocker}>
         {receiptId
           ? 'Your changes to the lines that aren’t saved yet will be lost. The lines themselves stay on the receipt under Purchases.'
-          : 'Nothing from this receipt has been saved yet. If you leave now, the import and your changes are lost.'}
+          : confirmed.length
+            ? 'Nothing from this receipt has been saved yet. If you leave now, the import and your changes are lost.'
+            : 'You haven’t ticked any lines to save, so nothing from this receipt has been kept. If you leave now, the import is lost.'}
       </LeaveModal>
       <div className="page-head">
         <div>

@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { Cell, Pie, PieChart, Tooltip } from 'recharts';
-import { BLEND_UNITS, BLEND_UOM, SAUCE_CONTAINERS, SAUCE_GRAMS_PER_TSP, SAUCE_UNITS, SAUCE_UOM, SPICE_GRAMS_PER_TSP, calculateBlend, normalizeUnit, parseAmount } from '@kitchen/shared';
+import { BLEND_UNITS, BLEND_UOM, SAUCE_CONTAINERS, SAUCE_UNITS, SAUCE_UOM, SPICE_GRAMS_PER_TSP, calculateBlend, normalizeUnit, parseAmount } from '@kitchen/shared';
 import { api, notifyDataChanged } from '../api.js';
 import { useApi, useLeaveGuard, useRowReorder } from '../hooks.js';
-import { Decimal, money, qty, toDecimal, unitMoney } from '../format.js';
+import { Decimal, date, money, pack, perUnit, qty, toDecimal, unitMoney } from '../format.js';
 import { OTHER, SERIES } from '../palette.js';
 import IngredientCombobox from '../components/IngredientCombobox.jsx';
 import { Field, Icon, LeaveModal, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
+import { IngredientDrawer } from '../components/IngredientDrawer.jsx';
 
 /** A spice keeps the color of its position in the blend; past the palette it's "Other". */
 const colorAt = (i) => SERIES[i] ?? OTHER;
@@ -93,7 +94,7 @@ export default function SpiceLabPage() {
               <h3><Link to={`/spice-lab/${b.id}`}>{b.name}</Link> <TestBadge item={b} /></h3>
               <span className="muted">
                 {b.kind === 'sauce'
-                  ? `Sauce: ${b.items.length} ingredient${b.items.length === 1 ? '' : 's'}, ${b.container} (${qty(b.batchSize)} oz) per batch`
+                  ? `Sauce: ${b.items.length} ingredient${b.items.length === 1 ? '' : 's'}, ${b.container} (${qty(b.batchSize)} oz)${b.servingOz ? `, ${qty(b.servingOz)} oz servings` : ''}`
                   : `${b.items.length} spice${b.items.length === 1 ? '' : 's'}, ${qty(b.totalGrams)} g per batch`}
               </span>
               <div className="blend-swatches">
@@ -109,7 +110,7 @@ export default function SpiceLabPage() {
 }
 
 let nextKey = 1;
-const blankFor = (kind) => ({ name: '', kind, container: kind === 'sauce' ? '1 qt' : null, notes: '', servings: '1', items: [] });
+const blankFor = (kind) => ({ name: '', kind, container: kind === 'sauce' ? '1 qt' : null, notes: '', servings: '1', servingOz: kind === 'sauce' ? '2' : '', items: [] });
 
 const fromServer = (b) => ({
   name: b.name,
@@ -117,6 +118,7 @@ const fromServer = (b) => ({
   container: b.container,
   notes: b.notes ?? '',
   servings: String(b.servings),
+  servingOz: b.servingOz ? toDecimal(b.servingOz).toString() : '',
   isTest: b.isTest,
   items: b.items.map((it) => ({
     key: nextKey++,
@@ -128,14 +130,22 @@ const fromServer = (b) => ({
     packSize: it.packSize,
     uom: it.uom,
     unitGrams: it.unitGrams,
+    vendor: it.vendor,
+    priceDate: it.priceDate,
   })),
 });
 
 const apiItems = (items) => items.map(({ ingredientId, name, amount, unit }) => (ingredientId ? { ingredientId, amount, unit } : { name, amount, unit }));
-const apiBody = (f) => ({ name: f.name, kind: f.kind, container: f.container, notes: f.notes, servings: f.servings, items: apiItems(f.items) });
+const apiBody = (f) => ({
+  name: f.name, kind: f.kind, container: f.container, notes: f.notes, items: apiItems(f.items),
+  // A sauce's servings follow from its serving size; a blend's are typed.
+  ...(f.kind === 'sauce' ? { servingOz: f.servingOz } : { servings: f.servings }),
+});
 const savedShape = (f) => JSON.stringify(apiBody(f));
 const wholeNumber = (v) => /^\d+$/.test(String(v).trim()) && Number(v) > 0;
 const amountProblem = (it) => { const a = parseAmount(it.amount); return !a || a.lte(0); };
+/** A sauce's serving size in oz: above 0 and no more than its container. */
+const servingProblem = (f) => { const s = toDecimal(f.servingOz); return !s || s.lte(0) || s.gt(SAUCE_CONTAINERS[f.container] ?? 0); };
 
 /** Edits a spice blend, or a sauce (`kind="sauce"` for a new one; a saved one keeps its kind). */
 export function BlendEditor({ kind: newKind = 'spice' }) {
@@ -148,6 +158,7 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [viewing, setViewing] = useState(null); // ingredient id whose detail panel is open over the blend
   const { rowProps, handleProps } = useRowReorder((from, to) => setForm((f) => {
     if (to < 0 || to >= f.items.length || from === to) return f;
     const items = f.items.slice();
@@ -191,6 +202,33 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
   if (loadError) return <main className="page"><Notice kind="error">{loadError}</Notice><Link to="/spice-lab">Back to the Spice Lab</Link></main>;
   if (!form) return <main className="page"><Spinner /></main>;
 
+  // After the ingredient panel closes, its items pick up any rename or new price; amounts stay.
+  const closeIngredient = async (ingredientId) => {
+    setViewing(null);
+    try {
+      const ing = await api(`/ingredients/${ingredientId}`);
+      setForm((f) => ({
+        ...f,
+        items: f.items.map((it) => (it.ingredientId === ingredientId ? {
+          ...it, name: ing.name, uom: ing.uom, unitGrams: ing.unitGrams, packPrice: ing.latestPackPrice, packSize: ing.latestPackSize,
+          vendor: ing.latestVendor, priceDate: ing.latestPurchaseDate,
+        } : it)),
+      }));
+    } catch {
+      // Deleted from the panel: the item stays, and saving reports it.
+    }
+  };
+
+  // A sauce is written for one container: picking another scales every amount to fill it.
+  const setContainer = (container) => setForm((f) => {
+    const ratio = new Decimal(SAUCE_CONTAINERS[container]).div(SAUCE_CONTAINERS[f.container]);
+    const items = f.items.map((it) => {
+      const a = parseAmount(it.amount);
+      return a ? { ...it, amount: a.times(ratio).toDecimalPlaces(4).toString() } : it;
+    });
+    return { ...f, container, items };
+  });
+
   const setItem = (key, patch) => setForm((f) => ({ ...f, items: f.items.map((it) => (it.key === key ? { ...it, ...patch } : it)) }));
   const removeItem = (key) => setForm((f) => ({ ...f, items: f.items.filter((it) => it.key !== key) }));
   const addItem = (item) => {
@@ -204,13 +242,14 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
     // A sauce's ingredients start in their own unit (a bunch of cilantro); spices in grams.
     ...(sauce && ing.uom ? { unit: normalizeUnit(ing.uom) ?? ing.uom.trim().toLowerCase() } : {}),
     ingredientId: ing.id, name: ing.name, packPrice: ing.latestPackPrice, packSize: ing.latestPackSize, uom: ing.uom, unitGrams: ing.unitGrams,
+    vendor: ing.latestVendor, priceDate: ing.latestPurchaseDate,
   });
 
-  const problems = form.items.some(amountProblem) || !form.name.trim() || !wholeNumber(form.servings);
+  const problems = form.items.some(amountProblem) || !form.name.trim() || (sauce ? servingProblem(form) : !wholeNumber(form.servings));
 
-  // Scale = servings needed / servings one batch makes. Only the view changes.
+  // A blend scales to the servings needed (only the view changes); a sauce is made by the container.
   const base = wholeNumber(form.servings) ? Number(form.servings) : 1;
-  const scale = wholeNumber(needed) ? new Decimal(needed).div(base) : new Decimal(1);
+  const scale = !sauce && wholeNumber(needed) ? new Decimal(needed).div(base) : new Decimal(1);
   const scaled = !scale.eq(1);
   const sliderMax = Math.max(50, base * 10, wholeNumber(needed) ? Number(needed) : 0);
   const save = async () => {
@@ -253,6 +292,8 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
   const grams = toDecimal(breakdown.totalGrams);
   const tsp = grams.div(SPICE_GRAMS_PER_TSP);
   const batch = toDecimal(breakdown.batchSize);
+  const servingOz = sauce && !servingProblem(form) ? toDecimal(form.servingOz) : null;
+  const perContainer = servingOz ? batch.div(servingOz) : null;
 
   return (
     <main className="page">
@@ -274,31 +315,43 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
         <div className="form-grid">
           <Field label={sauce ? 'Sauce name' : 'Blend name'} className="span-2"><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={sauce ? 'e.g. Cilantro sauce' : 'e.g. House rub'} /></Field>
           <Field label="Notes" className="span-2"><textarea className="input" rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder={sauce ? 'Blend, strain, how long it keeps…' : 'Grind, toast, what it goes with…'} /></Field>
-          {sauce && (
-            <Field label="Container" hint="One batch fills one; recipes use the sauce in oz">
-              <select className="select" value={form.container} onChange={(e) => setForm({ ...form, container: e.target.value })}>
-                {Object.entries(SAUCE_CONTAINERS).map(([c, oz]) => <option key={c} value={c}>{c} ({oz} oz)</option>)}
-              </select>
+          {sauce ? (
+            <>
+              <Field label="Container" hint="The amounts below make one; changing it scales them">
+                <select className="select" value={form.container} onChange={(e) => setContainer(e.target.value)}>
+                  {Object.entries(SAUCE_CONTAINERS).map(([c, oz]) => <option key={c} value={c}>{c} ({oz} oz)</option>)}
+                </select>
+              </Field>
+              <Field label="Serving size" hint={perContainer ? `${qty(perContainer, 1)} servings per container` : `Oz per serving, up to ${SAUCE_CONTAINERS[form.container]}`}>
+                <span className="unit-input">
+                  <input className="input num" inputMode="decimal" value={form.servingOz} aria-label="Serving size, in oz" aria-invalid={servingProblem(form)}
+                    onChange={(e) => setForm({ ...form, servingOz: e.target.value })} />
+                  <span aria-hidden="true">{SAUCE_UOM}</span>
+                </span>
+              </Field>
+            </>
+          ) : (
+            <Field label="One batch makes" hint="Servings, saved with the blend">
+              <input className="input num" inputMode="numeric" value={form.servings} aria-invalid={!wholeNumber(form.servings)} onChange={(e) => setForm({ ...form, servings: e.target.value })} />
             </Field>
           )}
-          <Field label="One batch makes" hint="Servings, saved with the blend">
-            <input className="input num" inputMode="numeric" value={form.servings} aria-invalid={!wholeNumber(form.servings)} onChange={(e) => setForm({ ...form, servings: e.target.value })} />
-          </Field>
         </div>
-        <div className="margin-slider blend-scale">
-          <div className="margin-slider-head">
-            <label htmlFor="servings-needed">Servings needed</label>
-            <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <span className={scaled ? 'scaled' : 'muted'}>×{scale.toDecimalPlaces(2).toString()}</span>
-              <input className="input num" style={{ width: 80 }} inputMode="numeric" value={needed} aria-label="Servings needed (number)"
-                aria-invalid={!wholeNumber(needed)} onChange={(e) => setNeeded(e.target.value)} />
-            </span>
+        {!sauce && (
+          <div className="margin-slider blend-scale">
+            <div className="margin-slider-head">
+              <label htmlFor="servings-needed">Servings needed</label>
+              <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <span className={scaled ? 'scaled' : 'muted'}>×{scale.toDecimalPlaces(2).toString()}</span>
+                <input className="input num" style={{ width: 80 }} inputMode="numeric" value={needed} aria-label="Servings needed (number)"
+                  aria-invalid={!wholeNumber(needed)} onChange={(e) => setNeeded(e.target.value)} />
+              </span>
+            </div>
+            <input id="servings-needed" type="range" min="1" max={sliderMax} step="1" value={wholeNumber(needed) ? Number(needed) : base}
+              onChange={(e) => setNeeded(e.target.value)}
+              style={{ '--fill': `${(((wholeNumber(needed) ? Number(needed) : base) - 1) / (sliderMax - 1)) * 100}%` }} />
+            <small>Scales the amounts below; the saved blend doesn’t change.</small>
           </div>
-          <input id="servings-needed" type="range" min="1" max={sliderMax} step="1" value={wholeNumber(needed) ? Number(needed) : base}
-            onChange={(e) => setNeeded(e.target.value)}
-            style={{ '--fill': `${(((wholeNumber(needed) ? Number(needed) : base) - 1) / (sliderMax - 1)) * 100}%` }} />
-          <small>Scales the amounts below; the saved blend doesn’t change.</small>
-        </div>
+        )}
       </section>
 
       <section className="panel">
@@ -307,11 +360,11 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
           <div className="blend-facts">
             {sauce ? (
               <>
-                <div><span>One batch ({base} serving{base === 1 ? '' : 's'})</span><b>{qty(batch)} {SAUCE_UOM}</b><small>{form.container} container</small></div>
+                <div><span>One container</span><b>{qty(batch)} {SAUCE_UOM}</b><small>{form.container}</small></div>
                 <div>
-                  <span>For {wholeNumber(needed) ? needed : base} serving{(wholeNumber(needed) ? Number(needed) : base) === 1 ? '' : 's'}</span>
-                  <b className={scaled ? 'scaled' : ''}>{qty(batch.times(scale))} {SAUCE_UOM}</b>
-                  <small>{qty(scale, 2)} container{scale.eq(1) ? '' : 's'}</small>
+                  <span>Servings</span>
+                  <b>{perContainer ? qty(perContainer, 1) : '—'}</b>
+                  <small>{servingOz ? `${qty(servingOz)} ${SAUCE_UOM} each` : 'Set a serving size'}</small>
                 </div>
               </>
             ) : (
@@ -330,31 +383,29 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
               <b>{breakdown.cost ? money(breakdown.cost) : '—'}</b>
               <small>
                 {sauce
-                  ? (breakdown.cost && batch ? `${unitMoney(toDecimal(breakdown.cost).div(batch))} / ${SAUCE_UOM}. ` : '')
+                  ? (breakdown.cost && batch ? `${servingOz ? `${money(toDecimal(breakdown.cost).times(servingOz).div(batch))} / serving, ` : ''}${unitMoney(toDecimal(breakdown.cost).div(batch))} / ${SAUCE_UOM}. ` : '')
                   : (breakdown.cost && breakdown.costPerGram ? `${unitMoney(breakdown.costPerGram)} / g. ` : '')}
                 {form.items.length ? `${costed} of ${form.items.length} ${noun}s priced` : ''}
               </small>
             </div>
-            <p className="muted">
-              {sauce
-                ? `Slices are by weight. Spoons and cups count as water, about ${SAUCE_GRAMS_PER_TSP} g per tsp; a box about 750 g and a bunch or can about 75 g, unless its ingredient says what it weighs.`
-                : `Slices are by weight. Spoons and pinches count as about ${SPICE_GRAMS_PER_TSP} g per tsp, typical for ground spices; a box about 750 g and a bunch or can about 75 g, unless its ingredient says what it weighs.`}
-            </p>
           </div>
         </div>
 
         <div className="table-wrap">
-          <table className="grid blend-grid">
+          <table className="grid builder-lines blend-grid">
             <thead>
               <tr>
                 <th style={{ width: 28 }}><span className="visually-hidden">Reorder</span></th>
                 <th style={{ minWidth: 200 }}>{sauce ? 'Ingredient' : 'Spice'}</th>
-                <th className="num">Amount</th>
-                <th>Unit</th>
+                <th className="num">Unit price</th>
+                <th className="num">Pack size</th>
+                <th className="num">Store price</th>
+                <th className="num" title="Fractions work: 1/2, 1 1/2, ½">Amount used</th>
                 <th className="num">In g</th>
-                <th className="num" title="Amount × servings needed ÷ servings one batch makes">Scaled amount</th>
                 <th className="num">Share</th>
-                <th className="num" title={`From the ${noun}'s latest purchase, when it's in the ingredient database`}>Cost</th>
+                <th className="num" title={`Unit price × amount used, from the ${noun}'s latest purchase`}>Total cost</th>
+                {scaled && <th className="num" title="Amount × servings needed ÷ servings one batch makes">Scaled amount</th>}
+                {scaled && <th className="num">Scaled cost</th>}
                 <th><span className="visually-hidden">Remove</span></th>
               </tr>
             </thead>
@@ -364,37 +415,50 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
                 // Offer the linked ingredient's own unit too, so a "box" of garlic can be costed.
                 const own = it.uom ? normalizeUnit(it.uom) ?? it.uom.trim().toLowerCase() : null;
                 const units = [...new Set([...(sauce ? SAUCE_UNITS : BLEND_UNITS), own, it.unit].filter(Boolean))];
+                const priced = it.ingredientId && toDecimal(it.packPrice) !== null;
                 return (
                   <tr key={it.key} {...rowProps(i)}>
                     <td>
-                      <button className="icon-btn drag-handle" aria-label={`Move ${it.name || `spice ${i + 1}`} (drag, or use arrow keys)`} {...handleProps(i)}><Icon.grip /></button>
+                      <button className="icon-btn drag-handle" aria-label={`Move ${it.name || `${noun} ${i + 1}`} (drag, or use arrow keys)`} {...handleProps(i)}><Icon.grip /></button>
                     </td>
                     <td>
                       <span className="spice-name">
                         <i style={{ background: colorAt(i) }} aria-hidden="true" />
                         {it.ingredientId
-                          ? <span style={{ fontWeight: 600 }}>{it.name}</span>
-                          : <input className="input" value={it.name} aria-label={`Spice ${i + 1} name`} onChange={(e) => setItem(it.key, { name: e.target.value })} />}
+                          ? (
+                            <span>
+                              <button type="button" className="line-name" data-tip="View/edit" aria-label={`${it.name}: view/edit`} onClick={() => setViewing(it.ingredientId)}>{it.name}</button>
+                              <br />
+                              {priced
+                                ? <small className="muted">{it.vendor ? `${it.vendor}, ` : ''}bought {date(it.priceDate)}</small>
+                                : <span className="badge warn">No purchase price</span>}
+                            </span>
+                          )
+                          : <input className="input" value={it.name} aria-label={`${sauce ? 'Ingredient' : 'Spice'} ${i + 1} name`} title="Not in the ingredient database, so it has no price" onChange={(e) => setItem(it.key, { name: e.target.value })} />}
                       </span>
                     </td>
+                    <td className="num nowrap">{priced ? perUnit(toDecimal(it.packPrice).div(toDecimal(it.packSize) || 1), it.uom) : '—'}</td>
+                    <td className="num nowrap">{priced ? pack(it.packSize, it.uom) : '—'}</td>
+                    <td className="num">{priced ? unitMoney(it.packPrice) : '—'}</td>
                     <td className="num">
-                      <input className="input num" style={{ width: 78 }} value={it.amount} aria-label={`${it.name} amount`} aria-invalid={amountProblem(it)}
-                        title="Fractions work: 1/2, 1 1/2, ½" onChange={(e) => setItem(it.key, { amount: e.target.value })} />
-                    </td>
-                    <td>
-                      <select className="select blend-unit" value={it.unit} aria-label={`${it.name} unit`} onChange={(e) => setItem(it.key, { unit: normalizeUnit(e.target.value) ?? e.target.value })}>
-                        {units.map((u) => <option key={u} value={u}>{u}</option>)}
-                      </select>
+                      <span className="nowrap" style={{ display: 'inline-flex', gap: 6 }}>
+                        <input className="input num" style={{ width: 78 }} value={it.amount} aria-label={`${it.name} amount`} aria-invalid={amountProblem(it)}
+                          title="Fractions work: 1/2, 1 1/2, ½" onChange={(e) => setItem(it.key, { amount: e.target.value })} />
+                        <select className="select blend-unit" value={it.unit} aria-label={`${it.name} unit`} onChange={(e) => setItem(it.key, { unit: normalizeUnit(e.target.value) ?? e.target.value })}>
+                          {units.map((u) => <option key={u} value={u}>{u}</option>)}
+                        </select>
+                      </span>
                     </td>
                     <td className="num muted">{b?.grams ? qty(b.grams) : '—'}</td>
-                    <td className={`num nowrap ${scaled ? 'scaled' : ''}`}>{amountProblem(it) ? '—' : `${qty(parseAmount(it.amount).times(scale))} ${it.unit}`}</td>
-                    <td className="num" style={{ fontWeight: 650 }}>{b?.share ? `${b.share}%` : '—'}</td>
-                    <td className="num muted">{b?.cost ? money(b.cost) : it.ingredientId ? <span title={`No price, or ${it.unit} can’t be converted to ${it.uom}: set what 1 ${it.uom} weighs in the ingredient’s details`}>—</span> : ''}</td>
-                    <td><button className="icon-btn" aria-label={`Remove ${it.name || `spice ${i + 1}`}`} onClick={() => removeItem(it.key)}><Icon.trash /></button></td>
+                    <td className="num">{b?.share ? `${b.share}%` : '—'}</td>
+                    <td className="num" style={{ fontWeight: 650 }}>{b?.cost ? money(b.cost) : priced ? <span title={`${it.unit} can’t be converted to ${it.uom}: set what 1 ${it.uom} weighs in the ingredient’s details`}>—</span> : '—'}</td>
+                    {scaled && <td className="num nowrap scaled">{amountProblem(it) ? '—' : `${qty(parseAmount(it.amount).times(scale))} ${it.unit}`}</td>}
+                    {scaled && <td className="num scaled">{b?.cost ? money(toDecimal(b.cost).times(scale)) : '—'}</td>}
+                    <td><button className="icon-btn" aria-label={`Remove ${it.name || `${noun} ${i + 1}`}`} onClick={() => removeItem(it.key)}><Icon.trash /></button></td>
                   </tr>
                 );
               })}
-              {!form.items.length && <tr><td colSpan={9} className="muted" style={{ padding: 18 }}>Add {noun}s from the ingredient database, or type any {noun} name below.</td></tr>}
+              {!form.items.length && <tr><td colSpan={12} className="muted" style={{ padding: 18 }}>Add {noun}s from the ingredient database, or type any {noun} name below.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -416,6 +480,7 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
         </div>
       </section>
 
+      {viewing && <IngredientDrawer id={viewing} onClose={() => closeIngredient(viewing)} />}
       <LeaveModal blocker={blocker} error={saveError} onSave={id && !problems ? save : undefined} saving={saving}>
         Your changes to {form.name || `this ${thing}`} haven’t been saved. If you leave now, they’re lost.
       </LeaveModal>

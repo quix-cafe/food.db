@@ -16,6 +16,7 @@ import zlib from 'node:zlib';
 import tarStream from 'tar-stream';
 import pg from 'pg';
 import { pool, tx } from './db.js';
+import { COMBINED } from './migrate.js';
 import { repoRoot, uploadDir } from './images.js';
 import { HttpError } from './validate.js';
 
@@ -159,7 +160,7 @@ async function validate(data, files) {
   }
   if (data.format !== FORMAT) throw new HttpError(400, `Backup format ${data.format} isn’t supported by this version.`);
   // Restore fills in anything a backup from an older schema lacks (missing columns take their defaults).
-  const { migrations } = data;
+  const migrations = data.migrations.filter((m) => !COMBINED.includes(m)); // already in 001_schema.sql
   const known = new Set(await currentMigrations());
   const unknown = migrations.filter((m) => !known.has(m));
   if (unknown.length) {

@@ -46,6 +46,17 @@ export function useDebounced(value, ms = 250) {
  * a save, or from a Discard button): that render's blocker still sees the old state.
  * `resetKey` re-arms the guard when it changes (e.g. a new recipe id after creating one).
  */
+/** Call `onOutside` on a mouse press outside `ref`'s element (closing a dropdown). */
+export function useClickOutside(ref, onOutside) {
+  const latest = useRef(onOutside);
+  latest.current = onOutside;
+  useEffect(() => {
+    const close = (e) => !ref.current?.contains(e.target) && latest.current();
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [ref]);
+}
+
 export function useLeaveGuard(dirty, resetKey) {
   const leaving = useRef(false);
   const blocker = useBlocker(({ currentLocation, nextLocation }) =>

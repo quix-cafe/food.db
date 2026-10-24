@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { SAUCE_CONTAINERS, normalizeUnit, parseAmount } from '@kitchen/shared';
+import { Decimal, SAUCE_CONTAINERS, normalizeUnit, parseAmount } from '@kitchen/shared';
 import { query, tx, fkViolation } from '../db.js';
 import { loadBlends } from '../blends.js';
 import { HttpError, badRequest, notFound, text, number, uuid, array } from '../validate.js';
@@ -23,12 +23,22 @@ function blendFields(body) {
   if (kind === 'sauce' && !Object.hasOwn(SAUCE_CONTAINERS, container)) {
     throw badRequest(`Container must be one of ${Object.keys(SAUCE_CONTAINERS).join(', ')}`);
   }
+  let servings = number(body.servings, 'Servings', { integer: true, min: 1 }) ?? 1;
+  // A sauce's serving is a size in oz (without one: its container ÷ the servings given), and
+  // servings is the whole servings one container holds.
+  let servingOz = null;
+  if (kind === 'sauce') {
+    const oz = new Decimal(SAUCE_CONTAINERS[container]);
+    servingOz = number(body.servingOz, 'Serving size', { min: 0, minExclusive: true, max: oz.toNumber() }) ?? oz.div(servings).toDecimalPlaces(4).toString();
+    servings = Math.max(1, oz.div(servingOz).floor().toNumber());
+  }
   return {
     name: text(body.name, 'Blend name', { required: true, max: 120 }),
     kind,
     container,
     notes: text(body.notes, 'Notes', { max: 4000 }),
-    servings: number(body.servings, 'Servings', { integer: true, min: 1 }) ?? 1,
+    servings,
+    servingOz,
     items,
   };
 }
@@ -76,7 +86,7 @@ router.post('/', async (req, res) => {
   const f = blendFields(req.body ?? {});
   try {
     const id = await tx(async (c) => {
-      const { rows } = await c.query('INSERT INTO spice_blends (name, kind, container, notes, servings) VALUES ($1,$2,$3,$4,$5) RETURNING id', [f.name, f.kind, f.container, f.notes, f.servings]);
+      const { rows } = await c.query('INSERT INTO spice_blends (name, kind, container, notes, servings, serving_oz) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [f.name, f.kind, f.container, f.notes, f.servings, f.servingOz]);
       await writeItems(c, rows[0].id, f.items);
       return rows[0].id;
     });
@@ -95,7 +105,7 @@ router.put('/:id', async (req, res) => {
   const f = blendFields({ ...req.body, kind: current.kind });
   try {
     await tx(async (c) => {
-      const { rowCount } = await c.query('UPDATE spice_blends SET name=$2, container=$3, notes=$4, servings=$5, updated_at=now() WHERE id=$1', [id, f.name, f.container, f.notes, f.servings]);
+      const { rowCount } = await c.query('UPDATE spice_blends SET name=$2, container=$3, notes=$4, servings=$5, serving_oz=$6, updated_at=now() WHERE id=$1', [id, f.name, f.container, f.notes, f.servings, f.servingOz]);
       if (!rowCount) throw notFound('Spice blend');
       await writeItems(c, id, f.items);
     });

@@ -6,7 +6,8 @@
 // - date at the top level or one level down ({ transaction: { date } }), ISO or MM/DD/YY(YY)
 // - items as a flat list, a list of groups ({ section, entries: [...] }), or a map of
 //   groups ({ sections: { Produce: [...] } }); the group name becomes the category
-// - per line: name/description/item, quantity ("2.21 lb"), unit_price ("0.59/lb"),
+// - per line: name/description/item, quantity ("2.21 lb"), weight ("1.46 lb", which wins
+//   over quantity: unit_price is then per lb), unit_price ("0.59/lb"),
 //   quantity_detail ("2 @ $2.99 ea"), and total/price/amount
 // - discount lines ({ discount: 1 } or a negative price) reduce the item above them;
 //   label lines ({ label: "PRICE YOU PAY", price }) give the item above its net price;
@@ -26,6 +27,7 @@ const KEYS = {
   name: ['name', 'description', 'item', 'product', 'item_name'],
   label: ['label'],
   quantity: ['quantity', 'qty', 'count'],
+  weight: ['weight', 'net_weight'],
   quantityDetail: ['quantity_detail', 'qty_detail', 'quantity_text'],
   unit: ['unit', 'uom', 'unit_of_measurement'],
   unitCost: ['unit_price', 'unitprice', 'unit_cost', 'unitcost', 'price_per_unit'],
@@ -93,7 +95,8 @@ function parseLine(el, category) {
   const name = str(pick(el, 'name'));
   let unit = str(pick(el, 'unit'));
   let quantity = null;
-  const q = pick(el, 'quantity');
+  // A weighed line sells by its weight; its quantity, if any, is the count of items weighed.
+  const q = pick(el, 'weight') ?? pick(el, 'quantity');
   if (typeof q === 'string') {
     const m = /^\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]+)?/.exec(q);
     if (m) {

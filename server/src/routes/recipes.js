@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { calculateRecipe } from '@kitchen/shared';
+import { Decimal, calculateRecipe, isLabor, parseAmount } from '@kitchen/shared';
 import { query, tx, fkViolation } from '../db.js';
 import { LATEST_PURCHASE, RECIPE_COLUMNS, RECIPE_LINES } from '../sql.js';
 import { blendAsLine, loadBlends } from '../blends.js';
@@ -7,6 +7,19 @@ import { badRequest, notFound, text, number, uuid, array } from '../validate.js'
 import { uploadImages, attachImages, listImages, copyImages, ownedFilenames, removeFiles, reorderImages } from '../images.js';
 
 const router = Router();
+
+/** An amount used, typed as a decimal or a fraction ("1/2", "1 1/2", "½"). */
+const amountUsed = (value, field, opts) => number(parseAmount(value)?.toString() ?? value, field, opts);
+
+/** Minutes in one of labor's unit of measure (it's normally billed by the hour). */
+const MINUTES = { min: 1, mins: 1, minute: 1, minutes: 1, h: 60, hr: 60, hrs: 60, hour: 60, hours: 60 };
+
+/** Minutes of labor in a recipe as written, or null when it has none (or none in a time unit). */
+function laborMinutes(lines) {
+  const timed = lines.filter((l) => isLabor(l) && MINUTES[String(l.uom ?? '').trim().toLowerCase()]);
+  if (!timed.length) return null;
+  return timed.reduce((sum, l) => sum.plus(new Decimal(l.amount).times(MINUTES[l.uom.trim().toLowerCase()])), new Decimal(0)).toDecimalPlaces(2).toString();
+}
 
 /** Load recipes by id with their lines (each carrying the ingredient's latest price). */
 export async function loadRecipes(ids, client = { query }) {
@@ -48,7 +61,7 @@ function recipeFields(body) {
     return {
       ingredientId: blendId ? null : uuid(l.ingredientId, `${row}: ingredient`),
       blendId,
-      amount: number(l.amount, `${row}: amount used`, { required: true, min: 0 }),
+      amount: amountUsed(l.amount, `${row}: amount used`, { required: true, min: 0 }),
     };
   });
   return {
@@ -98,7 +111,8 @@ router.get('/', async (req, res) => {
           ...rest,
           coverImage: images[0] ?? null,
           imageCount: images.length,
-          ingredientCount: lines.length,
+          ingredientCount: lines.filter((l) => !isLabor(l)).length,
+          laborMinutes: laborMinutes(lines),
           missingPrices: lines.filter((l) => l.packPrice === null).length,
           costPerServing: costing.costPerServing,
           recommendedPrice: costing.recommendedPrice,
@@ -118,7 +132,7 @@ router.post('/calculate', async (req, res) => {
     name: l.name,
     packPrice: number(l.packPrice, `Line ${i + 1}: pack price`, { min: 0 }),
     packSize: number(l.packSize, `Line ${i + 1}: pack size`, { min: 0, minExclusive: true }),
-    amount: number(l.amount, `Line ${i + 1}: amount used`, { min: 0 }) ?? '0',
+    amount: amountUsed(l.amount, `Line ${i + 1}: amount used`, { min: 0 }) ?? '0',
   }));
 
   // Lines given by ingredient id (without an explicit pack price) use the most recent purchase.
