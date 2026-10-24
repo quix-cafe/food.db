@@ -248,7 +248,7 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
             ) : (
               <>
                 {!labor && onMerge && (
-                  <button className="btn" onClick={() => onMerge({ first: { ...ing, purchaseCount: data.purchases.length } })}>
+                  <button className="btn" onClick={() => onMerge({ first: { ...ing, purchaseCount: data.trips.length } })}>
                     Merge into another ingredient…
                   </button>
                 )}

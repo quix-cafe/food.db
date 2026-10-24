@@ -8,6 +8,7 @@ import { Field, Icon, Modal, Notice, Spinner, Tabs, TestBadge, useToast } from '
 import SalesModal, { SalesTable } from '../components/SalesModal.jsx';
 import { DealInput, MarginCell, SalePriceInput, blankOrCount, blankOrPrice, isInt, priceText, pricingFor } from '../components/EventPricing.jsx';
 import { Financials, Results, ShoppingList } from '../components/EventTabs.jsx';
+import { DuplicateEventModal } from './EventsPage.jsx';
 
 const optional = (v) => (v == null ? '' : String(v));
 const blankOrInt = (v) => v.trim() === '' || isInt(v);
@@ -63,6 +64,7 @@ export default function EventPlanner() {
     quickScroll(to);
   };
   const [deleting, setDeleting] = useState(false);
+  const [copying, setCopying] = useState(false);
   const { data: recipes } = useApi('/recipes');
   const { data: blends } = useApi('/blends');
   const sauces = (blends ?? []).filter((b) => b.kind === 'sauce');
@@ -401,8 +403,13 @@ export default function EventPlanner() {
 
       <div className="page-foot">
         <button className="btn small" onClick={() => quickScroll(0)}><Icon.up /> Back to top</button>
-        <button className="btn small danger" onClick={() => setDeleting(true)}><Icon.trash /> Delete event</button>
+        <span className="form-actions">
+          <button className="btn small" onClick={() => setCopying(true)} disabled={status === 'pending' || status === 'saving'}
+            title={status === 'saved' ? 'A copy of this plan under a new name and date' : 'Wait for the changes to save'}><Icon.copy /> Duplicate</button>
+          <button className="btn small danger" onClick={() => setDeleting(true)}><Icon.trash /> Delete event</button>
+        </span>
       </div>
+      {copying && <DuplicateEventModal event={{ id, name: form.name || 'Untitled event', date: form.date }} onClose={() => setCopying(false)} />}
 
       {deleting && (
         <Modal title={`Delete ${form.name}?`} onClose={() => setDeleting(false)}>

@@ -17,7 +17,7 @@ import tarStream from 'tar-stream';
 import pg from 'pg';
 import { pool, tx } from './db.js';
 import { COMBINED } from './migrate.js';
-import { repoRoot, uploadDir } from './images.js';
+import { repoRoot, thumbDir, uploadDir } from './images.js';
 import { HttpError } from './validate.js';
 
 const APP = 'food.db';
@@ -302,7 +302,10 @@ export async function restoreBackup(token) {
     }
 
     const keep = new Set((data.tables.images ?? []).map((i) => i.filename));
-    for (const f of await readdir(dest)) if (!keep.has(f)) await rm(path.join(dest, f), { force: true });
+    for (const f of await readdir(dest)) if (!keep.has(f) && f !== 'thumbs') await rm(path.join(dest, f), { force: true });
+    for (const f of await readdir(thumbDir()).catch(() => [])) {
+      if (!keep.has(f.replace(/\.jpg$/, ''))) await rm(path.join(thumbDir(), f), { force: true });
+    }
 
     return {
       snapshot,

@@ -134,3 +134,64 @@ export function useRowReorder(move) {
     handleProps: (i) => ({ onPointerDown: onPointerDown(i), onKeyDown: onKeyDown(i) }),
   };
 }
+
+/** Whether a media query matches, kept up to date (e.g. PHONE, the width styles.css lays out for phones). */
+export const PHONE = '(max-width: 640px)';
+export function useMedia(query) {
+  const [matches, setMatches] = useState(() => window.matchMedia?.(query).matches ?? false);
+  useEffect(() => {
+    const mq = window.matchMedia?.(query);
+    if (!mq) return;
+    const update = () => setMatches(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, [query]);
+  return matches;
+}
+
+/**
+ * Table headers that stay in view while scrolling down a long table. A `.table-wrap` scrolls
+ * sideways, which also traps CSS sticky headers inside it, so each page table is checked: one
+ * that fits its width gets `data-fits="1"` (no scroll box, so its headers stick under the page's
+ * sticky bar, whose height goes in --sticky-top; see styles.css), and a wider one `data-fits="0"`,
+ * whose header cells are moved down with the page instead (a transform, kept inside the table).
+ */
+export function useStickyTableHeads() {
+  useEffect(() => {
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const bar = document.querySelector(window.innerWidth <= 800 ? '.sidebar' : '.topbar');
+      document.documentElement.style.setProperty('--sticky-top', `${bar?.offsetHeight ?? 0}px`);
+      const top = bar?.offsetHeight ?? 0;
+      for (const wrap of document.querySelectorAll('.page .table-wrap')) {
+        if (wrap.closest('.modal, .drawer')) continue;
+        const fits = wrap.scrollWidth <= wrap.clientWidth + 1 ? '1' : '0';
+        if (wrap.dataset.fits !== fits) wrap.dataset.fits = fits;
+        const head = wrap.querySelector(':scope > .grid > thead');
+        if (!head) continue;
+        let shift = 0;
+        if (fits === '0') {
+          const table = head.parentElement.getBoundingClientRect();
+          const room = table.height - head.offsetHeight - (head.parentElement.tFoot?.offsetHeight ?? 0);
+          shift = Math.min(Math.max(0, top - table.top), Math.max(0, room));
+        }
+        const value = shift ? `translateY(${shift}px)` : '';
+        for (const th of head.querySelectorAll('th')) if (th.style.transform !== value) th.style.transform = value;
+      }
+    };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(update); };
+    const observer = new MutationObserver(schedule);
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    window.addEventListener('resize', schedule);
+    window.addEventListener('scroll', schedule, { passive: true });
+    schedule();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', schedule);
+      window.removeEventListener('scroll', schedule);
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+}

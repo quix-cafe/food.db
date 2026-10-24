@@ -6,9 +6,12 @@ import { date } from '../format.js';
 import { Icon } from './ui.jsx';
 
 const GROUPS = [
-  ['ingredients', 'Ingredients', (r) => `/ingredients?open=${r.id}`, (r) => r.category],
+  ['ingredients', 'Ingredients', (r) => `/ingredients?open=${r.id}`, (r) => (r.alias ? `“${r.alias}”` : r.category)],
   ['recipes', 'Recipes', (r) => `/recipes/${r.id}`, (r) => `${r.baseServings} servings`],
+  ['sauces', 'Sauces', (r) => `/spice-lab/${r.id}`, (r) => r.container],
+  ['blends', 'Spice blends', (r) => `/spice-lab/${r.id}`, (r) => `${r.servings} servings`],
   ['events', 'Events', (r) => `/events/${r.id}`, (r) => date(r.date)],
+  ['purchases', 'Purchases', (r) => `/purchases/${r.id}`, (r) => [r.date && date(r.date), `${r.lines} line${r.lines === 1 ? '' : 's'}`].filter(Boolean).join(', ')],
 ];
 
 export default function UniversalSearch() {
@@ -54,11 +57,11 @@ export default function UniversalSearch() {
         className="input"
         type="search"
         role="combobox"
-        aria-label="Search ingredients, recipes and events"
+        aria-label="Search ingredients, recipes, sauces, events and purchases"
         aria-expanded={open && !!results}
         aria-controls={listId}
         aria-activedescendant={flat[active] ? `${listId}-${active}` : undefined}
-        placeholder="Search ingredients, recipes, events"
+        placeholder="Search everything"
         value={q}
         onChange={(e) => { setQ(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}

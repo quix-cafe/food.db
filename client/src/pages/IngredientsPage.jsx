@@ -17,8 +17,8 @@ const COLUMNS = [
   { key: 'latestPackPrice', label: 'Store price', num: true },
   { key: 'latestVendor', label: 'Vendor' },
   { key: 'latestPurchaseDate', label: 'Last bought' },
-  { key: 'purchaseCount', label: 'Purchases', num: true },
-  { key: 'recipeCount', label: 'Recipes', num: true, title: 'Recipes using it, directly or in a Spice Lab blend or sauce' },
+  { key: 'purchaseCount', label: 'Purchases', num: true, title: 'Shopping trips: all the lines of one receipt count once' },
+  { key: 'useCount', label: 'Used in', num: true, title: 'Recipes using it (directly or through a blend or sauce), plus the Spice Lab blends and sauces holding it' },
 ];
 
 const PAGE_SIZES = [25, 50, 100];
@@ -181,7 +181,7 @@ export default function IngredientsPage() {
                     <td>{r.latestVendor ?? '—'}</td>
                     <td className="nowrap">{isLabor(r) ? <span className="muted">Service rate</span> : date(r.latestPurchaseDate)}</td>
                     <td className="num">{isLabor(r) ? '—' : r.purchaseCount}</td>
-                    <td className="num">{r.recipeCount || <span className="muted">—</span>}</td>
+                    <td className="num">{r.useCount || <span className="muted">—</span>}</td>
                   </tr>
                 ))}
               </tbody>

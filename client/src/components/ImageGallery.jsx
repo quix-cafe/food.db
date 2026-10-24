@@ -26,7 +26,7 @@ export default function ImageGallery({ images, onAdd, onRemove, onMakeCover, bus
       {images.map((img, i) => (
         <figure key={img.id} className="thumb">
           <button type="button" className="thumb-img" onClick={() => setViewing(i)} aria-label={`View ${label} ${i + 1}${img.originalName ? ` (${img.originalName})` : ''}`}>
-            <img src={img.url} alt="" loading="lazy" />
+            <img src={img.thumbUrl ?? img.url} alt="" loading="lazy" />
           </button>
           {onMakeCover && i === 0 && images.length > 1 && <span className="badge cover-badge">Cover</span>}
           {(onRemove || (onMakeCover && i > 0)) && (

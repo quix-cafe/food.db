@@ -14,6 +14,10 @@ export const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 /** Resolved lazily so tests can point UPLOAD_DIR at a temp dir before first use. */
 export const uploadDir = () => path.resolve(repoRoot, process.env.UPLOAD_DIR ?? 'data/uploads');
 
+/** Thumbnails (see thumbs.js) live beside the originals, named after them. */
+export const thumbDir = () => path.join(uploadDir(), 'thumbs');
+export const thumbName = (filename) => `${filename}.jpg`;
+
 export const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
 const multerImages = multer({
@@ -40,6 +44,7 @@ export const OWNER_COLUMNS = { recipe: 'recipe_id', receipt: 'receipt_id' };
 export const imageJson = (row) => ({
   id: row.id,
   url: `/api/images/${row.id}`,
+  thumbUrl: `/api/images/${row.id}/thumb`,
   originalName: row.original_name,
   position: row.position,
 });
@@ -104,7 +109,10 @@ export async function ownedFilenames(client, owner, ownerId) {
 }
 
 export async function removeFiles(filenames) {
-  await Promise.all(filenames.map((f) => rm(path.join(uploadDir(), f), { force: true })));
+  await Promise.all(filenames.flatMap((f) => [
+    rm(path.join(uploadDir(), f), { force: true }),
+    rm(path.join(thumbDir(), thumbName(f)), { force: true }),
+  ]));
 }
 
 /** Copy an owner's images (files and rows) to another owner of the same kind. */

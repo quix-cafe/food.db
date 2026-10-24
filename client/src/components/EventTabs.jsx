@@ -257,19 +257,21 @@ function NeededInput({ line, eventId }) {
     await api(`/events/${eventId}/amounts/${line.ingredientId}`, { method: 'DELETE' });
     notifyDataChanged();
   };
+  // Kept narrow: the unit sits inside the box, and "Reset" (back to the recipes' total, shown on hover) is one word.
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-      <span className="nowrap">
-        <input className="input num" style={{ width: 80 }} inputMode="decimal" value={value} aria-label={`${line.name} needed, in ${line.uom}`}
+    <div className="needed-input">
+      <span className="unit-input">
+        <input className="input num" inputMode="decimal" value={value} aria-label={`${line.name} needed, in ${line.uom}`}
           aria-invalid={!!error} onChange={(e) => setDraft(e.target.value)} onBlur={save}
           onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setDraft(null); setError(null); } }} />
-        {' '}{line.uom}
+        <span>{line.uom}</span>
       </span>
       {error && <small style={{ color: 'var(--tomato)' }}>{error}</small>}
       {line.amountSet && (
-        <small className="muted no-print nowrap">
-          Recipes: {qty(line.calculatedAmount, 2)} · <button type="button" className="link-btn" onClick={reset}>Use recipes</button>
-        </small>
+        <button type="button" className="link-btn no-print" onClick={reset}
+          title={`Go back to what the recipes add up to: ${qty(line.calculatedAmount, 2)} ${line.uom}`}>
+          <small>Reset to {qty(line.calculatedAmount, 2)}</small>
+        </button>
       )}
     </div>
   );

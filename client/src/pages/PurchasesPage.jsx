@@ -46,7 +46,7 @@ export default function PurchasesPage() {
                   <td>
                     {r.images.length ? (
                       <Link className="receipt-thumbs" to={`/purchases/${r.id}`} aria-label={`${r.vendor ?? 'Unknown vendor'} receipt photos`}>
-                        {r.images.slice(0, 3).map((img) => <img key={img.id} src={img.url} alt="" loading="lazy" />)}
+                        {r.images.slice(0, 3).map((img) => <img key={img.id} src={img.thumbUrl} alt="" loading="lazy" />)}
                         {r.images.length > 3 && <span className="muted">+{r.images.length - 3}</span>}
                       </Link>
                     ) : <span className="muted">None</span>}

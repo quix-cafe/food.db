@@ -6,7 +6,7 @@ import { useLeaveGuard, useRowReorder } from '../hooks.js';
 import ImageGallery, { useLocalImages } from '../components/ImageGallery.jsx';
 import { date, money, pack, percent, perUnit, qty, unitMoney, toDecimal } from '../format.js';
 import IngredientCombobox from '../components/IngredientCombobox.jsx';
-import { Field, Icon, LeaveModal, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
+import { Field, Icon, LeaveModal, Modal, Notice, SaveButton, Spinner, TestBadge, useToast } from '../components/ui.jsx';
 import { AddToEventModal } from './RecipeGallery.jsx';
 import { IngredientDrawer } from '../components/IngredientDrawer.jsx';
 
@@ -276,9 +276,7 @@ export default function RecipeBuilder() {
         </div>
         <div className="form-actions">
           {id && <button className="btn" onClick={() => setAddToEvent(true)}>Add to event</button>}
-          <button className="btn primary" disabled={(!dirty && !!id) || saving} onClick={save}>
-            {saving && <Spinner />} {id ? (dirty ? 'Save changes' : 'Saved') : 'Create recipe'}
-          </button>
+          <SaveButton dirty={dirty} saving={saving} disabled={(!dirty && !!id) || saving} onClick={save} isNew={!id} createLabel="Create recipe" />
         </div>
       </div>
       {saveError && <Notice kind="error">{saveError}</Notice>}

@@ -58,7 +58,7 @@ export default function RecipeGallery() {
         {(data ?? []).map((r) => (
           <article key={r.id} className="panel recipe-card">
             {r.coverImage && (
-              <div className="card-cover"><img src={r.coverImage.url} alt="" loading="lazy" /></div>
+              <div className="card-cover"><img src={r.coverImage.thumbUrl} alt="" loading="lazy" /></div>
             )}
             <h3><Link to={`/recipes/${r.id}`}>{r.name}</Link> <TestBadge item={r} /></h3>
             <Menu

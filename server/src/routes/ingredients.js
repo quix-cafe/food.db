@@ -8,6 +8,10 @@ import { mergeIngredients } from '../merge.js';
 import { HttpError, badRequest, notFound, text, number, date, uuid, array, today } from '../validate.js';
 
 const router = Router();
+
+// Purchases counted as trips, like the drawer's history: every line of one receipt is one purchase.
+const PURCHASE_COUNT = `(SELECT count(DISTINCT coalesce(p.receipt_id, p.id))::int FROM ingredient_purchases p
+                          WHERE p.ingredient_id = i.id) AS "purchaseCount"`;
 const PRICE_HIKE_THRESHOLD = Number(process.env.PRICE_HIKE_THRESHOLD ?? 10);
 
 function ingredientFields(body, { partial = false } = {}) {
@@ -79,11 +83,13 @@ router.get('/', async (req, res) => {
   }
   const { rows } = await query(
     `SELECT ${INGREDIENT_COLUMNS},
-            (SELECT count(*)::int FROM ingredient_purchases p WHERE p.ingredient_id = i.id) AS "purchaseCount",
-            -- Recipes using it directly or through a Spice Lab blend or sauce, each once.
+            ${PURCHASE_COUNT},
+            -- Recipes using it directly or through a Spice Lab blend or sauce, each once, plus
+            -- those blends and sauces (a sauce can be sold on its own, in no recipe).
             (SELECT count(DISTINCT ri.recipe_id)::int FROM recipe_ingredients ri
               WHERE ri.ingredient_id = i.id
-                 OR ri.blend_id IN (SELECT si.blend_id FROM spice_blend_items si WHERE si.ingredient_id = i.id)) AS "recipeCount"
+                 OR ri.blend_id IN (SELECT si.blend_id FROM spice_blend_items si WHERE si.ingredient_id = i.id))
+              + (SELECT count(DISTINCT si.blend_id)::int FROM spice_blend_items si WHERE si.ingredient_id = i.id) AS "useCount"
      FROM ingredients i ${LATEST_PURCHASE}
      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
      ORDER BY lower(i.name)`,
@@ -111,7 +117,7 @@ router.get('/vendors', async (_req, res) => {
 router.get('/duplicates', async (_req, res) => {
   const [{ rows: ingredients }, { rows: aliases }, { rows: dismissed }] = await Promise.all([
     query(`SELECT ${INGREDIENT_COLUMNS},
-             (SELECT count(*)::int FROM ingredient_purchases p WHERE p.ingredient_id = i.id) AS "purchaseCount",
+             ${PURCHASE_COUNT},
              (SELECT count(DISTINCT ri.recipe_id)::int FROM recipe_ingredients ri WHERE ri.ingredient_id = i.id) AS "recipeCount"
            FROM ingredients i ${LATEST_PURCHASE}`),
     query('SELECT ingredient_id AS "ingredientId", alias FROM ingredient_aliases'),

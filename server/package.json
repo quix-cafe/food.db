@@ -11,6 +11,11 @@
     "test": "node --env-file-if-exists=../.env --test --test-concurrency=1 test/*.test.js"
   },
   "dependencies": {
+    "@jimp/core": "^1.6.1",
+    "@jimp/js-gif": "^1.6.1",
+    "@jimp/js-jpeg": "^1.6.1",
+    "@jimp/js-png": "^1.6.1",
+    "@jimp/plugin-resize": "^1.6.1",
     "@kitchen/shared": "*",
     "express": "^5.1.0",
     "multer": "^2.4.0",
