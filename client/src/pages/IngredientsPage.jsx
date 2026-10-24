@@ -17,7 +17,7 @@ const COLUMNS = [
   { key: 'latestPackPrice', label: 'Store price', num: true },
   { key: 'latestVendor', label: 'Vendor' },
   { key: 'latestPurchaseDate', label: 'Last bought' },
-  { key: 'purchaseCount', label: 'Purchases', num: true, title: 'Every purchase line, including several on one receipt' },
+  { key: 'purchaseCount', label: 'Purchases', num: true, title: 'Packs bought: 2 on one receipt line count as 2; a weighed buy (1.46 lb) as 1' },
   { key: 'useCount', label: 'Used in', num: true, title: 'Recipes using it (directly or through a blend or sauce), plus the Spice Lab blends and sauces holding it' },
 ];
 

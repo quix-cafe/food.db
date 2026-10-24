@@ -9,8 +9,10 @@ import { HttpError, badRequest, notFound, text, number, date, uuid, array, today
 
 const router = Router();
 
-// Every purchase line counts, including several of one ingredient on the same receipt.
-const PURCHASE_COUNT = `(SELECT count(*)::int FROM ingredient_purchases p WHERE p.ingredient_id = i.id) AS "purchaseCount"`;
+// Packs bought: a line's quantity, so 2 packs on one line are 2 and several lines on one receipt
+// each count. A fractional quantity is a weighed buy (1.46 lb of tomatoes), which is one.
+const PURCHASE_COUNT = `(SELECT coalesce(sum(CASE WHEN p.quantity = trunc(p.quantity) THEN p.quantity ELSE 1 END), 0)::int
+                          FROM ingredient_purchases p WHERE p.ingredient_id = i.id) AS "purchaseCount"`;
 const PRICE_HIKE_THRESHOLD = Number(process.env.PRICE_HIKE_THRESHOLD ?? 10);
 
 function ingredientFields(body, { partial = false } = {}) {

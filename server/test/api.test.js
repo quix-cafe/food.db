@@ -75,7 +75,15 @@ test('recurring purchases keep history and the latest price wins', { skip }, asy
 
   const list = await api('GET', '/ingredients?q=flo');
   assert.equal(list.data.length, 1);
-  assert.equal(list.data[0].purchaseCount, 2);
+  assert.equal(list.data[0].purchaseCount, 3); // two bags, then one
+  // Packs bought: 30 eggs on one line are 30; a weighed 1.46 lb is one buy.
+  const all = (await api('GET', '/ingredients')).data;
+  assert.equal(all.find((i) => i.name === 'Eggs').purchaseCount, 30);
+  const weighed = await api('POST', '/ingredients/purchase', { items: [{ name: 'Plum tomatoes', uom: 'lb', quantity: 1.46, packSize: 1, unitCost: '1.79' }] });
+  const tomato = (await api('GET', '/ingredients?q=plum')).data[0];
+  assert.equal(tomato.purchaseCount, 1);
+  await api('DELETE', `/ingredients/${weighed.data.purchases[0].ingredientId}/purchases/${weighed.data.purchases[0].id}`);
+  await api('DELETE', `/ingredients/${tomato.id}`);
 });
 
 test('purchase validation reports the row', { skip }, async () => {
@@ -794,7 +802,7 @@ test('several lines of one ingredient on one receipt are one averaged price, not
   assert.deepEqual(hist.trips.map((t) => [t.lines, t.unitPrice, t.changePercent, t.priceHike]), [[2, '4.2125', '5.3', false], [1, '4.0000', null, false]]);
   assert.equal(hist.trips[0].receiptId, receipt.id);
   assert.equal(hist.trips[0].totalCost, '16.8500');
-  // The Ingredients list counts every purchase line: three, though two share a receipt.
+  // The Ingredients list counts every pack bought: three, though two share a receipt.
   assert.equal((await api('GET', '/ingredients')).data.find((i) => i.id === thighs).purchaseCount, 3);
   // The header search finds the receipt by its vendor.
   const found = (await api('GET', '/search?q=butch')).data;
