@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { useBlocker } from 'react-router';
+import { useBlocker, useLocation, useNavigate } from 'react-router';
 import { api, isTestMode, onDataChanged, onTestModeChanged } from './api.js';
 
 /** Whether test mode is on in this browser (see api.js). */
@@ -28,6 +28,52 @@ export function useApi(path) {
   }, [load]);
 
   return { ...state, reload: load, setData: (data) => setState((s) => ({ ...s, data })) };
+}
+
+/** Run `fn` every `ms` while this page is on screen, and as soon as it comes back to it. */
+export function useWhileVisible(fn, ms) {
+  const latest = useRef(fn);
+  latest.current = fn;
+  useEffect(() => {
+    const run = () => { if (document.visibilityState === 'visible') latest.current(); };
+    const t = setInterval(run, ms);
+    document.addEventListener('visibilitychange', run);
+    window.addEventListener('focus', run);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', run);
+      window.removeEventListener('focus', run);
+    };
+  }, [ms]);
+}
+
+// The script a built index.html loads: its name has a hash of the code, so a new build changes it.
+const builtScript = (root) => root.querySelector('script[type="module"][src*="/assets/"]')?.getAttribute('src') ?? null;
+
+/** True once the server has a newer build of the app than this page is running. Off in dev, which has no build. */
+export function useNewBuild() {
+  const [mine] = useState(() => builtScript(document));
+  const [stale, setStale] = useState(false);
+  useWhileVisible(async () => {
+    if (!mine || stale) return;
+    try {
+      const res = await fetch('/', { cache: 'no-store' });
+      if (!res.ok) return;
+      const current = builtScript(new DOMParser().parseFromString(await res.text(), 'text/html'));
+      if (current && current !== mine) setStale(true);
+    } catch { /* the server is restarting; ask again next time */ }
+  }, 60000);
+  return stale;
+}
+
+/** Re-render every `ms` while `active`, for anything that shows the time passing. */
+export function useTick(active = true, ms = 1000) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!active) return undefined;
+    const t = setInterval(() => setTick((n) => n + 1), ms);
+    return () => clearInterval(t);
+  }, [active, ms]);
 }
 
 export function useDebounced(value, ms = 250) {
@@ -60,7 +106,8 @@ export function useClickOutside(ref, onOutside) {
 export function useLeaveGuard(dirty, resetKey) {
   const leaving = useRef(false);
   const blocker = useBlocker(({ currentLocation, nextLocation }) =>
-    dirty && !leaving.current && currentLocation.pathname !== nextLocation.pathname);
+    // Opening the POS over a page isn't leaving it: the page stays mounted underneath.
+    dirty && !leaving.current && currentLocation.pathname !== nextLocation.pathname && !nextLocation.state?.background);
   useEffect(() => { leaving.current = false; }, [resetKey]);
   useEffect(() => {
     if (!dirty) return;
@@ -132,6 +179,19 @@ export function useRowReorder(move) {
       className: `${drag.from === i ? 'dragging' : ''} ${drag.over === i && drag.from !== i ? 'drop-target' : ''}`,
     }),
     handleProps: (i) => ({ onPointerDown: onPointerDown(i), onKeyDown: onKeyDown(i) }),
+  };
+}
+
+/**
+ * Click handlers that open the POS screen (`to`) as a full-page modal. The page it opens from is kept as
+ * `background`, so it stays mounted underneath (`App`) and closing returns to it as it was.
+ */
+export function useOpenPos() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return (to) => (e) => {
+    e.preventDefault();
+    navigate(to, { state: { background: location } });
   };
 }
 

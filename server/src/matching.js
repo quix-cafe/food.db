@@ -1,9 +1,12 @@
 // How a receipt's wording maps to ingredients: a saved alias or exact name resolves
-// automatically; otherwise the closest-looking name is offered as a suggestion only.
+// automatically; otherwise ingredients sharing its words, and the closest-looking name, are offered
+// as suggestions only.
 //
 // A generic receipt name ("Grocery" for every line at some stores) can't be trusted as an
 // alias: it is only suggested, never applied, once one receipt saved it as two or more
 // different ingredients, or when it is on several lines of the receipt being imported.
+
+import { isLabor, wordMatches } from '@kitchen/shared';
 
 /** SQL: true when the receipt name in SQL expression `name` was saved as different ingredients on one receipt. */
 export const ambiguousName = (name) => `EXISTS (
@@ -47,11 +50,24 @@ async function pastChoices(client, name) {
 
 /**
  * Adds to each item `match` ({ id, name, category, uom, via }) or `suggestion` ({ id, name, category, uom }).
+ * An unmatched item also gets `candidates`: up to five ingredients it might be, best first, from the
+ * words it shares with their names or saved receipt names (each with `words`), then the
+ * closest-looking name if that isn't among them. `suggestion` is the first of them.
  * When a saved receipt name isn't applied because it's ambiguous, `choices` lists the ingredients it
  * was saved as before ({ …, times }) and `ambiguous` says why: 'receipt' (on several lines of this
  * receipt) or 'history' (one receipt saved it as several ingredients).
  */
 export async function matchItems(client, items) {
+  let everything = null; // every ingredient but labor, with its receipt names; loaded on first need
+  const ingredients = async () => {
+    everything ??= (await client.query(
+      `SELECT i.id, i.name, i.category, i.uom,
+              coalesce(json_agg(a.alias) FILTER (WHERE a.alias IS NOT NULL), '[]') AS aliases
+         FROM ingredients i LEFT JOIN ingredient_aliases a ON a.ingredient_id = i.id
+        GROUP BY i.id`,
+    )).rows.filter((i) => !isLabor(i));
+    return everything;
+  };
   const lines = new Map();
   for (const item of items) lines.set(item.name.toLowerCase(), (lines.get(item.name.toLowerCase()) ?? 0) + 1);
   for (const item of items) {
@@ -60,6 +76,7 @@ export async function matchItems(client, items) {
     item.match = known && { id: known.id, name: known.name, category: known.category, uom: known.uom, via: known.via };
     item.suggestion = null;
     item.choices = null;
+    item.candidates = null;
     item.ambiguous = null;
     if (known) continue;
     const choices = await pastChoices(client, item.name);
@@ -69,12 +86,15 @@ export async function matchItems(client, items) {
       item.ambiguous = repeated ? 'receipt' : 'history';
       continue;
     }
+    const candidates = wordMatches(item.name, await ingredients(), 4).map(({ aliases, ...c }) => c);
     const { rows } = await client.query(
       `SELECT id, name, category, uom FROM ingredients
        WHERE similarity(name, $1) > 0.3 ORDER BY similarity(name, $1) DESC LIMIT 1`,
       [item.name],
     );
-    item.suggestion = rows[0] ?? null;
+    if (rows[0] && !isLabor(rows[0]) && !candidates.some((c) => c.id === rows[0].id)) candidates.push({ ...rows[0], words: [] });
+    item.candidates = candidates.length ? candidates.slice(0, 5) : null;
+    item.suggestion = candidates[0] ? { id: candidates[0].id, name: candidates[0].name, category: candidates[0].category, uom: candidates[0].uom } : null;
   }
   return items;
 }

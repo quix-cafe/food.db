@@ -38,12 +38,13 @@ export async function loadRecipes(ids, client = { query }) {
   return recipes.map((r) => ({ ...r, lines: byRecipe.get(r.id) ?? [], images: images.get(r.id) ?? [] }));
 }
 
-function withCosting(recipe, expectedServings) {
+export function withCosting(recipe, expectedServings) {
   const costing = calculateRecipe({
     lines: recipe.lines,
     baseServings: recipe.baseServings,
     expectedServings: expectedServings ?? recipe.baseServings,
     targetMargin: recipe.targetMargin,
+    targetPrice: recipe.targetPrice,
     totalYield: recipe.totalYield,
   });
   const syncTimes = recipe.lines.map((l) => l.priceSyncedAt).filter(Boolean);
@@ -70,6 +71,8 @@ function recipeFields(body) {
     totalYield: number(body.totalYield, 'Total yield', { min: 0 }),
     yieldUnit: text(body.yieldUnit, 'Yield unit', { max: 30 }),
     targetMargin: number(body.targetMargin, 'Target margin', { min: 0, max: 100, maxExclusive: true }) ?? '70',
+    // Set by hand: kept when ingredient costs change. Blank lets the price follow the margin.
+    targetPrice: number(body.targetPrice, 'Menu price', { min: 0, minExclusive: true }),
     lines,
   };
 }
@@ -116,6 +119,8 @@ router.get('/', async (req, res) => {
           missingPrices: lines.filter((l) => l.packPrice === null).length,
           costPerServing: costing.costPerServing,
           recommendedPrice: costing.recommendedPrice,
+          targetMargin: costing.targetMargin, // the margin a set price makes
+          priceSet: costing.priceSet,
           profitPerServing: costing.profitPerServing,
           baseCost: costing.baseCost,
           batchProfit: costing.profit, // the batch as written, sold at the recommended price
@@ -158,6 +163,7 @@ router.post('/calculate', async (req, res) => {
       baseServings: number(body.baseServings, 'Base servings', { required: true, min: 0, minExclusive: true }),
       expectedServings: number(body.expectedServings, 'Expected servings', { min: 0 }),
       targetMargin: number(body.targetMargin, 'Target margin', { min: 0, max: 100, maxExclusive: true }) ?? undefined,
+      targetPrice: number(body.targetPrice, 'Menu price', { min: 0, minExclusive: true }),
       totalYield: body.totalYield,
     }),
   );
@@ -176,9 +182,9 @@ router.post('/', async (req, res) => {
   try {
     const id = await tx(async (c) => {
       const { rows } = await c.query(
-        `INSERT INTO recipes (name, base_servings, total_yield, yield_unit, target_margin)
-         VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-        [f.name, f.baseServings, f.totalYield, f.yieldUnit, f.targetMargin],
+        `INSERT INTO recipes (name, base_servings, total_yield, yield_unit, target_margin, target_price)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+        [f.name, f.baseServings, f.totalYield, f.yieldUnit, f.targetMargin, f.targetPrice],
       );
       await writeLines(c, rows[0].id, f.lines);
       return rows[0].id;
@@ -196,9 +202,9 @@ router.put('/:id', async (req, res) => {
   try {
     await tx(async (c) => {
       const { rowCount } = await c.query(
-        `UPDATE recipes SET name=$2, base_servings=$3, total_yield=$4, yield_unit=$5, target_margin=$6, updated_at=now()
+        `UPDATE recipes SET name=$2, base_servings=$3, total_yield=$4, yield_unit=$5, target_margin=$6, target_price=$7, updated_at=now()
          WHERE id=$1`,
-        [id, f.name, f.baseServings, f.totalYield, f.yieldUnit, f.targetMargin],
+        [id, f.name, f.baseServings, f.totalYield, f.yieldUnit, f.targetMargin, f.targetPrice],
       );
       if (!rowCount) throw notFound('Recipe');
       await writeLines(c, id, f.lines);
@@ -214,8 +220,8 @@ router.post('/:id/duplicate', async (req, res) => {
   const id = uuid(req.params.id, 'id');
   const newId = await tx(async (c) => {
     const { rows } = await c.query(
-      `INSERT INTO recipes (name, base_servings, total_yield, yield_unit, target_margin)
-       SELECT name || ' (copy)', base_servings, total_yield, yield_unit, target_margin FROM recipes WHERE id = $1
+      `INSERT INTO recipes (name, base_servings, total_yield, yield_unit, target_margin, target_price)
+       SELECT name || ' (copy)', base_servings, total_yield, yield_unit, target_margin, target_price FROM recipes WHERE id = $1
        RETURNING id`,
       [id],
     );

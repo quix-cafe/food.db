@@ -41,6 +41,15 @@ export function perUnit(price, uom) {
   return `${tiny ? unitMoney(d) : money(price)} / ${uom ?? 'each'}`;
 }
 
+/** Elapsed seconds as a timer reads: "0:45", "12:05", "1:02:03". */
+export function duration(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  const two = (n) => String(n).padStart(2, '0');
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h ? `${h}:${two(m)}:${two(s % 60)}` : `${m}:${two(s % 60)}`;
+}
+
 export function percent(value, dp = 1) {
   const d = toDecimal(value);
   return d ? `${d.toDecimalPlaces(dp).toString()}%` : '—';

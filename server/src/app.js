@@ -13,6 +13,7 @@ import images from './routes/images.js';
 import backup from './routes/backup.js';
 import blends from './routes/blends.js';
 import testData from './routes/testdata.js';
+import dashboard from './routes/dashboard.js';
 import exportRoutes from './routes/export.js';
 import multer from 'multer';
 import { HttpError } from './validate.js';
@@ -49,6 +50,7 @@ export function createApp() {
   app.use('/api/backup', backup);
   app.use('/api/blends', blends);
   app.use('/api/test-data', testData);
+  app.use('/api/dashboard', dashboard);
   app.use('/api/export', exportRoutes);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Navigate, Route, Routes, Link, useLocation, useParams } from 'react-router';
 import UniversalSearch from './components/UniversalSearch.jsx';
 import { setTestMode } from './api.js';
-import { useStickyTableHeads, useTestMode } from './hooks.js';
+import { useNewBuild, useOpenPos, useStickyTableHeads, useTestMode } from './hooks.js';
 import { NewIngredientForm, ReceiptImportForm } from './components/forms.jsx';
 import { Icon, Modal, ToastProvider } from './components/ui.jsx';
 import IngredientsPage from './pages/IngredientsPage.jsx';
@@ -10,7 +10,9 @@ import ReceiptReviewPage from './pages/ReceiptReviewPage.jsx';
 import RecipeGallery from './pages/RecipeGallery.jsx';
 import RecipeBuilder from './pages/RecipeBuilder.jsx';
 import EventsPage, { NewEventForm } from './pages/EventsPage.jsx';
+import DashboardPage from './pages/DashboardPage.jsx';
 import EventPlanner from './pages/EventPlanner.jsx';
+import PosPage from './pages/PosPage.jsx';
 import PurchasesPage, { ReceiptDetailPage } from './pages/PurchasesPage.jsx';
 import BackupPage from './pages/BackupPage.jsx';
 import SpiceLabPage, { BlendEditor } from './pages/SpiceLabPage.jsx';
@@ -54,6 +56,42 @@ function TestModeBar() {
   );
 }
 
+// Opens the order screen in a window of its own. Its window is kept: tapping again brings it
+// forward rather than reloading it, which would lose an order being rung up.
+function NewBuildBar() {
+  if (!useNewBuild()) return null;
+  return (
+    <div className="new-build-bar no-print" role="alert">
+      <span><b>food.db was updated.</b> Refresh this page before you change anything, so an old copy doesn't save over newer work.</span>
+      <button className="btn small" onClick={() => window.location.reload()}>Refresh</button>
+    </div>
+  );
+}
+
+function PosButton() {
+  const openPos = useOpenPos();
+  return (
+    <a className="btn pos-btn" href="/pos" aria-label="POS: open the order screen" title="Open the order screen" onClick={openPos('/pos')}>
+      <Icon.cart /> <span className="btn-label">POS</span>
+    </a>
+  );
+}
+
+/** The POS screen, filling the page, over the app or (from a bookmark) on its own. */
+function PosFrame() {
+  useEffect(() => {
+    document.body.classList.add('pos-open');
+    return () => document.body.classList.remove('pos-open');
+  }, []);
+  return (
+    <div className="pos-frame" role="dialog" aria-modal="true" aria-label="POS">
+      <NewBuildBar />
+      <TestModeBar />
+      <PosPage />
+    </div>
+  );
+}
+
 function OldReceiptRedirect() {
   const { id } = useParams();
   return <Navigate to={`/purchases/${id}`} replace />;
@@ -79,7 +117,10 @@ export default function App() {
   const [quickAdd, setQuickAdd] = useState(false);
   // On phones the menu collapses behind a button; it closes on navigation, Escape or a tap outside.
   const [menuOpen, setMenuOpen] = useState(false);
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const { pathname } = location;
+  // Opened from a page, the POS is a modal over it; the page underneath keeps its place and its edits.
+  const background = pathname === '/pos' ? location.state?.background : null;
   useEffect(() => setMenuOpen(false), [pathname]);
   useStickyTableHeads();
   useEffect(() => {
@@ -88,9 +129,10 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [menuOpen]);
+  if (pathname === '/pos' && !background) return <ToastProvider><PosFrame /></ToastProvider>;
   return (
     <ToastProvider>
-      <div className="shell">
+      <div className="shell" inert={!!background}>
         <nav className={`sidebar ${menuOpen ? 'menu-open' : ''}`} aria-label="Main">
           <Link to="/" className="brand">
             <img src="/favicon.svg" width="28" height="28" alt="" />
@@ -111,15 +153,17 @@ export default function App() {
           </div>
         </nav>
         <div className="main">
+          {!background && <NewBuildBar />}
           <TestModeBar />
           <header className="topbar">
             <UniversalSearch />
             <button className="btn quick-add-btn" onClick={() => setQuickAdd(true)} aria-label="Quick add">
               <Icon.plus /> <span className="btn-label">Quick add</span>
             </button>
+            <PosButton />
           </header>
-          <Routes>
-            <Route path="/" element={<Navigate to="/ingredients" replace />} />
+          <Routes location={background ?? location}>
+            <Route path="/" element={<DashboardPage />} />
             <Route path="/ingredients" element={<IngredientsPage />} />
             <Route path="/ingredients/review" element={<ReceiptReviewPage />} />
             <Route path="/purchases" element={<PurchasesPage />} />
@@ -141,6 +185,7 @@ export default function App() {
           </Routes>
         </div>
       </div>
+      {background && <PosFrame />}
       {quickAdd && <QuickAdd onClose={() => setQuickAdd(false)} />}
     </ToastProvider>
   );

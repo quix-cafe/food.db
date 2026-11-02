@@ -5,3 +5,4 @@ client/dist/
 data/
 dist/
 server/src/embedded.gen.js
+.gitnexus

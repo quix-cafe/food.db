@@ -223,3 +223,37 @@ test('thumbnails are small JPEGs, made once and removed with their image', { ski
   assert.equal((await api('DELETE', `/images/${img.id}`)).status, 204);
   assert.deepEqual(await readdir(thumbs), []);
 });
+
+test('compressing resamples photos over a size and leaves the rest', { skip }, async () => {
+  const { createJimp } = await import('@jimp/core');
+  const { default: jpeg } = await import('@jimp/js-jpeg');
+  const Jimp = createJimp({ formats: [jpeg] });
+  // 2400 × 1600 of noise, so the JPEG is big; portrait 600 × 900 is already under the size.
+  const noisy = (width, height) => {
+    const img = new Jimp({ width, height, color: 0xffffffff });
+    for (let i = 0; i < img.bitmap.data.length; i++) img.bitmap.data[i] = (i % 4 === 3) ? 255 : (i * 2654435761) >>> 24;
+    return img.getBuffer('image/jpeg', { quality: 95 });
+  };
+  const recipe = (await api('POST', '/recipes', { name: 'Big photos', baseServings: 1 })).data;
+  const [big, small, broken] = (await api('POST', `/recipes/${recipe.id}/images`, form([
+    ['big.jpg', await noisy(2400, 1600), 'image/jpeg'], ['small.jpg', await noisy(600, 900), 'image/jpeg'], ['b.jpg', JPEG, 'image/jpeg'],
+  ]))).data;
+  const files = (await filesOnDisk()).length;
+
+  const { data: plan } = await api('GET', '/images/compress');
+  const sizes = Object.fromEntries(plan.photos.map((p) => [p.id, [p.width, p.height, p.compressible]]));
+  assert.deepEqual([sizes[big.id], sizes[small.id], sizes[broken.id]], [[2400, 1600, true], [600, 900, true], [null, null, false]]);
+
+  assert.equal((await api('POST', '/images/compress', { maxSide: 500, ids: [big.id] })).status, 400);
+  const { data: { results } } = await api('POST', '/images/compress', { maxSide: 1024, ids: [big.id, small.id, broken.id] });
+  assert.deepEqual(results.map((r) => r.status), ['done', 'small', 'failed']);
+  assert.ok(results[0].after < results[0].before / 3);
+
+  const origin = base.replace('/api', '');
+  const served = await Jimp.fromBuffer(Buffer.from(await (await fetch(origin + big.url)).arrayBuffer()));
+  assert.deepEqual([served.bitmap.width, served.bitmap.height], [1024, 683]);
+  assert.equal((await filesOnDisk()).length, files); // the original was replaced, not kept beside it
+  const { rows: [row] } = await pool.query('SELECT size_bytes FROM images WHERE id = $1', [big.id]);
+  assert.equal(row.size_bytes, results[0].after);
+  await api('DELETE', `/recipes/${recipe.id}`);
+});

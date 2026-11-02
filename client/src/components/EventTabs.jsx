@@ -4,8 +4,13 @@ import { useApi } from '../hooks.js';
 import { isLabor } from '@kitchen/shared';
 import { Decimal, date, money, pack, qty, toDecimal } from '../format.js';
 import { Field, Icon } from './ui.jsx';
-import { recordedRevenue } from './SalesModal.jsx';
+import { IngredientDrawer } from './IngredientDrawer.jsx';
+import { recordedRevenue } from './Sales.jsx';
 import { isInt, priceText } from './EventPricing.jsx';
+
+/** The shopping list's lines without labor, which isn't bought, and their summed `field`. */
+const groceries = (s) => s.shoppingList.filter((l) => !isLabor(l));
+const sumOf = (lines, field) => lines.reduce((sum, l) => sum.plus(toDecimal(l[field]) ?? 0), new Decimal(0));
 
 /**
  * Labor is listed as its own cost: each recipe row shows its cost without labor, and the labor
@@ -25,7 +30,7 @@ export function Financials({ s, eventId }) {
         <div className="panel figure"><span>Vendor fee</span><b>{money(s.vendorFee)}</b></div>
         <div className="panel figure"><span>Projected cost</span><b>{money(s.totalCost)}</b>{labor.length > 0 && <small className="muted">incl. {money(laborCost)} labor</small>}</div>
         <div className="panel figure"><span>Projected revenue</span><b>{money(s.revenue)}</b></div>
-        <div className={`panel figure ${loss ? 'loss' : 'profit'}`}><span>Total profit</span><b>{money(s.profit)}</b></div>
+        <div className={`panel figure ${loss ? 'loss' : 'profit'}`}><span>Projected profit</span><b>{money(s.profit)}</b></div>
         <div className="panel figure"><span>Overall margin</span><b>{s.marginPercent == null ? '—' : `${s.marginPercent}%`}</b></div>
       </div>
       <div className="panel table-wrap">
@@ -40,7 +45,7 @@ export function Financials({ s, eventId }) {
           <tbody>
             {s.recipes.map((r) => (
               <tr key={r.recipeId}>
-                <td>{r.name}<div className="show-sm"><small className="muted">{r.expectedServings} servings</small></div></td>
+                <td>{r.name}{r.servingLabel && <small className="muted"> ({r.servingLabel} a serving)</small>}<div className="show-sm"><small className="muted">{r.expectedServings} servings</small></div></td>
                 <td className="num hide-sm">{r.expectedServings}</td>
                 <td className="num hide-sm">{money(r.costPerServing)}</td>
                 <td className="num hide-sm">{money(r.salePrice)}{r.priceSet && <small className="muted" title={`The recipe’s target price is ${money(r.recommendedPrice)}`}> (set)</small>}</td>
@@ -149,7 +154,7 @@ export function Results({ s, form, set, setForm, eventId }) {
           )}>
             <input className="input num" inputMode="decimal" value={form.actualRevenue} onChange={set('actualRevenue')} placeholder="0.00" />
           </Field>
-          <Field label="Actual spend" hint={`Shopping list total: ${money(s.purchaseCost)}`}><input className="input num" inputMode="decimal" value={form.actualCost} onChange={set('actualCost')} placeholder="0.00" /></Field>
+          <Field label="Actual spend" hint={`Shopping list total: ${money(sumOf(groceries(s), 'purchaseCost'))}`}><input className="input num" inputMode="decimal" value={form.actualCost} onChange={set('actualCost')} placeholder="0.00" /></Field>
           <Field label="Notes" className="span-2"><textarea className="input" rows={3} value={form.notes} onChange={set('notes')} placeholder="What sold out, what was left over, what to change next time…" /></Field>
         </div>
       </section>
@@ -173,7 +178,97 @@ export function Results({ s, form, set, setForm, eventId }) {
       </div>
       {revenue && !spend && <p className="muted">Profit uses the projected cost until you enter the actual spend.</p>}
       {fee.gt(0) && <p className="muted">Profit is after the {money(fee)} vendor fee{spend ? '; leave it out of the actual spend' : ''}.</p>}
+      <RecordedSales s={s} report={report} />
     </>
+  );
+}
+
+/**
+ * What Record sales logged, per menu item, against what was made and what selling all of it would
+ * bring in (the Financials revenue, deals included). Kept apart from the actual figures above:
+ * a sale nobody tapped in isn't here.
+ */
+function RecordedSales({ s, report }) {
+  if (!report) return null;
+  const logged = new Map(report.totals.byRecipe.map((r) => [r.recipeId ?? (r.blendId ? `blend:${r.blendId}` : `name:${r.name}`), r]));
+  const menu = [
+    ...s.recipes.map((r) => ({ key: r.recipeId, name: r.name, made: Number(r.expectedServings), possible: toDecimal(r.revenue) })),
+    ...s.sauces.map((b) => ({ key: `blend:${b.blendId}`, name: b.name, sauce: true, made: Number(b.expectedServings), possible: toDecimal(b.revenue) })),
+  ];
+  const onMenu = new Set(menu.map((m) => m.key));
+  // Sold here but since taken off the menu (or deleted): nothing was planned for them.
+  const offMenu = [...logged.entries()].filter(([key]) => !onMenu.has(key)).map(([key, r]) => ({ key, name: r.name, sauce: !!r.blendId, made: null, possible: null }));
+  const rows = [...menu, ...offMenu].map((m) => {
+    const r = logged.get(m.key);
+    return { ...m, sold: r?.sold ?? 0, givenAway: r?.givenAway ?? 0, revenue: toDecimal(r?.revenue ?? 0) };
+  });
+  if (!rows.length) return null;
+  const sum = (f) => rows.reduce((a, r) => a + (f(r) ?? 0), 0);
+  const total = {
+    made: sum((r) => r.made), sold: sum((r) => r.sold), givenAway: sum((r) => r.givenAway),
+    revenue: toDecimal(report.totals.revenue),
+    possible: menu.reduce((a, m) => a.plus(m.possible), new Decimal(0)),
+  };
+  const share = (part, whole) => (whole && Number(whole) > 0 ? Math.min(100, (Number(part) / Number(whole)) * 100) : null);
+  const of = (part, whole, fmt = String) => (
+    <>{fmt(part)}{whole !== null && <span className="muted"> / {fmt(whole)}</span>}</>
+  );
+  const bar = (pct) => pct !== null && <div className="sold-bar" aria-hidden="true"><span style={{ width: `${pct}%` }} /></div>;
+  const pctText = (pct) => (pct === null ? '—' : `${Math.round(pct)}%`);
+  return (
+    <section className="recorded-sales">
+      <div className="section-head">
+        <h3>Recorded sales</h3>
+        <small className="muted">
+          {report.totals.sales
+            ? `From the ${report.totals.sales} sale${report.totals.sales === 1 ? '' : 's'} logged with Record sales. Anything not logged is missing, so these can run under the actual figures above.`
+            : 'Nothing logged with Record sales yet.'}
+        </small>
+      </div>
+      <div className="panel table-wrap">
+        <table className="grid">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th className="num" title="Servings sold out of the servings made for the event">Sold / made</th>
+              <th className="num hide-sm">Given away</th>
+              <th className="num" title="Revenue logged out of what selling every serving made would bring in">Revenue / possible</th>
+              <th className="num hide-sm" title="Logged revenue as a share of the possible revenue">Of possible</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const soldPct = share(r.sold, r.made);
+              return (
+                <tr key={r.key}>
+                  <td>
+                    {r.name}{r.sauce && <> <span className="badge">Sauce</span></>}
+                    {r.made === null && <div><small className="muted">No longer on the menu</small></div>}
+                    {r.givenAway > 0 && <div className="show-sm"><small className="muted">{r.givenAway} given away</small></div>}
+                  </td>
+                  <td className="num nowrap">{of(r.sold, r.made)}{bar(soldPct)}</td>
+                  <td className="num hide-sm">{r.givenAway || '—'}</td>
+                  <td className="num nowrap">{of(r.revenue, r.possible, money)}{bar(share(r.revenue, r.possible))}</td>
+                  <td className="num hide-sm">{pctText(share(r.revenue, r.possible))}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td>Total</td>
+              <td className="num nowrap">{of(total.sold, total.made)}</td>
+              <td className="num hide-sm">{total.givenAway || '—'}</td>
+              <td className="num nowrap">{of(total.revenue, total.possible, money)}</td>
+              <td className="num hide-sm">{pctText(share(total.revenue, total.possible))}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      {!toDecimal(report.totals.fees).isZero() && (
+        <p className="muted">Customers also paid {money(report.totals.fees)} in Venmo and Cash App fees, which those apps keep; revenue leaves them out.</p>
+      )}
+    </section>
   );
 }
 
@@ -182,14 +277,14 @@ export function Results({ s, form, set, setForm, eventId }) {
  * per line. Labor isn't bought, so it's left off. Shown only in print (see styles.css).
  */
 function PrintedList({ s, title, day, guests }) {
-  const lines = s.shoppingList.filter((l) => !isLabor(l));
+  const lines = groceries(s);
   const groups = new Map();
   for (const l of lines) {
     const key = l.blendId ? (l.category === 'Sauce' ? 'Sauces to make' : 'Spice blends to make') : l.category || 'Other';
     groups.set(key, [...(groups.get(key) ?? []), l]);
   }
   const order = [...groups.keys()].sort((a, b) => (a === 'Other') - (b === 'Other') || a.localeCompare(b));
-  const total = lines.reduce((sum, l) => sum.plus(toDecimal(l.purchaseCost) ?? 0), new Decimal(0));
+  const total = sumOf(lines, 'purchaseCost');
   return (
     <div className="print-only printed-list">
       <h2>{title}: shopping list</h2>
@@ -277,7 +372,15 @@ function NeededInput({ line, eventId }) {
   );
 }
 
+/**
+ * What to buy. Labor isn't bought, so it's left off (its hours are set on Financials), and the
+ * totals are the groceries' alone.
+ */
 export function ShoppingList({ s, eventId, title, date: day, guests }) {
+  const lines = groceries(s);
+  const purchaseCost = sumOf(lines, 'purchaseCost');
+  const usedCost = sumOf(lines, 'usedCost');
+  const [viewing, setViewing] = useState(null); // ingredient id whose detail panel is open
   return (
     <div className="print-target" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div className="list-actions no-print">
@@ -300,14 +403,18 @@ export function ShoppingList({ s, eventId, title, date: day, guests }) {
           </tr>
         </thead>
         <tbody>
-          {s.shoppingList.map((l) => (
-            <tr key={l.key} className={isLabor(l) ? 'labor-row' : ''}>
+          {lines.map((l) => (
+            <tr key={l.key}>
               <td style={{ fontWeight: 600 }}>
-                {l.name}{l.missingPrice && <> <span className="badge warn">No price</span></>}
+                {l.ingredientId
+                  ? <button type="button" className="line-name" data-tip="View/edit" aria-label={`${l.name}: view/edit`} onClick={() => setViewing(l.ingredientId)}>{l.name}</button>
+                  : l.name}
+                {l.missingPrice && <> <span className="badge warn">No price</span></>}
+                {l.ingredientId && l.priceDate && <div><small className="muted" style={{ fontWeight: 400 }}>{l.vendor ? `${l.vendor}, ` : ''}bought {date(l.priceDate)}</small></div>}
                 {l.blendId && <div><small className="muted" style={{ fontWeight: 400 }}>{l.category ?? 'Spice blend'}: make {l.packsToBuy} batch{l.packsToBuy === '1' ? '' : 'es'}</small></div>}
                 <div className="show-sm"><small className="muted" style={{ fontWeight: 400 }}>{l.recipes.join(', ')}</small></div>
               </td>
-              <td className="num nowrap">{isLabor(l) ? <NeededInput key={`${l.ingredientId}:${l.amount}`} line={l} eventId={eventId} /> : `${qty(l.amount, 2)} ${l.uom}`}</td>
+              <td className="num nowrap">{qty(l.amount, 2)} {l.uom}</td>
               <td className="num" style={{ fontWeight: 700 }}>
                 {l.packsToBuy}
                 {l.packSize && <div className="show-sm"><small className="muted" style={{ fontWeight: 400 }}>× {pack(l.packSize, l.uom, 2)}</small></div>}
@@ -322,17 +429,18 @@ export function ShoppingList({ s, eventId, title, date: day, guests }) {
         </tbody>
         <tfoot className="shop-total">
           <tr>
-            <td>Total <span className="muted" style={{ fontWeight: 500 }}>({s.shoppingList.length} items)</span></td><td /><td /><td className="hide-sm" />
+            <td>Total <span className="muted" style={{ fontWeight: 500 }}>({lines.length} items)</span></td><td /><td /><td className="hide-sm" />
             <td className="num">
-              {money(s.purchaseCost)}
+              {money(purchaseCost)}
               {/* The Used cost column is hidden on a phone; its total goes here. */}
-              <div className="show-sm"><small className="muted" style={{ fontWeight: 600 }}>Used {money(s.totalCost)}</small></div>
+              <div className="show-sm"><small className="muted" style={{ fontWeight: 600 }}>Used {money(usedCost)}</small></div>
             </td>
-            <td className="num hide-sm">{money(s.totalCost)}</td><td className="hide-sm" /><td className="hide-sm" />
+            <td className="num hide-sm">{money(usedCost)}</td><td className="hide-sm" /><td className="hide-sm" />
           </tr>
         </tfoot>
       </table>
     </div>
+      {viewing && <IngredientDrawer id={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }

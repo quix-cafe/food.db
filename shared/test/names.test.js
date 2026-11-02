@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { editDistance, findDuplicates, ingredientKey, nameParts, preferredKeep } from '../src/calc.js';
+import { editDistance, findDuplicates, ingredientKey, nameParts, preferredKeep, wordMatches } from '../src/calc.js';
 
 test('names reduce to what identifies the ingredient', () => {
   assert.equal(ingredientKey('Granulated sugar'), 'sugar');
@@ -71,4 +71,22 @@ test('the suggested keeper: a real unit, then the more specific name, then more 
   // A pack size in the name isn't more specific.
   assert.equal(preferredKeep(ing('Cocoa powder 8 oz', { uom: 'oz' }), ing('Cocoa powder', { uom: 'lb', purchaseCount: 2 })).name, 'Cocoa powder');
   assert.equal(preferredKeep(ing('Onion', { purchaseCount: 1 }), ing('Onions', { purchaseCount: 2, recipeCount: 1 })).name, 'Onions');
+});
+
+test('receipt wording finds ingredients that share its words', () => {
+  const ingredients = [
+    { id: 1, name: 'Baby spinach' },
+    { id: 2, name: 'Spinach' },
+    { id: 3, name: 'Chicken thighs, boneless' },
+    { id: 4, name: 'Chicken' },
+    { id: 5, name: 'Plum tomatoes' },
+    { id: 6, name: 'Romaine', aliases: ['KS ROMAINE HEARTS'] },
+  ];
+  const ids = (name) => wordMatches(name, ingredients).map((m) => m.id);
+  assert.deepEqual(ids('KS ORG BABY SPINACH 2LB'), [1, 2]);
+  assert.deepEqual(ids('CHICKEN THIGH BNLS'), [3, 4]); // two words beat one
+  assert.deepEqual(ids('PLUM TOMAT'), [5]); // a cut-short word matches the word it begins
+  assert.deepEqual(ids('ROMAINE HEARTS 3CT'), [6]); // through a saved receipt name
+  assert.deepEqual(wordMatches('KS ORG 2LB', ingredients), []); // nothing but filler
+  assert.deepEqual(wordMatches('PLUM TOMAT', ingredients)[0].words, ['plum', 'tomato']);
 });

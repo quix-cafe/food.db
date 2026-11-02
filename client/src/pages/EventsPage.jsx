@@ -1,11 +1,11 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
 import { useApi } from '../hooks.js';
 import { todayIso } from '../format.js';
 import { Field, Icon, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
 
-function DateBlock({ iso }) {
+export function DateBlock({ iso }) {
   const [y, m, d] = iso.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
   return (
@@ -18,7 +18,13 @@ function DateBlock({ iso }) {
 
 export default function EventsPage() {
   const { data, error, loading } = useApi('/events');
-  const [creating, setCreating] = useState(false);
+  // The dashboard's Plan an event opens the form. Clear the request, so coming back here doesn't open it again.
+  const { state } = useLocation();
+  const navigate = useNavigate();
+  const [creating, setCreating] = useState(!!state?.creating);
+  useEffect(() => {
+    if (state?.creating) navigate('/events', { replace: true, state: null });
+  }, [state, navigate]);
   const [copying, setCopying] = useState(null);
   const today = todayIso();
   const upcoming = (data ?? []).filter((e) => e.date >= today).reverse();

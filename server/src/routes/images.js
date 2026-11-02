@@ -3,9 +3,31 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { uploadDir, removeFiles, thumbDir } from '../images.js';
 import { thumbFor } from '../thumbs.js';
-import { notFound, uuid } from '../validate.js';
+import { MAX_SIDE, MIN_SIDE, compressPhoto, photoSizes } from '../compress.js';
+import { saveSnapshot } from '../backup.js';
+import { array, badRequest, notFound, number, uuid } from '../validate.js';
 
 const router = Router();
+
+// Compress photos (Backup page). Every photo's size and dimensions, for estimating a setting.
+router.get('/compress', async (_req, res) => {
+  res.json({ minSide: MIN_SIDE, maxSide: MAX_SIDE, photos: await photoSizes() });
+});
+
+// A copy of everything, photos included, before any are compressed.
+router.post('/compress/snapshot', async (_req, res) => {
+  res.status(201).json({ snapshot: await saveSnapshot('compressing-photos') });
+});
+
+// Compress a few photos per request (each takes a second or two), so the page can show progress.
+router.post('/compress', async (req, res) => {
+  const maxSide = number(req.body?.maxSide, 'Longest side', { required: true, integer: true, min: MIN_SIDE, max: MAX_SIDE });
+  const ids = array(req.body?.ids, 'ids').map((id, i) => uuid(id, `Photo ${i + 1}`));
+  if (ids.length > 10) throw badRequest('Compress at most 10 photos per request');
+  const results = [];
+  for (const id of ids) results.push(await compressPhoto(id, maxSide));
+  res.json({ results });
+});
 
 router.get('/:id', async (req, res) => {
   const { rows } = await query('SELECT filename, mime FROM images WHERE id = $1', [uuid(req.params.id, 'id')]);

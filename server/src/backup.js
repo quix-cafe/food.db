@@ -31,7 +31,7 @@ export const TABLES = [
 ];
 
 const IMAGE_FILE = /^[A-Za-z0-9-]+\.(jpg|png|webp|gif)$/;
-const SNAPSHOT_FILE = /^before-(restore|clearing-test-data)-[0-9TZ-]+\.tar\.gz$/;
+const SNAPSHOT_FILE = /^before-(restore|clearing-test-data|compressing-photos)-[0-9TZ-]+\.tar\.gz$/;
 const KEEP_SNAPSHOTS = 10;
 
 export const backupDir = () => path.resolve(repoRoot, process.env.BACKUP_DIR ?? 'data/backups');

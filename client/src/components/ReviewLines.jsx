@@ -18,6 +18,7 @@ export const toRow = (item, line = item.line ?? null) => ({
   keep: !!item.name, // use the receipt's wording as-is
   resolved: item.match ?? null, // what that wording resolves to (saved alias or exact name)
   suggestion: item.suggestion ?? null,
+  candidates: item.candidates ?? null, // ingredients it might be: shared words, then the closest spelling
   choices: item.choices ?? null, // a saved receipt name too generic to apply: what it was saved as before
   ambiguous: item.ambiguous ?? null, // why: 'receipt' (several lines here) or 'history'
   name: '', // the rename, when not keeping the receipt wording

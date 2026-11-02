@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateBlend, convertUnits, itemAmounts, normalizeUnit, parseAmount, unitRatio } from '../src/calc.js';
+import { calculateBlend, convertUnits, itemAmounts, normalizeUnit, parseAmount, unitRatio, unitsForName } from '../src/calc.js';
 
 test('unit ratios between ingredient units are exact and never cross weight and volume', () => {
   assert.equal(unitRatio('oz', 'lb').toString(), '0.0625');
@@ -33,6 +33,32 @@ test('a bunch converts only to itself exactly, and any unit converts to itself',
   assert.equal(convertUnits(2, 'Box', 'box').toString(), '2');
   assert.equal(unitRatio('bunch', 'lb'), null);
   assert.equal(unitRatio('bunch', 'bunch').toString(), '1');
+});
+
+test('garlic can be measured in cloves, which cost through their weight', () => {
+  assert.equal(normalizeUnit('Cloves'), 'clove');
+  assert.equal(convertUnits(2, 'clove', 'g').toString(), '14');
+  assert.equal(unitRatio('clove', 'lb'), null);
+  assert.deepEqual(unitsForName('Garlic'), ['clove']);
+  assert.deepEqual(unitsForName('Garlic, peeled'), ['clove']);
+  assert.deepEqual(unitsForName('Garlic powder'), []);
+  assert.deepEqual(unitsForName('Thai Chilies'), []);
+  // By the pound: 2 cloves are 14 g of a 453.592 g lb.
+  assert.equal(itemAmounts(2, 'clove', { uom: 'lb' }).inUom.toFixed(4), '0.0309');
+  // By the box, through a box's weight, in a sauce's density too.
+  const box = { name: 'Garlic', uom: 'box', packPrice: '7.50', packSize: '1' };
+  const s = calculateBlend([{ amount: '3', unit: 'clove', ...box }], { kind: 'sauce', container: '1 qt' });
+  assert.equal(s.totalGrams, '21.0000');
+  assert.equal(s.cost, '0.2100'); // 21 g of a 750 g box × $7.50
+});
+
+test('a chili weighs a couple of grams, unless its ingredient says otherwise', () => {
+  assert.equal(itemAmounts(7, 'chili', { uom: 'chili' }).grams.toString(), '14');
+  assert.equal(itemAmounts(1, 'oz', { uom: 'chili' }).inUom.toFixed(2), '14.17');
+  assert.equal(itemAmounts(7, 'chili', { uom: 'chili', unitGrams: '15' }).grams.toString(), '105');
+  // Counted in its own unit, its cost doesn't depend on the weight.
+  const b = calculateBlend([{ name: 'Thai Chilies', amount: '7', unit: 'chili', uom: 'chili', packPrice: '3', packSize: '30' }]);
+  assert.equal(b.cost, '0.7000');
 });
 
 test('a sauce weighs volumes like water and its batch is its container', () => {

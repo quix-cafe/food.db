@@ -50,5 +50,5 @@ export const RECIPE_LINES = `
 
 export const RECIPE_COLUMNS = `
   r.id, r.name, r.base_servings AS "baseServings", r.total_yield AS "totalYield",
-  r.yield_unit AS "yieldUnit", r.target_margin AS "targetMargin",
+  r.yield_unit AS "yieldUnit", r.target_margin AS "targetMargin", r.target_price AS "targetPrice",
   r.created_at AS "createdAt", r.updated_at AS "updatedAt", r.is_test AS "isTest"`;

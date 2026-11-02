@@ -15,6 +15,8 @@
   --basil-dark: #24563f;
   --basil-wash: #e2efe7;
   --saffron: #b9831a;
+  --magenta: #e5007e;
+  --magenta-dark: #b80066;
   --carrot: #c2541a;
   --blue: #2b62b0;
   --blue-dark: #1f4d8f;
@@ -97,6 +99,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .nav a:hover { background: var(--side-hover); color: #fff; }
 .nav a.active { background: var(--side-active); color: var(--side-active-ink); }
 .nav svg { flex: none; }
+/* A section under the one above: indented, with an angle pointing back up to its parent. */
 .sidebar .nav { flex: 1; }
 .theme-switch {
   all: unset; box-sizing: border-box; cursor: pointer; position: relative; margin: auto 10px 0; order: 1; /* after the menu */
@@ -152,6 +155,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn.quick-add-btn:hover { background: linear-gradient(180deg, var(--blue), var(--blue-dark)); border-color: var(--blue-dark); }
 .btn.quick-add-btn:active { box-shadow: 0 1px 2px rgba(31, 77, 143, 0.3) inset; }
 .btn.quick-add-btn:focus-visible { outline-color: var(--blue); }
+.btn.pos-btn { background: var(--magenta); border-color: var(--magenta-dark); color: #fff; font-weight: 750; text-decoration: none; box-shadow: 0 2px 8px rgba(229, 0, 126, 0.4); }
+.btn.pos-btn:hover { background: var(--magenta-dark); }
+.btn.pos-btn:focus-visible { outline-color: var(--magenta); }
 .btn.danger { color: var(--tomato); }
 .btn.danger:hover { border-color: var(--tomato); }
 .btn.danger-solid { background: var(--tomato); border-color: var(--tomato); color: #fff; }
@@ -221,6 +227,16 @@ h1 .badge.test { font-size: 0.8rem; margin-left: 10px; }
 .test-mode-bar b { font-weight: 700; }
 .test-mode-bar .btn { margin-left: auto; }
 @media (max-width: 800px) { .test-mode-bar { padding: 7px 16px; } }
+.new-build-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 9px 28px; font-size: 0.95rem;
+  color: var(--tomato-ink); background: var(--tomato-wash); border-bottom: 2px solid var(--tomato);
+}
+.pos-frame .new-build-bar { position: static; } /* over the pay buttons, it would be in the way mid-order */
+.new-build-bar b { font-weight: 700; }
+.new-build-bar .btn { margin-left: auto; }
+@media (max-width: 800px) { .new-build-bar { padding: 9px 16px; } }
 .switch-row { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; }
 .switch-row input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--saffron); flex: none; }
 .test-counts { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -233,6 +249,9 @@ h1 .badge.test { font-size: 0.8rem; margin-left: 10px; }
 .notice.error { background: var(--tomato-wash); color: var(--tomato-ink); }
 .notice.success { background: var(--basil-wash); color: var(--basil-ink); }
 .notice ul { margin: 0; padding-left: 18px; }
+.plan-conflict { margin-bottom: 14px; }
+.plan-conflict b { font-weight: 700; }
+.plan-conflict-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 
 /* ---------- Surfaces ---------- */
 
@@ -337,7 +356,6 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
   background: var(--solid); color: var(--on-solid); padding: 10px 18px; border-radius: var(--radius); font-weight: 550;
   animation: toast-in 160ms ease-out; pointer-events: none; /* never in the way of a tap */
 }
-body:has(.sales-modal) .toast { bottom: auto; top: 16px; }
 @keyframes toast-in { from { transform: translate(-50%, 8px); opacity: 0; } }
 
 .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin 700ms linear infinite; }
@@ -450,6 +468,13 @@ a.receipt-thumbs:hover img, a.receipt-thumbs:focus-visible img { outline: 2px so
 
 .backup-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: start; }
 .backup-card { display: flex; flex-direction: column; gap: 14px; }
+.compress-slider { max-width: 560px; }
+.compress-marks { display: flex; gap: 8px; flex-wrap: wrap; }
+.compress-mark { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 8px 12px; min-width: 170px; font: inherit; text-align: left; color: inherit; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.compress-mark:hover { border-color: var(--basil); }
+.compress-mark.on { border-color: var(--basil); box-shadow: inset 0 0 0 1px var(--basil); background: var(--basil-wash); }
+.compress-progress { display: flex; flex-direction: column; gap: 4px; }
+.compress-progress progress { width: 100%; accent-color: var(--basil); }
 .backup-counts { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin: 0; }
 .backup-counts div { border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 8px 10px; }
 .backup-counts dt { font-size: 0.82rem; color: var(--muted); }
@@ -668,6 +693,8 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 
 /* ---------- Events ---------- */
 
+.dash-figure { color: inherit; text-decoration: none; }
+.dash-figure:hover { background: var(--wash); }
 .event-list { display: flex; flex-direction: column; }
 .event-item { display: flex; align-items: center; border-bottom: 1px solid var(--line-soft); }
 .event-item:last-child { border-bottom: 0; }
@@ -689,57 +716,36 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 .list-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .results-grid td.better { color: var(--basil); font-weight: 650; }
 .results-grid td.worse { color: var(--tomato); font-weight: 650; }
+.recorded-sales { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.recorded-sales .section-head { display: flex; flex-direction: column; gap: 2px; }
+.sold-bar { height: 4px; margin-top: 4px; margin-left: auto; width: 100%; max-width: 120px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.sold-bar > span { display: block; height: 100%; background: var(--basil); border-radius: inherit; }
 .save-state { font-size: 0.86rem; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
 .recipe-pick td { padding: 8px 12px; }
 .recipe-pick tr.off td:not(:first-child) { color: var(--muted); }
 .money-input.vendor-fee .input { font-size: 1rem; font-weight: 600; font-stretch: 100%; padding-top: 7px; padding-bottom: 7px; }
 .sales-table tr.free td { color: var(--muted); }
+.sales-table tr.cancelled td { color: var(--muted); }
+.sales-table tr.cancelled td:nth-child(2), .sales-table tr.cancelled td:nth-child(6) { text-decoration: line-through; }
+.sales-table td > b { display: block; }
 .sales-table .deal-tag { margin-left: 6px; }
 .sales-confirm { font-size: 0.88rem; }
 .link-btn.danger { color: var(--tomato); }
 
-/* Sales counter (during the event): full screen on a phone, big touch targets. */
-.modal.sales-modal { width: min(720px, calc(100vw - 32px)); }
-.sales-modal .modal-body { gap: 12px; padding-top: 12px; }
-/* The counter's header and totals are kept short, leaving the screen to the items. */
-.sales-modal .modal-head { padding-top: 4px; padding-bottom: 4px; }
-.sales-modal .modal-head h2 { font-size: 1.05rem; }
-.sales-modal .sales-totals > div { padding: 3px 6px 4px; }
-.sales-modal .sales-totals b { line-height: 1.15; }
+/* Sales totals, and the POS screen's shared bits: big touch targets. */
 .sales-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }
 .sales-totals > div { padding: 10px 6px; border: 1px solid var(--line-soft); border-radius: var(--radius); }
 .sales-totals b { display: block; font-size: 1.35rem; font-stretch: 85%; }
 .sales-totals span { font-size: 0.8rem; color: var(--muted); }
 .sales-totals p { grid-column: 1 / -1; margin: 0; font-size: 0.82rem; }
-.sales-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.sales-items li { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; padding: 10px 4px; border-bottom: 1px solid var(--line-soft); }
-.sales-items li.in-line { background: var(--steel); border-radius: var(--radius); }
-.sales-item-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.sales-item-name small { font-size: 0.85rem; }
 .deal-tag { margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: var(--basil); color: #fff; font-size: 0.75rem; font-weight: 650; }
 .stepper { display: flex; align-items: center; gap: 6px; }
 .stepper .btn { width: 46px; height: 46px; padding: 0; justify-content: center; font-size: 1.4rem; font-weight: 700; }
 .stepper output { min-width: 2ch; text-align: center; font-size: 1.25rem; font-weight: 750; }
 .deal-toggle { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
 .deal-toggle input { width: 22px; height: 22px; accent-color: var(--basil); }
-.sales-checkout { position: sticky; bottom: -20px; margin: 0 -20px; padding: 12px 20px 16px; background: var(--paper); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; box-shadow: 0 -6px 14px rgba(28, 42, 51, 0.08); }
-.pay-buttons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.pay-buttons .btn, .pay-secondary .btn { min-height: 48px; justify-content: center; font-size: 1rem; }
 .pay-button { flex-direction: column; gap: 0; line-height: 1.15; }
-.pay-button small { font-size: 0.72rem; font-weight: 500; opacity: 0.85; }
-.pay-secondary { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; }
-.recent-sales h3 { margin: 0 0 6px; }
-.recent-sales ul { list-style: none; margin: 0 0 6px; padding: 0; font-size: 0.88rem; }
-.recent-sales li { display: grid; grid-template-columns: auto 1fr auto auto; gap: 10px; align-items: baseline; padding: 6px 0; border-bottom: 1px dashed var(--line); }
-@media (max-width: 640px) {
-  .modal.sales-modal { inset: 0; top: 0; left: 0; transform: none; width: 100vw; max-height: 100dvh; height: 100dvh; border-radius: 0; }
-  .sales-checkout { gap: 8px; padding: 10px 16px 12px; margin: 0 -20px; }
-  .pay-buttons { gap: 6px; }
-  .pay-buttons .btn { min-height: 52px; padding: 0 4px; font-size: 0.95rem; }
-  .pay-secondary .btn { min-height: 40px; }
-  .recent-sales li { grid-template-columns: auto 1fr auto; }
-  .recent-sales li > span:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
-}
+.pay-button small { font-size: 0.72rem; font-weight: 500; opacity: 0.85; white-space: normal; text-align: center; }
 
 /* After a receipt is saved */
 .receipt-saved { display: flex; flex-direction: column; gap: 16px; max-width: 920px; }
@@ -758,7 +764,10 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 .recipe-pick .money-input > span, .deal-input .money-input > span { left: 8px; }
 .form-grid .sale-price { align-items: stretch; }
 .form-grid .sale-price .money-input .input { width: 100%; max-width: 140px; }
-.deal-input .deal-qty { width: 52px; padding: 4px 6px; }
+.deal-input .deal-qty { width: 42px; padding: 4px 6px; }
+.recipe-pick .deal-input .money-input .input { width: 72px; }
+.deal-toggle-cell { display: inline-flex; align-items: center; gap: 8px; min-height: 34px; }
+.deal-check { flex: none; width: 18px; height: 18px; accent-color: var(--basil); }
 
 /* ---------- Responsive ---------- */
 
@@ -820,10 +829,25 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 .grid tfoot.shop-total td { font-size: 1.15rem; font-weight: 800; padding-top: 12px; padding-bottom: 12px; }
 .grid tfoot.shop-total td:first-child { font-size: 1rem; }
 .grid tfoot.shop-total small { font-size: 0.85rem; }
+.serving-size { display: inline-flex; align-items: center; gap: 6px; }
+.serving-size .input { width: 50px; padding: 4px 6px; }
+.recipe-pick thead th { white-space: normal; vertical-align: bottom; }
+.recipe-pick .c-name { min-width: 150px; }
+@media (min-width: 641px) { .recipe-pick .c-makes { width: 1%; } }
+.sauce-holds span { white-space: nowrap; }
 .sauce-make { display: inline-flex; align-items: center; gap: 6px; }
-.sauce-make .input { width: 52px; }
+.sauce-make .input { width: 44px; }
 .sauce-make .select { width: auto; }
-.sauce-servings { font-size: 1.05rem; padding-right: 2px; }
+.sauce-servings { font-size: 1.05rem; }
+.serving-total { display: inline-block; margin-top: 4px; padding: 2px 8px; border-radius: 999px; background: var(--saffron-wash); color: var(--saffron-ink); box-shadow: inset 0 0 0 1px var(--saffron-line); font-size: 0.85rem; font-weight: 750; white-space: nowrap; }
+.recipe-pick tbody td:first-child { box-shadow: inset 7px 0 0 var(--tile, transparent); }
+@media (min-width: 641px) {
+  /* Names on the left, everything else centered under its heading; rules set the name and yield apart from the figures. */
+  .recipe-pick.grid :is(th, td) { text-align: center; }
+  .recipe-pick.grid :is(th:nth-child(2), td.c-name, .group-row td) { text-align: left; }
+  .recipe-pick .sale-price { align-items: center; }
+  .recipe-pick :is(th:nth-child(2), td.c-name, th:nth-child(3), td.c-makes) { border-right: 1px solid var(--line); }
+}
 .event-tabs-area { display: flex; flex-direction: column; gap: 16px; }
 /* Phone: jump from the top of an event down to one of its tabs. */
 @media (max-width: 640px) { .jump-menu.show-sm { display: grid !important; grid-template-columns: repeat(4, 1fr); gap: 6px; } .jump-menu .btn { padding: 7px 4px; } }
@@ -837,8 +861,8 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
   /* The top of every page: a slimmer search bar, Quick add as a + button, and the page title
      beside its main button, without the description underneath. */
   .topbar { padding: 8px 12px; gap: 8px; }
-  .quick-add-btn { padding: 8px 11px; }
-  .quick-add-btn .btn-label { display: none; }
+  .quick-add-btn, .btn.pos-btn { padding: 8px 11px; }
+  .quick-add-btn .btn-label, .pos-btn .btn-label { display: none; }
   .page { padding: 14px 12px 24px; gap: 14px; }
   h1 { font-size: 1.45rem; }
   .page-head { align-items: center; gap: 8px 12px; }
@@ -892,7 +916,7 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
   .recipe-pick.cards-sm thead { display: none; }
   .recipe-pick.cards-sm tr {
     display: grid; grid-template-columns: 26px repeat(3, minmax(0, 1fr)); column-gap: 10px; row-gap: 8px;
-    grid-template-areas: 'check name name serv' '. makes cost margin' '. price deal deal';
+    grid-template-areas: 'check name name serv' '. makes cost margin' '. size size price' '. deal deal deal';
     padding: 12px; border-bottom: 1px solid var(--line-soft); align-items: start;
   }
   .recipe-pick.cards-sm tr.off { grid-template-areas: 'check name name name' '. makes cost price'; row-gap: 4px; padding: 10px 12px; }
@@ -901,6 +925,8 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
     content: attr(data-label); display: block; margin-bottom: 2px;
     font-size: 0.68rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
   }
+  .recipe-pick.cards-sm tr { box-shadow: inset 7px 0 0 var(--tile, transparent); }
+  .recipe-pick.cards-sm tbody td:first-child { box-shadow: none; }
   .recipe-pick.cards-sm .c-check { grid-area: check; align-self: center; }
   .recipe-pick.cards-sm .c-name { grid-area: name; align-self: center; }
   .recipe-pick.cards-sm .c-serv { grid-area: serv; }
@@ -909,7 +935,8 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
   .recipe-pick.cards-sm .c-margin { grid-area: margin; }
   .recipe-pick.cards-sm .c-price { grid-area: price; }
   .recipe-pick.cards-sm .c-deal { grid-area: deal; }
-  .recipe-pick.cards-sm tr.off .c-deal, .recipe-pick.cards-sm tr.off .c-serv, .recipe-pick.cards-sm tr.off .c-margin, .recipe-pick.cards-sm .c-none { display: none; }
+  .recipe-pick.cards-sm .c-size { grid-area: size; }
+  .recipe-pick.cards-sm tr.off .c-size, .recipe-pick.cards-sm tr.off .c-deal, .recipe-pick.cards-sm tr.off .c-serv, .recipe-pick.cards-sm tr.off .c-margin, .recipe-pick.cards-sm .c-none { display: none; }
   .recipe-pick.cards-sm .c-serv .input { width: 100% !important; }
   /* A sauce's "2 × 1/2 qt" needs two columns; its margin moves beside the price. */
   .recipe-pick.cards-sm tr.sauce-row:not(.off) { grid-template-areas: 'check name name serv' '. makes makes cost' '. price margin margin'; }
@@ -921,7 +948,7 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
   .recipe-pick.cards-sm tr { padding: 14px 12px; border-bottom: 1px solid var(--line); }
   .recipe-pick.cards-sm .c-name a { font-size: 1.12rem; line-height: 1.25; }
   .recipe-pick.cards-sm tr:not(.off) :is(.c-makes, .c-cost, .c-margin) { background: var(--wash); border-radius: var(--radius); padding: 6px 8px; }
-  .recipe-pick.cards-sm tr:not(.off) :is(.c-price, .c-deal) { border-top: 1px dashed var(--line); padding-top: 8px; }
+  .recipe-pick.cards-sm tr:not(.off) :is(.c-size, .c-price, .c-deal) { border-top: 1px dashed var(--line); padding-top: 8px; }
   .recipe-pick.cards-sm tr:not(.off) .c-margin { color: var(--basil-ink); font-weight: 650; }
   .recipe-pick.cards-sm tr.off .c-name a { font-size: 1rem; }
   .recipe-pick.cards-sm tr.group-row { display: block; padding: 8px 12px; background: var(--wash); }
@@ -996,3 +1023,135 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
   :root[data-theme='dark'] .tabs.segmented-sm .tab[aria-selected='true'] { box-shadow: inset 0 0 0 1px #3b474e; }
   :root[data-theme='dark'] .scrim { background: rgba(0, 0, 0, 0.6); }
 }
+
+/* The POS screen's event picker, order names and timing. */
+.ticket-pick { position: relative; display: flex; align-items: center; gap: 8px; border-radius: var(--radius); }
+.ticket-pick:has(select:focus-visible) { outline: 2px solid currentColor; outline-offset: 4px; }
+.ticket-pick svg { flex: none; width: 20px; height: 20px; }
+/* The native list, for its keyboard and phone behaviour, laid invisibly over the name. */
+.ticket-pick select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 16px; }
+.order-name { all: unset; cursor: pointer; font-weight: 700; font-size: 1.05rem; overflow-wrap: anywhere; }
+.order-name.none { color: var(--muted); font-weight: 600; font-size: 0.95rem; text-decoration: underline; text-underline-offset: 2px; }
+.order-name:focus-visible { outline: 2px solid var(--basil); }
+.order-items { margin: 0; padding: 0; list-style: none; }
+.order-timing { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0; }
+.order-timing > div { padding: 3px 8px; border-left: 3px solid var(--line); }
+.order-timing dt { font-size: 0.76rem; color: var(--muted); }
+.order-timing dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.order-timing .running { border-left-color: var(--magenta); }
+.order-timing .running dt, .order-timing .running dd { color: var(--magenta); }
+.input.customer-name { min-height: 48px; padding: 8px 12px; font-size: 1.125rem; font-weight: 600; }
+.pos-card-head .customer-name { flex: 1; min-width: 0; }
+.input.new-order-name { min-height: 54px; font-size: 1.25rem; }
+.name-warning { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: var(--radius); background: var(--tomato-wash); color: var(--tomato-ink); font-size: 0.95rem; }
+.name-warning span svg { vertical-align: -3px; width: 16px; height: 16px; }
+.name-warning .btn { min-height: 44px; justify-content: center; }
+.input.customer-name::placeholder { font-weight: 400; }
+
+/* The POS screen: the whole window, no app around it. Each region scrolls on its own. */
+/* Over the app, under its modals (50) and toasts (60), so a confirmation from the page underneath still shows. */
+.pos-frame { position: fixed; inset: 0; z-index: 45; display: flex; flex-direction: column; background: var(--steel); }
+body.pos-open { overflow: hidden; }
+.pos { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pos-pad { padding: 20px; }
+.pos-bar { display: flex; align-items: center; gap: 16px; padding: 8px 16px; background: var(--side); color: #fff; border-bottom: 4px solid var(--magenta); }
+.pos-event { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; }
+.pos-bar h1 { font-size: clamp(1.25rem, 1rem + 1.2vw, 1.9rem); font-weight: 800; overflow-wrap: anywhere; }
+.pos-bar .ticket-pick { gap: 6px; }
+.pos-bar .ticket-pick svg { width: 20px; height: 20px; }
+.pos-not-today { padding: 2px 10px; border-radius: 999px; background: var(--tomato); color: #fff; font-size: 0.85rem; font-weight: 700; white-space: nowrap; }
+.pos-clock { font-size: 1.15rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.btn.pos-close { background: transparent; border-color: rgba(255, 255, 255, 0.4); color: #fff; text-decoration: none; }
+.btn.pos-close:hover { background: var(--side-hover); }
+.pos-stats { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 6px 16px; background: var(--paper); border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: 0.92rem; }
+.pos-stats { align-items: center; }
+.pos-stats b { color: var(--ink); font-variant-numeric: tabular-nums; }
+/* A stage's color: its count here, and the box around its orders on the board. */
+.pos-stage { padding: 1px 10px; border-radius: 999px; font-weight: 700; }
+.pos-stage.placed { background: var(--carrot); color: #fff; }
+.pos-stage.in_progress { background: var(--magenta); color: #fff; }
+.pos-stage b { color: inherit; }
+.pos-panes { display: none; background: var(--paper); padding: 0 8px; }
+.pos-panes .tab.has-orders { color: var(--tomato); font-weight: 800; }
+.pos-desk { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 11fr) minmax(0, 12fr); }
+.pos-sell { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 320px; border-right: 1px solid var(--line); }
+.pos-menu { min-height: 0; overflow-y: auto; padding: 12px; }
+.pos-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.pos-tile {
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-height: 112px; padding: 12px 12px 10px 18px; text-align: left; cursor: pointer;
+  background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); font: inherit; touch-action: manipulation; -webkit-tap-highlight-color: transparent; overflow: hidden;
+}
+.pos-tile::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 9px; background: var(--tile); }
+.pos-tile:hover:not(:disabled) { background: var(--wash-hover); }
+.pos-tile:active:not(:disabled) { transform: scale(0.98); }
+.pos-tile:focus-visible { outline: 2px solid var(--magenta); outline-offset: 2px; }
+.pos-tile.in-line { border-color: var(--magenta); box-shadow: 0 0 0 1px var(--magenta); }
+.pos-tile b { padding-right: 26px; font-size: 1.05rem; line-height: 1.2; overflow-wrap: anywhere; }
+.pos-tile > span:not(.deal-tag) { font-weight: 650; }
+.pos-tile .deal-tag { margin-left: 0; }
+.pos-tile small { margin-top: auto; color: var(--muted); }
+.pos-qty { position: absolute; top: 6px; right: 6px; min-width: 30px; height: 30px; display: grid; place-items: center; border-radius: 999px; background: var(--magenta); color: #fff; font-style: normal; font-weight: 800; }
+.pos-ticket { min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--paper); border-left: 1px solid var(--line); }
+.pos-lines { flex: 1; min-height: 40px; overflow-y: auto; }
+.pos-lines > p { margin: 8px 0; }
+.pos-line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.pos-line.tiled { padding-left: 8px; }
+.pos-line .stepper { gap: 2px; }
+.pos-line .stepper .btn { width: 36px; height: 36px; font-size: 1.15rem; }
+.pos-line .stepper output { font-size: 1.05rem; }
+.pos-line-name { overflow-wrap: anywhere; font-size: 0.95rem; }
+.pos-total { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--ink-2); font-size: 0.9rem; }
+.pos-total b { color: var(--ink); font-family: var(--font-heading); font-size: 1.9rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.pos-pay { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.pos-pay .btn { min-height: 54px; justify-content: center; font-size: 1.02rem; }
+.pos-pay .btn:nth-last-child(-n + 2) { min-height: 40px; font-size: 0.92rem; }
+.pos-board { min-height: 0; display: flex; flex-direction: column; }
+.pos-columns { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pos-column { min-height: 0; overflow-y: auto; padding: 0 8px 12px; border-right: 1px solid var(--line); }
+.pos-column:last-child { border-right: 0; }
+.pos-column h2 { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; margin: 0 -8px 8px; padding: 10px 12px 8px; background: var(--steel); font-size: 1rem; }
+.pos-column h2 span { font-family: var(--font); font-variant-numeric: tabular-nums; }
+.pos-column ul { list-style: none; margin: 0; padding: 0; }
+.pos-column > ul { display: flex; flex-direction: column; gap: 8px; }
+.pos-column > p { margin: 8px 4px; font-size: 0.9rem; }
+.pos-card { display: flex; flex-direction: column; align-items: stretch; gap: 3px; padding: 6px 8px; background: var(--paper); border: 1px solid var(--line); border-top: 3px solid var(--line); border-radius: var(--radius); }
+.pos-card.placed { border: 2px solid var(--carrot); }
+.pos-card.in_progress { border: 2px solid var(--magenta); }
+.pos-card.completed { border-top-color: var(--basil); }
+.pos-card.cancelled { border-top-color: var(--tomato); opacity: 0.75; }
+.pos-card > .badge { align-self: flex-start; }
+.pos-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.pos-card-head small { color: var(--muted); white-space: nowrap; }
+.pos-card .order-name { font-size: 1rem; }
+.pos-card .order-items { font-size: 0.92rem; }
+.pos-card .order-timing { gap: 2px; }
+.pos-card .order-timing > div { padding: 1px 4px; border-left-width: 2px; }
+.pos-card .order-timing dd { font-size: 0.86rem; }
+.pos-card .order-timing dt { font-size: 0.7rem; }
+.pos-card-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; margin-top: 2px; }
+.pos-card-actions .btn { min-height: 34px; padding: 0 4px; justify-content: center; font-size: 0.86rem; }
+.pos-card-actions .btn.big { grid-column: 1 / -1; min-height: 42px; font-size: 1rem; }
+@media (max-width: 1180px) {
+  .pos-panes { display: flex; }
+  .pos-desk { grid-template-columns: minmax(0, 1fr); }
+  .pos-desk > [data-shown='false'] { display: none; }
+  .pos-sell { border-right: 0; }
+}
+@media (max-width: 640px) {
+  .pos-bar { padding: 6px 12px; gap: 10px; }
+  .pos-clock { display: none; }
+  .pos-sell { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .pos-ticket { border-left: 0; border-top: 2px solid var(--line); box-shadow: 0 -6px 14px rgba(28, 42, 51, 0.1); }
+  .pos-lines { flex: none; max-height: 22dvh; }
+  .pos-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .pos-tile { min-height: 92px; }
+  .pos-pay { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .pos-pay .btn { padding: 0 2px; font-size: 0.9rem; }
+  .pos-pay .btn:nth-last-child(-n + 2) { grid-column: span 2; }
+  .pos-board { overflow-y: auto; }
+  .pos-columns { display: block; flex: none; }
+  .pos-column { overflow: visible; border-right: 0; }
+}
+
+/* A menu item's color, the same on every screen for an event (recipeColors). */
+:is(li, div, span).tiled { border-left: 6px solid var(--tile, transparent); padding-left: 8px; }

@@ -9,7 +9,7 @@ const dir = fileURLToPath(new URL('../migrations/', import.meta.url));
  * Migrations since combined into 001_schema.sql. A database (or backup) that applied them has
  * everything they added, so their records are dropped rather than refused.
  */
-export const COMBINED = ['002_sauce_serving_oz.sql'];
+export const COMBINED = ['002_sauce_serving_oz.sql', '003_recipe_target_price.sql'];
 
 /** Apply any migrations/*.sql files not yet recorded, in filename order. */
 export async function migrate({ log = console.log } = {}) {

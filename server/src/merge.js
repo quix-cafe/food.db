@@ -143,7 +143,7 @@ async function costs(c, ids) {
   const recipes = await loadRecipes(ids, c);
   return recipes
     .map((r) => {
-      const costing = calculateRecipe({ lines: r.lines, baseServings: r.baseServings, targetMargin: r.targetMargin, totalYield: r.totalYield });
+      const costing = calculateRecipe({ lines: r.lines, baseServings: r.baseServings, targetMargin: r.targetMargin, targetPrice: r.targetPrice, totalYield: r.totalYield });
       return { id: r.id, name: r.name, costPerServing: costing.costPerServing, recommendedPrice: costing.recommendedPrice };
     })
     .sort((a, b) => a.name.localeCompare(b.name));

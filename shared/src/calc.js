@@ -110,6 +110,9 @@ function requirePositive(value, label) {
  * lines: [{ packPrice, packSize, amount, ...passthrough }]
  *   packPrice / packSize come from the ingredient's most recent purchase (packPrice null if
  *   never bought); amount is how much of the ingredient's unit of measure the recipe uses.
+ * targetPrice: a menu price set by hand. It's the price whatever the cost, and `targetMargin`
+ *   comes back as the margin it makes (below 0 once the cost passes it); `priceSet` says so.
+ *   Without one, the price follows the cost at targetMargin.
  */
 export function calculateRecipe({
   lines = [],
@@ -117,8 +120,11 @@ export function calculateRecipe({
   expectedServings,
   targetMargin = DEFAULT_MARGIN,
   totalYield = null,
+  targetPrice = null,
 }) {
   const base = requirePositive(baseServings, 'Base servings');
+  const setPrice = toDecimal(targetPrice);
+  if (setPrice !== null && setPrice.lte(0)) throw new CalcError('Menu price must be greater than 0');
   const expected = toDecimal(expectedServings) ?? base;
   if (expected.lt(0)) throw new CalcError('Expected servings cannot be negative');
   const margin = toDecimal(targetMargin) ?? new Decimal(DEFAULT_MARGIN);
@@ -148,7 +154,9 @@ export function calculateRecipe({
 
   const scaledCost = baseCost.times(scale);
   const costPerServing = baseCost.div(base);
-  const price = recommendedPrice(costPerServing, margin).toDecimalPlaces(MONEY_DP);
+  const price = setPrice ? setPrice.toDecimalPlaces(MONEY_DP) : recommendedPrice(costPerServing, margin).toDecimalPlaces(MONEY_DP);
+  // A set price makes whatever margin it makes; 6 decimals, like a margin derived from a typed price.
+  const madeMargin = setPrice ? new Decimal(1).minus(costPerServing.div(price)).times(100).toDecimalPlaces(6) : margin;
   const revenue = price.times(expected);
   const profit = revenue.minus(scaledCost);
   const yieldD = toDecimal(totalYield);
@@ -157,7 +165,8 @@ export function calculateRecipe({
     baseServings: base.toString(),
     expectedServings: expected.toString(),
     scale: scale.toDecimalPlaces(6).toString(),
-    targetMargin: margin.toString(),
+    targetMargin: madeMargin.toString(),
+    priceSet: !!setPrice,
     lines: outLines,
     baseCost: cost(baseCost),
     scaledCost: cost(scaledCost),
@@ -180,8 +189,9 @@ export function calculateRecipe({
  *   purchaseCost = packsToBuy × Pack_Price         (what buying those whole packs costs)
  *   leftover     = packsToBuy × Pack_Size − amount (what's left of those packs, in the UOM)
  *
- * recipes: [{ recipeId, name, baseServings, targetMargin, expectedServings, lines }]
- *   where lines carry { ingredientId, name, uom, packPrice, packSize, amount }.
+ * recipes: [{ recipeId, name, baseServings, targetMargin, expectedServings, servingSize?, totalYield?, yieldUnit?, lines }]
+ *   where lines carry { ingredientId, name, uom, packPrice, packSize, amount }. expectedServings
+ *   count this event's servings, so `servingSize` scales the food by eventServing's ratio.
  * amounts: { [ingredientId]: amount } set by hand for the event (e.g. labor). It replaces
  *   the scaled total; usedCost becomes amount × price per unit, and the difference from the
  *   recipes' cost is reported as `adjustment` and included in totalCost and profit.
@@ -214,6 +224,40 @@ export function eventPricing({ costPerServing, recommendedPrice, salePrice = nul
     revenue: money(listPrice.times(expected).minus(discount)),
   };
 }
+
+/** "3 tacos", in the unit as the recipe writes it, but "1 taco" for one of a plural. */
+export function amountLabel(amount, unit) {
+  const n = new Decimal(amount).toDecimalPlaces(2);
+  return `${n.toString()} ${n.eq(1) ? unit.replace(/([^s])s$/, '$1') : unit}`;
+}
+
+/**
+ * What one serving of a recipe is at an event. `servingSize` is in the recipe's yield unit ("3" tacos);
+ * unset (or not above 0) it's the recipe's own size, total yield ÷ servings. `ratio` is how many of the
+ * recipe's servings one event serving takes, and the cost and default price come back per event serving.
+ * A recipe with no total yield measures its size in its own servings.
+ */
+export function eventServing({ baseServings, totalYield = null, yieldUnit = null, costPerServing = null, recommendedPrice = null }, servingSize = null) {
+  const set = toDecimal(servingSize);
+  const size = set?.gt(0) ? set : null;
+  const total = toDecimal(totalYield);
+  const hasYield = !!total?.gt(0);
+  const unit = String(yieldUnit ?? '').trim() || (hasYield ? 'units' : 'servings');
+  const ratio = !size ? new Decimal(1) : hasYield ? size.times(baseServings).div(total) : size;
+  const perServing = toDecimal(costPerServing);
+  const price = toDecimal(recommendedPrice);
+  return {
+    ratio,
+    unit,
+    recipeSize: hasYield ? total.div(baseServings) : new Decimal(1),
+    servingLabel: size ? amountLabel(size, unit) : null,
+    costPerServing: perServing === null ? null : cost(perServing.times(ratio)),
+    recommendedPrice: price === null ? null : money(price.times(ratio)),
+  };
+}
+
+/** A menu item's name on tickets and order lines, with its size at this event when one is set. */
+export const menuItemName = ({ name, servingLabel = null }) => (servingLabel ? `${name} (${servingLabel})` : name);
 
 /** What a payment app keeps from each payment: percent of what's paid plus a fixed fee. */
 export const PAYMENT_FEES = {
@@ -252,11 +296,67 @@ export function saleItem({ quantity, salePrice, discountAmount = null, discountQ
   return { quantity: q.toNumber(), unitPrice: money(price), deals: deals.toNumber(), discount: money(discount), amount: money(amount) };
 }
 
+/** Where an order is, in queue order. Placed and in progress are still open; a cancelled order counts toward nothing. */
+export const ORDER_STATUSES = ['placed', 'in_progress', 'completed', 'cancelled'];
+export const OPEN_ORDER_STATUSES = ['placed', 'in_progress'];
+
+/**
+ * How long an order has taken, in whole seconds: `waiting` from placed to started, `making` from
+ * started to completed, `total` from placed to completed, each null when it doesn't apply (an
+ * order completed without being started, a sale handed over on the spot). An open order's current
+ * stage counts up to `now` and is named by `running`. Timestamps come from the server.
+ */
+export function orderTimes({ createdAt, inProgressAt = null, completedAt = null, status }, now = Date.now()) {
+  const at = (t) => new Date(t).getTime();
+  const span = (from, to) => (from === null || to === null ? null : Math.max(0, Math.floor((to - from) / 1000)));
+  const placed = at(createdAt);
+  const started = inProgressAt ? at(inProgressAt) : null;
+  const ended = completedAt ? at(completedAt) : null;
+  const isPlaced = status === 'placed';
+  const isMaking = status === 'in_progress';
+  return {
+    waiting: span(placed, started ?? (isPlaced ? now : null)),
+    making: span(started, ended ?? (isMaking ? now : null)),
+    total: span(placed, ended ?? (isPlaced || isMaking ? now : null)),
+    running: isPlaced ? 'waiting' : isMaking ? 'making' : null,
+  };
+}
+
+/** Average seconds per stage over the completed orders that were timed; null where none were. */
+export function orderTimingSummary(sales) {
+  const timed = sales.filter((s) => s.status === 'completed' && s.completedAt).map((s) => orderTimes(s));
+  const average = (key) => {
+    const seen = timed.map((t) => t[key]).filter((v) => v !== null);
+    return seen.length ? Math.round(seen.reduce((a, b) => a + b, 0) / seen.length) : null;
+  };
+  return { count: timed.length, waiting: average('waiting'), making: average('making'), total: average('total') };
+}
+
+/**
+ * The event orders are probably being taken for, from the events list and today's date
+ * (YYYY-MM-DD): one today, even with an empty menu (of several, one with a menu, then the
+ * busiest), else one with orders still open, else the next one coming up, else the latest. Past
+ * today, events with something to sell come first. Null if none.
+ */
+export function anticipateEvent(events, today) {
+  const hasMenu = (e) => e.recipeCount + e.sauceCount > 0;
+  const ready = events.filter(hasMenu);
+  const pool = ready.length ? ready : events;
+  const newest = (a, b) => String(b.lastOrderAt ?? '').localeCompare(String(a.lastOrderAt ?? ''));
+  const busiest = (a, b) => b.openOrders - a.openOrders || newest(a, b);
+  const byDate = (a, b) => a.date.localeCompare(b.date);
+  return events.filter((e) => e.date === today).sort((a, b) => hasMenu(b) - hasMenu(a) || busiest(a, b))[0]
+    ?? pool.filter((e) => e.openOrders > 0).sort(byDate).at(-1)
+    ?? pool.filter((e) => e.date > today).sort(byDate)[0]
+    ?? [...pool].sort(byDate).at(-1)
+    ?? null;
+}
+
 /**
  * A sauce made at an event in `container`s (default: the sauce's own): one container is
  * `scale` of the sauce's batch and holds `servingsPerContainer` servings of `servingOz` oz.
  * It's sold by the serving: the batch cost × serving oz ÷ batch oz, by default priced at the
- * default margin, as a recipe's would be. blend: a loadBlends row.
+ * default margin, as a recipe's would be, unless the sauce has its own `salePrice`. blend: a loadBlends row.
  */
 export function sauceContainer(blend, container = null) {
   const size = container ?? blend.container;
@@ -267,6 +367,7 @@ export function sauceContainer(blend, container = null) {
   const servingOz = toDecimal(blend.servingOz) ?? batch.div(blend.servings ?? 1);
   if (servingOz.lte(0)) throw new CalcError(`${blend.name}: set a serving size`);
   const perServing = toDecimal(blend.cost)?.times(servingOz).div(batch) ?? null;
+  const own = toDecimal(blend.salePrice);
   return {
     container: size,
     containerOz: oz,
@@ -274,7 +375,7 @@ export function sauceContainer(blend, container = null) {
     servingOz: cost(servingOz),
     servingsPerContainer: new Decimal(oz).div(servingOz).toDecimalPlaces(COST_DP).toString(),
     costPerServing: perServing === null ? null : cost(perServing),
-    recommendedPrice: perServing === null ? null : money(recommendedPrice(perServing, DEFAULT_MARGIN)),
+    recommendedPrice: own ? money(own) : perServing === null ? null : money(recommendedPrice(perServing, DEFAULT_MARGIN)),
   };
 }
 
@@ -302,6 +403,7 @@ export function summarizeEvent(recipes = [], amounts = {}, { vendorFee = null, s
         name: line.name,
         category: line.category ?? null,
         vendor: line.vendor ?? null,
+        priceDate: line.priceDate ?? null, // of the latest purchase, which vendor is from
         uom: line.uom ?? null,
         packSize: toDecimal(line.packSize)?.toString() ?? null,
         packPrice: toDecimal(line.packPrice)?.toString() ?? null,
@@ -319,19 +421,23 @@ export function summarizeEvent(recipes = [], amounts = {}, { vendorFee = null, s
   };
 
   const recipeSummaries = recipes.map((r) => {
+    const sold = toDecimal(r.expectedServings) ?? new Decimal(r.baseServings);
+    const { ratio } = eventServing(r, r.servingSize);
     const calc = calculateRecipe({
       lines: r.lines,
       baseServings: r.baseServings,
-      expectedServings: r.expectedServings,
+      expectedServings: sold.times(ratio),
       targetMargin: r.targetMargin,
+      targetPrice: r.targetPrice,
     });
+    const served = eventServing({ ...r, costPerServing: calc.costPerServing, recommendedPrice: calc.recommendedPrice }, r.servingSize);
     const pricing = eventPricing({
-      costPerServing: calc.costPerServing,
-      recommendedPrice: calc.recommendedPrice,
+      costPerServing: served.costPerServing,
+      recommendedPrice: served.recommendedPrice,
       salePrice: r.salePrice,
       discountAmount: r.discountAmount,
       discountQty: r.discountQty,
-      expectedServings: calc.expectedServings,
+      expectedServings: sold,
     });
     totalCost = totalCost.plus(calc.scaledCost);
     revenue = revenue.plus(pricing.revenue);
@@ -342,14 +448,16 @@ export function summarizeEvent(recipes = [], amounts = {}, { vendorFee = null, s
     return {
       recipeId: r.recipeId,
       name: r.name,
-      expectedServings: calc.expectedServings,
+      expectedServings: sold.toString(),
       baseServings: calc.baseServings,
       targetMargin: calc.targetMargin,
       scaledCost: calc.scaledCost,
       // The part of scaledCost that is labor, so Financials can list labor as its own cost.
       laborCost: cost(calc.lines.filter(isLabor).reduce((sum, l) => sum.plus(l.scaledCost), new Decimal(0))),
-      costPerServing: calc.costPerServing,
-      recommendedPrice: calc.recommendedPrice, // the recipe's own target price
+      servingSize: r.servingSize ?? null, // at this event; null: the recipe's own
+      servingLabel: served.servingLabel,
+      costPerServing: served.costPerServing,
+      recommendedPrice: served.recommendedPrice, // the recipe's own target price, for this size of serving
       ...pricing, // salePrice (what it sells for here), discount, revenue, margin per serving
       profit: money(new Decimal(pricing.revenue).minus(calc.scaledCost)),
     };

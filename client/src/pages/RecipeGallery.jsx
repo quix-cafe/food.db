@@ -76,7 +76,8 @@ export default function RecipeGallery() {
               <div className={toDecimal(r.profitPerServing)?.lt(0) ? 'loss' : 'profit'}><dt>Profit</dt><dd>{money(r.profitPerServing)}</dd></div>
             </dl>
             <div className="card-pills">
-              <span className="badge good">{percent(r.targetMargin, 0)} margin</span>
+              <span className={`badge ${toDecimal(r.targetMargin)?.lt(0) ? 'warn' : 'good'}`}>{percent(r.targetMargin, 0)} margin</span>
+              {r.priceSet && <span className="badge" title="Menu price set by hand: it stays when ingredient costs change">Price set</span>}
               <span className="badge">{r.baseServings} servings</span>
               <span className="badge">{money(r.batchProfit)} batch profit</span>
               {r.missingPrices > 0 && <span className="badge warn">{r.missingPrices} unpriced</span>}

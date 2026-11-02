@@ -7,7 +7,7 @@ import { LATEST_PURCHASE } from './sql.js';
 export async function loadBlends(ids = null, client = { query }) {
   const where = ids ? 'WHERE b.id = ANY($1::uuid[])' : '';
   const { rows: blends } = await client.query(
-    `SELECT b.id, b.name, b.kind, b.container, b.notes, b.servings, b.serving_oz AS "servingOz", b.created_at AS "createdAt", b.updated_at AS "updatedAt", b.is_test AS "isTest"
+    `SELECT b.id, b.name, b.kind, b.container, b.notes, b.servings, b.serving_oz AS "servingOz", b.sale_price AS "salePrice", b.created_at AS "createdAt", b.updated_at AS "updatedAt", b.is_test AS "isTest"
      FROM spice_blends b ${where} ORDER BY lower(b.name)`,
     ids ? [ids] : [],
   );

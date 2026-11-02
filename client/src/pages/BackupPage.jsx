@@ -66,13 +66,15 @@ export default function BackupPage() {
         </div>
       </section>
 
+      <CompressPhotosCard onDone={reload} />
+
       <TestDataCard />
 
       <section className="panel">
         <div className="panel-head">
           <div>
             <h2>Automatic copies</h2>
-            <p className="muted">Before every restore and every clearing of test data, what was in the app is saved here first. The last 10 are kept.</p>
+            <p className="muted">Before every restore, clearing of test data or photo compression, what was in the app is saved here first. The last 10 are kept.</p>
           </div>
         </div>
         {summary?.snapshots.length ? (
@@ -82,7 +84,7 @@ export default function BackupPage() {
               <tbody>
                 {summary.snapshots.map((s) => (
                   <tr key={s.name}>
-                    <td>{s.name.startsWith('before-clearing-test-data') ? 'Before clearing test data' : 'Before the restore'} on {dateTime(s.createdAt)}</td>
+                    <td>{SNAPSHOT_LABELS.find(([prefix]) => s.name.startsWith(prefix))?.[1] ?? 'Before the restore'} on {dateTime(s.createdAt)}</td>
                     <td className="num">{bytes(s.bytes)}</td>
                     <td className="num"><a className="btn small" href={`/api/backup/snapshots/${encodeURIComponent(s.name)}`} download>Download</a></td>
                   </tr>
@@ -95,6 +97,136 @@ export default function BackupPage() {
         )}
       </section>
     </main>
+  );
+}
+
+const SNAPSHOT_LABELS = [
+  ['before-clearing-test-data', 'Before clearing test data'],
+  ['before-compressing-photos', 'Before compressing photos'],
+  ['before-restore', 'Before the restore'],
+];
+
+/** Longest sides marked on the slider, each with what it would save. */
+const MARKS = [2048, 4096];
+const BATCH = 2; // photos per request: each takes a second or two to resample
+
+/**
+ * What resampling the photos larger than `side` (longest side, px) would save. JPEG size goes
+ * roughly with the pixel count, so each is estimated as its bytes × (side / longest side)²;
+ * re-encoding usually saves a little more.
+ */
+function estimate(photos, side) {
+  const over = photos.filter((p) => p.compressible && Math.max(p.width, p.height) > side);
+  const before = over.reduce((n, p) => n + p.bytes, 0);
+  const after = over.reduce((n, p) => n + p.bytes * (side / Math.max(p.width, p.height)) ** 2, 0);
+  return { over, before, after: Math.round(after), saved: Math.round(before - after) };
+}
+
+/** Resample recipe and receipt photos down to a longest side, to save storage and backup size. */
+function CompressPhotosCard({ onDone }) {
+  const { data, error, reload } = useApi('/images/compress');
+  const [side, setSide] = useState(2048);
+  const [snapshot, setSnapshot] = useState(true);
+  const [confirming, setConfirming] = useState(false);
+  const [progress, setProgress] = useState(null); // { done, total }
+  const [runError, setRunError] = useState(null);
+  const toast = useToast();
+
+  if (error) return <section className="panel panel-pad backup-card"><h2>Compress photos</h2><Notice kind="error">{error.message}</Notice></section>;
+  const photos = data?.photos ?? [];
+  const total = photos.reduce((n, p) => n + p.bytes, 0);
+  const at = estimate(photos, side);
+  const fixed = photos.filter((p) => !p.compressible).length;
+  const pct = (e) => (e.before ? Math.round((e.saved / e.before) * 100) : 0);
+
+  const run = async () => {
+    setRunError(null);
+    const ids = at.over.map((p) => p.id);
+    setProgress({ done: 0, total: ids.length });
+    let before = 0;
+    let after = 0;
+    try {
+      if (snapshot) await api('/images/compress/snapshot', { method: 'POST' });
+      for (let i = 0; i < ids.length; i += BATCH) {
+        const { results } = await api('/images/compress', { method: 'POST', body: { maxSide: side, ids: ids.slice(i, i + BATCH) } });
+        for (const r of results) { before += r.before ?? 0; after += r.after ?? r.before ?? 0; }
+        setProgress({ done: Math.min(i + BATCH, ids.length), total: ids.length });
+      }
+      setConfirming(false);
+      toast(`Compressed ${count(ids.length, 'photo')}, saving ${bytes(before - after)}`);
+    } catch (err) {
+      setRunError(err.message);
+    } finally {
+      setProgress(null);
+      reload();
+      onDone();
+      notifyDataChanged();
+    }
+  };
+
+  return (
+    <section className="panel panel-pad backup-card" id="compress-photos">
+      <h2>Compress photos</h2>
+      <p className="muted">
+        Resamples recipe and receipt photos larger than the size you pick, so they take less space and backups get smaller.
+        Smaller photos are left as they are.
+      </p>
+      {!data ? <Spinner /> : (
+        <>
+          <div className="margin-slider compress-slider">
+            <div className="margin-slider-head">
+              <label htmlFor="compress-side">Longest side, at most</label>
+              <output htmlFor="compress-side">{side} px</output>
+            </div>
+            <input id="compress-side" type="range" min={data.minSide} max={data.maxSide} step="256" value={side} list="compress-marks"
+              onChange={(e) => setSide(Number(e.target.value))}
+              style={{ '--fill': `${((side - data.minSide) / (data.maxSide - data.minSide)) * 100}%` }} />
+            <datalist id="compress-marks">{MARKS.map((m) => <option key={m} value={m} />)}</datalist>
+          </div>
+          <div className="compress-marks">
+            {MARKS.map((m) => {
+              const e = estimate(photos, m);
+              return (
+                <button key={m} type="button" className={`compress-mark ${side === m ? 'on' : ''}`} onClick={() => setSide(m)}>
+                  <b>{m} px</b>
+                  <span>{e.over.length ? `saves about ${bytes(e.saved)} (${pct(e)}%)` : 'nothing to do'}</span>
+                  <small className="muted">{count(e.over.length, 'photo')}</small>
+                </button>
+              );
+            })}
+          </div>
+          <p>
+            {at.over.length
+              ? <><b>{count(at.over.length, 'photo')}</b> larger than {side} px: {bytes(at.before)} now, about {bytes(at.after)} after, saving about <b>{bytes(at.saved)}</b> ({pct(at)}%).</>
+              : <>No photo is larger than {side} px.</>}
+            {' '}<span className="muted">All {count(photos.length, 'photo')}: {bytes(total)}.{fixed > 0 && ` ${fixed} WebP or GIF ${fixed === 1 ? 'photo isn’t' : 'photos aren’t'} compressed.`}</span>
+          </p>
+          <div>
+            <button className="btn" disabled={!at.over.length} onClick={() => setConfirming(true)}>Compress {count(at.over.length, 'photo')}</button>
+          </div>
+        </>
+      )}
+      {confirming && (
+        <Modal title={`Compress ${count(at.over.length, 'photo')}?`} onClose={() => !progress && setConfirming(false)}>
+          <p>Each photo larger than {side} px on its longest side is resampled down to it and replaces the original. This can’t be undone except from a copy.</p>
+          <label className="agree">
+            <input type="checkbox" checked={snapshot} disabled={!!progress} onChange={(e) => setSnapshot(e.target.checked)} />
+            Save a copy of everything first, under Automatic copies ({bytes(total)} of photos, plus the data)
+          </label>
+          {progress && (
+            <div className="compress-progress">
+              <progress max={progress.total} value={progress.done} />
+              <small className="muted">{progress.done === 0 && snapshot ? 'Saving a copy…' : `${progress.done} of ${progress.total} done`}</small>
+            </div>
+          )}
+          {runError && <Notice kind="error">{runError}</Notice>}
+          <div className="form-actions">
+            <button className="btn ghost" disabled={!!progress} onClick={() => setConfirming(false)}>Cancel</button>
+            <button className="btn primary" disabled={!!progress} onClick={run}>{progress && <Spinner />} Compress</button>
+          </div>
+        </Modal>
+      )}
+    </section>
   );
 }
 

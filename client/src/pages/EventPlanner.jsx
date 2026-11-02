@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
-import { useApi } from '../hooks.js';
-import { SAUCE_CONTAINERS, sauceContainer } from '@kitchen/shared';
-import { money, qty } from '../format.js';
+import { useApi, useOpenPos, useWhileVisible } from '../hooks.js';
+import { SAUCE_CONTAINERS, amountLabel, eventServing, parseAmount, sauceContainer } from '@kitchen/shared';
+import { money, qty, toDecimal } from '../format.js';
 import { Field, Icon, Modal, Notice, Spinner, Tabs, TestBadge, useToast } from '../components/ui.jsx';
-import SalesModal, { SalesTable } from '../components/SalesModal.jsx';
-import { DealInput, MarginCell, SalePriceInput, blankOrCount, blankOrPrice, isInt, priceText, pricingFor } from '../components/EventPricing.jsx';
+import { SalesTable } from '../components/Sales.jsx';
+import { DealToggle, MarginCell, SalePriceInput, blankOrCount, blankOrPrice, isInt, priceText, pricingFor } from '../components/EventPricing.jsx';
 import { Financials, Results, ShoppingList } from '../components/EventTabs.jsx';
+import { recipeColors } from '../palette.js';
 import { DuplicateEventModal } from './EventsPage.jsx';
 
 const optional = (v) => (v == null ? '' : String(v));
@@ -15,7 +16,9 @@ const blankOrInt = (v) => v.trim() === '' || isInt(v);
 const isCount = (v) => isInt(v) && Number(v) > 0;
 /** A sauce's container cost and default price, or null while it can't be worked out. */
 const containerOf = (b, container) => { try { return sauceContainer(b, container); } catch { return null; } };
-const noPricing = () => ({ salePrice: '', discountAmount: '', discountQty: '' });
+const noPricing = () => ({ salePrice: '', discountAmount: '', discountQty: '', servingSize: '' });
+/** Blank (the recipe's own size), or an amount above 0; fractions are fine. */
+const blankOrSize = (v) => v.trim() === '' || (parseAmount(v)?.gt(0) ?? false);
 
 /** Servings in `count` containers of a sauce: whole servings, at least 1. */
 function sauceServings(b, count, container) {
@@ -42,11 +45,43 @@ function quickScroll(to) {
   requestAnimationFrame(step);
 }
 
-export default function EventPlanner() {
+/** An event's saved plan, as the form holds it. */
+function formOf(ev) {
+  return {
+    name: ev.name,
+    isTest: ev.isTest,
+    date: ev.date,
+    guestCount: ev.guestCount == null ? '' : String(ev.guestCount),
+    servings: Object.fromEntries(ev.recipes.map((r) => [r.recipeId, String(r.expectedServings)])),
+    prices: Object.fromEntries(ev.recipes.map((r) => [r.recipeId, {
+      salePrice: optional(r.salePrice),
+      discountAmount: optional(r.discountAmount),
+      discountQty: r.discountQty == null ? '' : String(r.discountQty),
+      servingSize: r.servingSize == null ? '' : toDecimal(r.servingSize).toString(),
+    }])),
+    actualGuests: optional(ev.actualGuests),
+    actualRevenue: optional(ev.actualRevenue),
+    actualCost: optional(ev.actualCost),
+    notes: ev.notes ?? '',
+    vendorFee: optional(ev.vendorFee),
+    sauces: Object.fromEntries(ev.sauces.map((b) => [b.blendId, {
+      servings: String(b.servings),
+      container: b.container,
+      salePrice: optional(b.salePrice),
+    }])),
+  };
+}
+
+// Each event gets its own page state, so edits waiting to save can't go out under the next event's id.
+export default function EventPlannerPage() {
   const { id } = useParams();
+  return <EventPlanner key={id} id={id} />;
+}
+
+function EventPlanner({ id }) {
   const [form, setForm] = useState(null);
   const [loadError, setLoadError] = useState(null);
-  const [status, setStatus] = useState('saved'); // saved | pending | saving | invalid | error
+  const [status, setStatus] = useState('saved'); // saved | pending | saving | invalid | error | conflict
   const [saveError, setSaveError] = useState(null);
   const [tab, setTab] = useState('financials');
   const tabsRef = useRef(null);
@@ -72,48 +107,51 @@ export default function EventPlanner() {
   // while choosing the first ones on a new event.
   const [showAll, setShowAll] = useState(false);
   const summary = useApi(`/events/${id}/summary`);
-  // ?sales=1 opens the sales counter, so a phone can bookmark it.
-  const [params, setParams] = useSearchParams();
-  const selling = params.has('sales');
-  const setSelling = (on) => setParams(on ? { sales: '1' } : {}, { replace: !on });
+  // ?sales=1 goes straight to the POS screen, so a phone can bookmark it.
+  const [params] = useSearchParams();
+  const openPos = useOpenPos();
+  const posUrl = `/pos?event=${id}`;
   const navigate = useNavigate();
   const toast = useToast();
   const lastSaved = useRef(null);
+
+  // The event version this form was edited from; a save names it, and the server refuses one that's out of date.
+  const version = useRef(null);
+  const saves = useRef({ last: Promise.resolve(), running: 0 });
+  const latestForm = useRef(form);
+  latestForm.current = form;
+  const adopt = (ev) => {
+    const f = formOf(ev);
+    version.current = ev.version;
+    lastSaved.current = JSON.stringify(f);
+    setForm(f);
+    setStatus('saved');
+    setSaveError(null);
+  };
 
   useEffect(() => {
     let stale = false;
     api(`/events/${id}`)
       .then((ev) => {
         if (stale) return;
-        const f = {
-          name: ev.name,
-          isTest: ev.isTest,
-          date: ev.date,
-          guestCount: ev.guestCount == null ? '' : String(ev.guestCount),
-          servings: Object.fromEntries(ev.recipes.map((r) => [r.recipeId, String(r.expectedServings)])),
-          prices: Object.fromEntries(ev.recipes.map((r) => [r.recipeId, {
-            salePrice: optional(r.salePrice),
-            discountAmount: optional(r.discountAmount),
-            discountQty: r.discountQty == null ? '' : String(r.discountQty),
-          }])),
-          actualGuests: optional(ev.actualGuests),
-          actualRevenue: optional(ev.actualRevenue),
-          actualCost: optional(ev.actualCost),
-          notes: ev.notes ?? '',
-          vendorFee: optional(ev.vendorFee),
-          sauces: Object.fromEntries(ev.sauces.map((b) => [b.blendId, {
-            servings: String(b.servings),
-            container: b.container,
-            salePrice: optional(b.salePrice),
-          }])),
-        };
         setShowAll(!ev.recipes.length && !ev.sauces.length);
-        lastSaved.current = JSON.stringify(f);
-        setForm(f);
+        adopt(ev);
       })
       .catch((err) => !stale && setLoadError(err.message));
     return () => { stale = true; };
   }, [id]);
+
+  // Saved somewhere else: with nothing unsaved here, take the new plan, so this window's copy doesn't go old.
+  // With edits on the way, leave it to their save, which the server refuses and the conflict notice explains.
+  useWhileVisible(async () => {
+    if (!latestForm.current) return;
+    const ev = await api(`/events/${id}`).catch(() => null);
+    if (!ev || ev.version <= version.current || saves.current.running) return;
+    if (JSON.stringify(latestForm.current) !== lastSaved.current) return;
+    adopt(ev);
+    notifyDataChanged();
+    toast('Updated with changes made in another window');
+  }, 15000);
 
   // Autosave shortly after edits stop, then refresh the summary.
   useEffect(() => {
@@ -128,6 +166,7 @@ export default function EventPlanner() {
       Object.values(form.servings).some((s) => !isInt(s)) ? 'Servings must be whole numbers' :
       Object.values(form.sauces).some((x) => x.count !== undefined && !isCount(x.count)) ? 'Sauce containers must be whole numbers, 1 or more' :
       Object.values(form.sauces).some((x) => !isCount(x.servings)) ? 'Sauce servings must be whole numbers, 1 or more' :
+      allPrices.some((p) => !blankOrSize(p.servingSize)) ? 'Size per serving must be an amount above 0' :
       allPrices.some((p) => !blankOrPrice(p.salePrice)) ? 'Sale prices must be amounts' :
       allPrices.some((p) => !blankOrPrice(p.discountAmount)) ? 'Discounts must be amounts' :
       allPrices.some((p) => !blankOrCount(p.discountQty)) ? 'A discount applies per 1 or more servings' :
@@ -143,17 +182,19 @@ export default function EventPlanner() {
     setSaveError(null);
     const t = setTimeout(async () => {
       setStatus('saving');
-      try {
-        await api(`/events/${id}`, {
+      saves.current.running += 1;
+      // One at a time: each save names the version the one before it returned.
+      const save = saves.current.last.catch(() => {}).then(() => api(`/events/${id}`, {
           method: 'PUT',
           body: {
+            version: version.current,
             name: form.name,
             date: form.date,
             guestCount: form.guestCount,
             vendorFee: priceText(form.vendorFee),
             recipes: Object.entries(form.servings).map(([recipeId, expectedServings]) => {
               const p = form.prices[recipeId] ?? noPricing();
-              return { recipeId, expectedServings, salePrice: priceText(p.salePrice), discountAmount: priceText(p.discountAmount), discountQty: p.discountQty.trim() };
+              return { recipeId, expectedServings, salePrice: priceText(p.salePrice), discountAmount: priceText(p.discountAmount), discountQty: p.discountQty.trim(), servingSize: p.servingSize.trim() && parseAmount(p.servingSize).toString() };
             }),
             sauces: Object.entries(form.sauces).map(([blendId, x]) => ({
               blendId, servings: x.servings.trim(), container: x.container, salePrice: priceText(x.salePrice),
@@ -163,18 +204,24 @@ export default function EventPlanner() {
             actualCost: priceText(form.actualCost),
             notes: form.notes,
           },
-        });
+      }));
+      saves.current.last = save;
+      try {
+        version.current = (await save).version;
         lastSaved.current = snapshot;
         setStatus('saved');
         notifyDataChanged();
       } catch (err) {
-        setStatus('error');
+        setStatus(err.status === 409 ? 'conflict' : 'error');
         setSaveError(err.message);
+      } finally {
+        saves.current.running -= 1;
       }
     }, 600);
     return () => clearTimeout(t);
   }, [form, id]);
 
+  if (params.has('sales')) return <Navigate to={posUrl} replace />;
   if (loadError) return <main className="page"><Notice kind="error">{loadError}</Notice><Link to="/events">Back to events</Link></main>;
   if (!form) return <main className="page"><Spinner /></main>;
 
@@ -186,7 +233,7 @@ export default function EventPlanner() {
       delete servings[r.id];
       delete prices[r.id];
     } else {
-      servings[r.id] = isInt(f.guestCount) ? f.guestCount : String(r.baseServings);
+      servings[r.id] = String(r.baseServings);
       prices[r.id] = noPricing();
     }
     return { ...f, servings, prices };
@@ -208,6 +255,24 @@ export default function EventPlanner() {
   const setPrice = (rid, patch) => setForm((f) => ({ ...f, prices: { ...f.prices, [rid]: { ...(f.prices[rid] ?? noPricing()), ...patch } } }));
   const applyGuests = () => setForm((f) => ({ ...f, servings: Object.fromEntries(Object.keys(f.servings).map((k) => [k, f.guestCount])) }));
 
+  const loadLatest = async () => {
+    try {
+      adopt(await api(`/events/${id}`));
+      notifyDataChanged();
+    } catch (err) {
+      setSaveError(err.message);
+    }
+  };
+  // Save this window's plan over the newer one, by asking for the version it now has.
+  const keepMine = async () => {
+    try {
+      version.current = (await api(`/events/${id}`)).version;
+      setForm((f) => ({ ...f }));
+    } catch (err) {
+      setSaveError(err.message);
+    }
+  };
+
   const remove = async () => {
     await api(`/events/${id}`, { method: 'DELETE' });
     notifyDataChanged();
@@ -228,12 +293,9 @@ export default function EventPlanner() {
   const shownRecipes = folded ? chosen : [...chosen, ...unchosen];
   const shownSauces = folded ? chosenSauces : [...chosenSauces, ...unchosenSauces];
   const hiddenCount = unchosen.length + unchosenSauces.length;
-  // What Record sales offers: the recipes, then the sauces sold by the container.
-  const menu = s ? [
-    ...s.recipes.map((r) => ({ ...r, key: r.recipeId })),
-    ...s.sauces.map((b) => ({ ...b, key: `blend:${b.blendId}` })),
-  ] : [];
-  const statusText = { saved: 'All changes saved', pending: 'Unsaved changes', saving: 'Saving…', invalid: saveError, error: saveError }[status];
+  // What's chosen, whether saved yet or not; the same colors as the POS screen.
+  const colors = recipeColors([...Object.keys(form.servings), ...Object.keys(form.sauces).map((bid) => `blend:${bid}`)]);
+  const statusText = { saved: 'All changes saved', pending: 'Unsaved changes', saving: 'Saving…', invalid: saveError, error: saveError, conflict: 'Not saved' }[status];
 
   return (
     <main className="page">
@@ -241,16 +303,28 @@ export default function EventPlanner() {
         <div>
           <Link to="/events" className="muted">Events</Link>
           <h1>{form.name || 'Untitled event'}<TestBadge item={form} /></h1>
-          <span className="save-state" role="status" style={status === 'invalid' || status === 'error' ? { color: 'var(--tomato)' } : undefined}>
+          <span className="save-state" role="status" style={status === 'invalid' || status === 'error' || status === 'conflict' ? { color: 'var(--tomato)' } : undefined}>
             {status === 'saving' && <Spinner />}{statusText}
           </span>
         </div>
-        <button className="btn primary" onClick={() => setSelling(true)} disabled={!anyChosen} title={anyChosen ? 'Count servings sold and given away during the event' : 'Add recipes first'}>
-          <Icon.cart /> Record sales
-        </button>
+        <div className="form-actions">
+          <button className="btn primary" onClick={openPos(posUrl)} disabled={!anyChosen} title={anyChosen ? 'Take orders on the POS screen' : 'Add recipes first'}>
+            <Icon.cart /> Record sales
+          </button>
+        </div>
       </div>
-      {selling && (
-        s ? <SalesModal eventId={id} eventName={form.name || 'Untitled event'} items={menu} onClose={() => setSelling(false)} /> : <Spinner />
+
+      {status === 'conflict' && (
+        <div className="notice error plan-conflict" role="alert">
+          <Icon.alert />
+          <div>
+            <b>This event was changed somewhere else, so your edits here aren't saved.</b> This window was holding an older copy of the plan.
+            <div className="plan-conflict-actions">
+              <button className="btn small primary" onClick={loadLatest}>Load the saved plan</button>
+              <button className="btn small" onClick={keepMine}>Replace it with this window's plan</button>
+            </div>
+          </div>
+        </div>
       )}
 
       <section className="panel panel-pad">
@@ -289,7 +363,8 @@ export default function EventPlanner() {
                 <tr>
                   <th style={{ width: 40 }}><span className="visually-hidden">Include</span></th>
                   <th>Recipe</th>
-                  <th className="num">Makes</th>
+                  <th className="num c-makes" title="What one batch of the recipe makes, in servings of the size set here">Recipe yield</th>
+                  <th title="What one serving is at this event, like 3 tacos. Blank: the recipe’s own size. Cost and price follow it.">Size / serving</th>
                   <th className="num">Cost / serving</th>
                   <th className="num" title="Per serving at this event. Starts at the recipe’s target price; change it here for this event only.">Sale price</th>
                   <th title="Optional deal, e.g. buy 2, get $1 off: $1.00 off per 2 servings">Discount</th>
@@ -301,34 +376,46 @@ export default function EventPlanner() {
                 {shownRecipes.map((r) => {
                   const on = r.id in form.servings;
                   const p = form.prices[r.id] ?? noPricing();
+                  const served = eventServing(r, on ? parseAmount(p.servingSize) : null);
+                  const showTotal = on && served.servingLabel && isInt(form.servings[r.id]);
                   return (
-                    <tr key={r.id} className={on ? '' : 'off'}>
+                    <tr key={r.id} className={on ? '' : 'off'} style={on ? { '--tile': colors.get(r.id) } : undefined}>
                       <td className="c-check"><input type="checkbox" checked={on} onChange={() => toggle(r)} aria-label={`Include ${r.name}`} style={{ width: 18, height: 18, accentColor: 'var(--basil)' }} /></td>
                       <td className="c-name"><Link to={`/recipes/${r.id}`} style={{ color: 'inherit', fontWeight: 600 }}>{r.name}</Link></td>
-                      <td className="num c-makes" data-label="Makes">{r.baseServings}</td>
-                      <td className="num c-cost" data-label="Cost">{money(r.costPerServing)}</td>
+                      <td className="num c-makes" data-label="Recipe yield">{qty(toDecimal(r.baseServings).div(served.ratio), 1)}</td>
+                      <td className="c-size" data-label="Size / serving">
+                        {on ? (
+                          <span className="serving-size">
+                            <input className="input num" inputMode="decimal" value={p.servingSize} placeholder={qty(served.recipeSize, 2)} aria-label={`Size per serving of ${r.name}, in ${served.unit}`}
+                              aria-invalid={!blankOrSize(p.servingSize)} onChange={(e) => setPrice(r.id, { servingSize: e.target.value })} />
+                            <span className="muted">{served.unit}</span>
+                          </span>
+                        ) : amountLabel(served.recipeSize, served.unit)}
+                      </td>
+                      <td className="num c-cost" data-label="Cost">{money(served.costPerServing)}</td>
                       <td className="num c-price" data-label="Price">
                         {on
-                          ? <SalePriceInput value={p.salePrice} recipePrice={r.recommendedPrice} label={`Sale price per serving of ${r.name}`} onChange={(v) => setPrice(r.id, { salePrice: v })} />
-                          : money(r.recommendedPrice)}
+                          ? <SalePriceInput value={p.salePrice} recipePrice={served.recommendedPrice} label={`Sale price per serving of ${r.name}`} onChange={(v) => setPrice(r.id, { salePrice: v })} />
+                          : money(served.recommendedPrice)}
                       </td>
                       <td className="c-deal" data-label="Deal">
                         {on
-                          ? <DealInput amount={p.discountAmount} qty={p.discountQty} label={r.name} onChange={(patch) => setPrice(r.id, patch)} />
+                          ? <DealToggle amount={p.discountAmount} qty={p.discountQty} label={r.name} onChange={(patch) => setPrice(r.id, patch)} />
                           : '—'}
                       </td>
-                      <td className="num nowrap c-margin" data-label="Margin"><MarginCell pricing={pricingFor(r, on ? p : undefined)} /></td>
+                      <td className="num nowrap c-margin" data-label="Margin"><MarginCell pricing={pricingFor(served, on ? p : undefined)} /></td>
                       <td className="num c-serv" data-label="Servings">
                         {on ? (
-                          <input className="input num" style={{ width: 96, marginLeft: 'auto' }} inputMode="numeric" value={form.servings[r.id]}
+                          <input className="input num" style={{ width: 76 }} inputMode="numeric" value={form.servings[r.id]}
                             aria-label={`Servings of ${r.name}`} aria-invalid={!isInt(form.servings[r.id])} onChange={(e) => setServings(r.id, e.target.value)} />
                         ) : '—'}
+                        {showTotal && <div><b className="serving-total">{amountLabel(toDecimal(form.servings[r.id]).times(parseAmount(p.servingSize)), served.unit)} in all</b></div>}
                       </td>
                     </tr>
                   );
                 })}
                 {shownSauces.length > 0 && (
-                  <tr className="group-row"><td colSpan={8}>Sauces <span className="muted">· sold by the serving, made in whole containers</span></td></tr>
+                  <tr className="group-row"><td colSpan={9}>Sauces <span className="muted">· sold by the serving, made in whole containers</span></td></tr>
                 )}
                 {shownSauces.map((b) => {
                   const on = b.id in form.sauces;
@@ -337,7 +424,7 @@ export default function EventPlanner() {
                   const costed = c && { costPerServing: c.costPerServing ?? '0', recommendedPrice: c.recommendedPrice };
                   const count = x.count ?? (on ? String(containersOf(b, x)) : '');
                   return (
-                    <tr key={b.id} className={`sauce-row ${on ? '' : 'off'}`}>
+                    <tr key={b.id} className={`sauce-row ${on ? '' : 'off'}`} style={on ? { '--tile': colors.get(`blend:${b.id}`) } : undefined}>
                       <td className="c-check"><input type="checkbox" checked={on} onChange={() => toggleSauce(b)} aria-label={`Include ${b.name}`} style={{ width: 18, height: 18, accentColor: 'var(--basil)' }} /></td>
                       <td className="c-name"><Link to={`/spice-lab/${b.id}`} style={{ color: 'inherit', fontWeight: 600 }}>{b.name}</Link> <span className="badge">Sauce</span></td>
                       <td className="num c-makes" data-label="Containers">
@@ -351,8 +438,9 @@ export default function EventPlanner() {
                             </select>
                           </span>
                         ) : b.container}
-                        {c && <div><small className="muted">{c.containerOz} oz, {qty(c.servingsPerContainer, 1)} servings each</small></div>}
+                        {c && <div className="sauce-holds"><small className="muted"><span>{c.containerOz} oz,</span> <span>{qty(c.servingsPerContainer, 1)} servings each</span></small></div>}
                       </td>
+                      <td className="muted c-size c-none">{c ? `${qty(c.servingOz, 2)} oz` : '—'}</td>
                       <td className="num c-cost" data-label="Cost">{c?.costPerServing ? money(c.costPerServing) : '—'}</td>
                       <td className="num c-price" data-label="Price">
                         {on
@@ -395,7 +483,7 @@ export default function EventPlanner() {
         {!s ? <Spinner /> : !s.recipes.length && !s.sauces.length ? (
           <div className="panel empty"><p>Select recipes or sauces above to project costs and build the shopping list.</p></div>
         ) : tab === 'financials' ? <Financials s={s} eventId={id} />
-          : tab === 'sales' ? <SalesTable eventId={id} onRecord={() => setSelling(true)} />
+          : tab === 'sales' ? <SalesTable eventId={id} onRecord={openPos(posUrl)} />
           : tab === 'results' ? <Results s={s} form={form} set={set} setForm={setForm} eventId={id} />
           : <ShoppingList s={s} eventId={id} title={form.name || 'Untitled event'} date={form.date} guests={form.guestCount} />}
         {s?.warnings.length > 0 && <Notice>{s.warnings.map((w) => <div key={w}>{w}</div>)}</Notice>}

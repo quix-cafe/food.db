@@ -4,7 +4,14 @@ import {
   calculateRecipe,
   summarizeEvent,
   eventPricing,
+  eventServing,
+  menuItemName,
+  amountLabel,
   saleItem,
+  anticipateEvent,
+  sauceContainer,
+  orderTimes,
+  orderTimingSummary,
   lineCost,
   unitPrice,
   recommendedPrice,
@@ -155,6 +162,40 @@ test('an amount set for the event replaces the scaled total and adjusts the even
   assert.equal(set.recipes[0].scaledCost, '18.7500'); // per-recipe figures stay as the recipes say
 });
 
+test('a serving set for one event: 3 tacos for $14 scales the cost, the food and the default price', () => {
+  // 30 tacos for $30 and $4.50 each: a recipe's serving is one taco.
+  const recipe = { recipeId: 'a', name: 'Chicken Taco', baseServings: 30, totalYield: '30', yieldUnit: 'tacos', targetPrice: '4.50', expectedServings: 20,
+    lines: [{ ingredientId: 'c', name: 'Chicken', uom: 'lb', packPrice: '30', packSize: '10', amount: '10' }] };
+  const r = summarizeEvent([{ ...recipe, servingSize: '3', salePrice: '14' }]);
+  const [t] = r.recipes;
+  // 20 servings are 60 tacos: 20 lb of chicken at $3, sold at $14 a serving.
+  assert.deepEqual([t.expectedServings, t.costPerServing, t.salePrice, t.recommendedPrice, t.servingLabel], ['20', '3.0000', '14.00', '13.50', '3 tacos']);
+  assert.deepEqual([t.scaledCost, t.revenue, t.profit, t.marginPerServing], ['60.0000', '280.00', '220.00', '11.0000']);
+  assert.deepEqual([r.shoppingList[0].amount, r.shoppingList[0].packsToBuy], ['20.0000', '2']);
+  assert.equal(menuItemName(t), 'Chicken Taco (3 tacos)');
+  // No size: as before, and a deal still counts event servings.
+  const plain = summarizeEvent([recipe]).recipes[0];
+  assert.deepEqual([plain.costPerServing, plain.salePrice, plain.scaledCost, plain.servingLabel], ['1.0000', '4.50', '20.0000', null]);
+  assert.equal(menuItemName(plain), 'Chicken Taco');
+  assert.equal(summarizeEvent([{ ...recipe, servingSize: '3', salePrice: '14', discountAmount: '1', discountQty: 2 }]).recipes[0].revenue, '270.00');
+});
+
+test('a serving is measured in the recipe’s unit, against the recipe’s own size', () => {
+  // Fuchka: 15 servings of 5 puff, so 10 puff are 2 of its servings.
+  const fuchka = { baseServings: 15, totalYield: '75', yieldUnit: 'puff', costPerServing: '1.1650', recommendedPrice: '10.00' };
+  const big = eventServing(fuchka, '10');
+  assert.deepEqual([big.ratio.toString(), big.costPerServing, big.recommendedPrice, big.servingLabel], ['2', '2.3300', '20.00', '10 puff']);
+  assert.deepEqual([eventServing(fuchka).ratio.toString(), eventServing(fuchka).recipeSize.toString(), eventServing(fuchka).servingLabel], ['1', '5', null]);
+  // Nothing usable falls back to the recipe's size; without a total yield, the size is its servings.
+  assert.equal(eventServing(fuchka, '0').ratio.toString(), '1');
+  assert.equal(eventServing(fuchka, null).ratio.toString(), '1');
+  const noYield = eventServing({ baseServings: 4, costPerServing: '1' }, '2');
+  assert.deepEqual([noYield.ratio.toString(), noYield.unit, noYield.servingLabel], ['2', 'servings', '2 servings']);
+  assert.equal(amountLabel(1, 'tacos'), '1 taco');
+  assert.equal(amountLabel('1.5', 'tacos'), '1.5 tacos');
+  assert.equal(amountLabel(1, 'glass'), '1 glass');
+});
+
 test('an event price replaces the recipe price, and a deal comes off every N servings', () => {
   // Cost $1.20 a serving at 70% margin: the recipe sells for $4.00.
   const recipe = { recipeId: 'a', name: 'Tacos', baseServings: 10, expectedServings: 25, targetMargin: 70,
@@ -191,4 +232,69 @@ test('a vendor fee comes off the event profit, not the food cost', () => {
   const s = summarizeEvent([recipe], {}, { vendorFee: '40' });
   assert.deepEqual([s.totalCost, s.revenue, s.vendorFee, s.profit, s.marginPercent], ['30.0000', '100.00', '40.00', '30.00', '30.0']);
   assert.equal(summarizeEvent([recipe]).vendorFee, '0.00');
+});
+
+test('the event orders are probably for: today, then open orders, then the next, then the latest', () => {
+  const ev = (id, date, more = {}) => ({ id, date, recipeCount: 1, sauceCount: 0, openOrders: 0, lastOrderAt: null, ...more });
+  const pick = (events) => anticipateEvent(events, '2026-11-10')?.id;
+  const past = ev('past', '2026-11-01');
+  const older = ev('older', '2026-10-01');
+  const soon = ev('soon', '2026-11-12');
+  const later = ev('later', '2026-12-01');
+  const open = ev('open', '2026-11-09', { openOrders: 2 });
+  const today = ev('today', '2026-11-10');
+  assert.equal(pick([]), undefined);
+  assert.equal(pick([older, past]), 'past');
+  assert.equal(pick([past, later, soon]), 'soon');
+  assert.equal(pick([soon, past, open]), 'open');
+  assert.equal(pick([open, soon, today]), 'today'); // yesterday's forgotten order doesn't outrank today
+  // Two today: the one with the queue, then the one with the latest order.
+  assert.equal(pick([today, ev('busy', '2026-11-10', { openOrders: 1 })]), 'busy');
+  assert.equal(pick([ev('a', '2026-11-10', { lastOrderAt: '2026-11-10T10:00:00.000Z' }), ev('b', '2026-11-10', { lastOrderAt: '2026-11-10T11:00:00.000Z' })]), 'b');
+  // Today wins even with nothing to sell yet, unless another event today has a menu, a sauce counting as one.
+  const empty = ev('empty', '2026-11-10', { recipeCount: 0 });
+  assert.equal(pick([empty, soon, open]), 'empty');
+  assert.equal(pick([empty, ev('sauce', '2026-11-10', { recipeCount: 0, sauceCount: 1 })]), 'sauce');
+  // Other days: skipped while another event has a menu.
+  assert.equal(pick([ev('emptySoon', '2026-11-11', { recipeCount: 0 }), later]), 'later');
+});
+
+test('order timing: waiting, making and total, counting up on the current stage', () => {
+  const t = (mmss) => `2026-11-10T12:${mmss}.000Z`;
+  const now = new Date(t('30:00')).getTime();
+  const placed = { createdAt: t('10:00') };
+  assert.deepEqual(orderTimes({ ...placed, status: 'placed' }, now), { waiting: 1200, making: null, total: 1200, running: 'waiting' });
+  assert.deepEqual(orderTimes({ ...placed, status: 'in_progress', inProgressAt: t('15:00') }, now), { waiting: 300, making: 900, total: 1200, running: 'making' });
+  const done = { ...placed, status: 'completed', inProgressAt: t('15:00'), completedAt: t('25:30') };
+  assert.deepEqual(orderTimes(done, now), { waiting: 300, making: 630, total: 930, running: null });
+  // Never started: only the total. Handed over on the spot: nothing.
+  assert.deepEqual(orderTimes({ ...placed, status: 'completed', completedAt: t('12:00') }, now), { waiting: null, making: null, total: 120, running: null });
+  assert.deepEqual(orderTimes({ ...placed, status: 'completed' }, now), { waiting: null, making: null, total: null, running: null });
+  // Cancelled: what was reached stays, and nothing runs.
+  assert.deepEqual(orderTimes({ ...placed, status: 'cancelled', inProgressAt: t('15:00') }, now), { waiting: 300, making: null, total: null, running: null });
+  // A browser clock behind the server's never shows negative time.
+  assert.equal(orderTimes({ createdAt: t('31:00'), status: 'placed' }, now).waiting, 0);
+
+  const summary = orderTimingSummary([
+    done,
+    { ...placed, status: 'completed', completedAt: t('12:00') },
+    { ...placed, status: 'completed' }, // handed over: not timed
+    { ...done, status: 'cancelled' }, // cancelled: not counted
+    { ...placed, status: 'placed' },
+  ]);
+  assert.deepEqual(summary, { count: 2, waiting: 300, making: 630, total: 525 });
+  assert.deepEqual(orderTimingSummary([]), { count: 0, waiting: null, making: null, total: null });
+});
+
+test('a sauce’s own sale price replaces its cost at the default margin', () => {
+  const blend = { name: 'Green', container: '1 qt', batchSize: '32', servingOz: '2', cost: '8' }; // $0.50 a serving
+  assert.equal(sauceContainer(blend).recommendedPrice, '1.67');
+  assert.equal(sauceContainer({ ...blend, salePrice: '3' }).recommendedPrice, '3.00');
+  assert.equal(sauceContainer({ ...blend, salePrice: null }).recommendedPrice, '1.67');
+  assert.equal(sauceContainer({ ...blend, salePrice: '0' }).recommendedPrice, '0.00'); // given away is a price
+  // Unpriced ingredients: no default, but the sauce's own price stands.
+  assert.equal(sauceContainer({ ...blend, cost: null }).recommendedPrice, null);
+  const own = sauceContainer({ ...blend, cost: null, salePrice: '3' });
+  assert.deepEqual([own.recommendedPrice, own.costPerServing], ['3.00', null]);
+  assert.equal(sauceContainer({ ...blend, salePrice: '3' }, '1 gal').recommendedPrice, '3.00'); // per serving, whatever the container
 });

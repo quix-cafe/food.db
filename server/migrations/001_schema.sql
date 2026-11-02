@@ -147,7 +147,8 @@ CREATE TABLE spice_blend_items (
 CREATE INDEX spice_blend_items_ingredient ON spice_blend_items (ingredient_id);
 
 -- target_margin keeps 6 decimals so a margin derived from a typed target price reproduces
--- that price to the cent.
+-- that price to the cent. target_price is a menu price set by hand: it stays put when ingredient
+-- costs change, and the margin moves instead (null: the price follows the cost at target_margin).
 CREATE TABLE recipes (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name          text NOT NULL,
@@ -155,6 +156,7 @@ CREATE TABLE recipes (
   total_yield   numeric(14,4),
   yield_unit    text,
   target_margin numeric(9,6) NOT NULL DEFAULT 70 CHECK (target_margin >= 0 AND target_margin < 100),
+  target_price  numeric(12,2) CHECK (target_price > 0),
   created_at    timestamptz NOT NULL DEFAULT now(),
   updated_at    timestamptz NOT NULL DEFAULT now(),
   is_test       boolean NOT NULL DEFAULT is_test_default()

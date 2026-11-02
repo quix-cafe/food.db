@@ -1,17 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { Cell, Pie, PieChart, Tooltip } from 'recharts';
-import { BLEND_UNITS, BLEND_UOM, SAUCE_CONTAINERS, SAUCE_UNITS, SAUCE_UOM, SPICE_GRAMS_PER_TSP, calculateBlend, normalizeUnit, parseAmount } from '@kitchen/shared';
+import { BLEND_UNITS, BLEND_UOM, SAUCE_CONTAINERS, SAUCE_UNITS, SAUCE_UOM, SPICE_GRAMS_PER_TSP, calculateBlend, normalizeUnit, parseAmount, sauceContainer, unitsForName } from '@kitchen/shared';
 import { api, notifyDataChanged } from '../api.js';
 import { PHONE, useApi, useLeaveGuard, useMedia, useRowReorder } from '../hooks.js';
 import { Decimal, date, money, pack, perUnit, qty, toDecimal, unitMoney } from '../format.js';
 import { OTHER, SERIES } from '../palette.js';
+import { blankOrPrice, priceText } from '../components/EventPricing.jsx';
 import IngredientCombobox from '../components/IngredientCombobox.jsx';
 import { Field, Icon, LeaveModal, Modal, Notice, SaveButton, Spinner, TestBadge, useToast } from '../components/ui.jsx';
 import { IngredientDrawer } from '../components/IngredientDrawer.jsx';
 
 /** A spice keeps the color of its position in the blend; past the palette it's "Other". */
 const colorAt = (i) => SERIES[i] ?? OTHER;
+
+// A sauce's scaler: anything up to a gallon on the slider, by the quarter quart; more can be typed.
+const QUART_OZ = SAUCE_CONTAINERS['1 qt'];
+const QT_STEP = 0.25;
+const MAX_SLIDER_QT = 4;
 
 /**
  * Donut of a blend by weight. items: calculateBlend items, in blend order. Spices beyond the
@@ -23,12 +29,12 @@ function BlendPie({ items, totalGrams, size = 220, interactive = true }) {
   items.forEach((it, i) => {
     const grams = toDecimal(it.grams);
     if (!grams || grams.isZero()) return;
-    if (i < SERIES.length) slices.push({ name: it.name || 'Unnamed spice', value: grams.toNumber(), share: it.share, label: `${it.amount} ${it.unit}`, color: colorAt(i) });
+    if (i < SERIES.length) slices.push({ name: it.name || 'Unnamed spice', value: grams.toNumber(), share: it.share, label: it.unit === BLEND_UOM ? `${qty(grams, 0)} g` : `${it.amount} ${it.unit} (${qty(grams, 0)} g)`, color: colorAt(i) });
     else other += grams.toNumber();
   });
   if (other) {
     const share = toDecimal(totalGrams)?.isZero() ? null : ((other / Number(totalGrams)) * 100).toFixed(1);
-    slices.push({ name: 'Other spices', value: other, share, label: `${qty(other)} g`, color: OTHER });
+    slices.push({ name: 'Other spices', value: other, share, label: `${qty(other, 0)} g`, color: OTHER });
   }
   if (!slices.length) {
     return <div className="blend-pie-empty" style={{ width: size, height: size }}>Add spices to see the breakdown</div>;
@@ -44,7 +50,7 @@ function BlendPie({ items, totalGrams, size = 220, interactive = true }) {
       </PieChart>
       {interactive && (
         <div className="blend-pie-center" aria-hidden="true">
-          <b>{qty(totalGrams)}</b>
+          <b>{qty(totalGrams, 0)}</b>
           <span>g</span>
         </div>
       )}
@@ -94,8 +100,8 @@ export default function SpiceLabPage() {
               <h3><Link to={`/spice-lab/${b.id}`}>{b.name}</Link> <TestBadge item={b} /></h3>
               <span className="muted">
                 {b.kind === 'sauce'
-                  ? `Sauce: ${b.items.length} ingredient${b.items.length === 1 ? '' : 's'}, ${b.container} (${qty(b.batchSize)} oz)${b.servingOz ? `, ${qty(b.servingOz)} oz servings` : ''}`
-                  : `${b.items.length} spice${b.items.length === 1 ? '' : 's'}, ${qty(b.totalGrams)} g per batch`}
+                  ? `Sauce: ${b.items.length} ingredient${b.items.length === 1 ? '' : 's'}, ${b.container} (${qty(b.batchSize)} oz)${b.servingOz ? `, ${qty(b.servingOz)} oz servings` : ''}${b.salePrice ? ` at ${money(b.salePrice)}` : ''}`
+                  : `${b.items.length} spice${b.items.length === 1 ? '' : 's'}, ${qty(b.totalGrams, 0)} g per batch`}
               </span>
               <div className="blend-swatches">
                 {b.items.slice(0, SERIES.length).map((it, i) => <span key={i}><i style={{ background: colorAt(i) }} />{it.name}</span>)}
@@ -110,7 +116,7 @@ export default function SpiceLabPage() {
 }
 
 let nextKey = 1;
-const blankFor = (kind) => ({ name: '', kind, container: kind === 'sauce' ? '1 qt' : null, notes: '', servings: '1', servingOz: kind === 'sauce' ? '2' : '', items: [] });
+const blankFor = (kind) => ({ name: '', kind, container: kind === 'sauce' ? '1 qt' : null, notes: '', servings: '1', servingOz: kind === 'sauce' ? '2' : '', salePrice: '', items: [] });
 
 const fromServer = (b) => ({
   name: b.name,
@@ -119,6 +125,7 @@ const fromServer = (b) => ({
   notes: b.notes ?? '',
   servings: String(b.servings),
   servingOz: b.servingOz ? toDecimal(b.servingOz).toString() : '',
+  salePrice: b.salePrice ?? '',
   isTest: b.isTest,
   items: b.items.map((it) => ({
     key: nextKey++,
@@ -139,7 +146,7 @@ const apiItems = (items) => items.map(({ ingredientId, name, amount, unit }) => 
 const apiBody = (f) => ({
   name: f.name, kind: f.kind, container: f.container, notes: f.notes, items: apiItems(f.items),
   // A sauce's servings follow from its serving size; a blend's are typed.
-  ...(f.kind === 'sauce' ? { servingOz: f.servingOz } : { servings: f.servings }),
+  ...(f.kind === 'sauce' ? { servingOz: f.servingOz, salePrice: priceText(f.salePrice) } : { servings: f.servings }),
 });
 const savedShape = (f) => JSON.stringify(apiBody(f));
 const wholeNumber = (v) => /^\d+$/.test(String(v).trim()) && Number(v) > 0;
@@ -167,6 +174,7 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
     return { ...f, items };
   }));
   const [needed, setNeeded] = useState('1'); // servings to scale to; never saved
+  const [makeQt, setMakeQt] = useState(null); // a sauce's quarts to scale to; null: one container. Never saved
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -175,6 +183,7 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
       setForm(blank);
       setSaved(savedShape(blank));
       setNeeded(blank.servings);
+      setMakeQt(null);
       return;
     }
     let stale = false;
@@ -185,6 +194,7 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
         setForm(f);
         setSaved(savedShape(f));
         setNeeded(f.servings);
+        setMakeQt(null);
       })
       .catch((err) => !stale && setLoadError(err.message));
     return () => { stale = true; };
@@ -221,14 +231,14 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
   };
 
   // A sauce is written for one container: picking another scales every amount to fill it.
-  const setContainer = (container) => setForm((f) => {
+  const setContainer = (container) => { setMakeQt(null); setForm((f) => {
     const ratio = new Decimal(SAUCE_CONTAINERS[container]).div(SAUCE_CONTAINERS[f.container]);
     const items = f.items.map((it) => {
       const a = parseAmount(it.amount);
       return a ? { ...it, amount: a.times(ratio).toDecimalPlaces(4).toString() } : it;
     });
     return { ...f, container, items };
-  });
+  }); };
 
   const setItem = (key, patch) => setForm((f) => ({ ...f, items: f.items.map((it) => (it.key === key ? { ...it, ...patch } : it)) }));
   const removeItem = (key) => setForm((f) => ({ ...f, items: f.items.filter((it) => it.key !== key) }));
@@ -246,12 +256,20 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
     vendor: ing.latestVendor, priceDate: ing.latestPurchaseDate,
   });
 
-  const problems = form.items.some(amountProblem) || !form.name.trim() || (sauce ? servingProblem(form) : !wholeNumber(form.servings));
+  const problems = form.items.some(amountProblem) || !form.name.trim() || (sauce ? servingProblem(form) || !blankOrPrice(form.salePrice) : !wholeNumber(form.servings));
 
-  // A blend scales to the servings needed (only the view changes); a sauce is made by the container.
+  // A blend scales to the servings needed, a sauce to the quarts being made; only the view changes.
   const base = wholeNumber(form.servings) ? Number(form.servings) : 1;
-  const scale = !sauce && wholeNumber(needed) ? new Decimal(needed).div(base) : new Decimal(1);
+  const containerQt = sauce ? new Decimal(SAUCE_CONTAINERS[form.container]).div(QUART_OZ) : null;
+  const qtText = sauce ? makeQt ?? containerQt.toString() : '';
+  const quarts = sauce ? parseAmount(qtText) : null;
+  const quartsOk = !!quarts && quarts.gt(0);
+  const scale = sauce
+    ? (quartsOk ? quarts.div(containerQt) : new Decimal(1))
+    : (wholeNumber(needed) ? new Decimal(needed).div(base) : new Decimal(1));
   const scaled = !scale.eq(1);
+  const qtSliderMax = Math.max(MAX_SLIDER_QT, quartsOk ? quarts.toNumber() : 0);
+  const qtSlider = quartsOk ? Math.max(QT_STEP, quarts.toNumber()) : containerQt?.toNumber();
   const sliderMax = Math.max(50, base * 10, wholeNumber(needed) ? Number(needed) : 0);
   const save = async () => {
     setSaving(true);
@@ -295,6 +313,13 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
   const batch = toDecimal(breakdown.batchSize);
   const servingOz = sauce && !servingProblem(form) ? toDecimal(form.servingOz) : null;
   const perContainer = servingOz ? batch.div(servingOz) : null;
+  // What a serving costs, what it'd sell for at the default margin, and the margin the price set makes.
+  const servingCost = servingOz && breakdown.cost ? toDecimal(breakdown.cost).times(servingOz).div(batch) : null;
+  const marginPrice = servingCost && sauceContainer({ ...breakdown, name: form.name, container: form.container, salePrice: null }).recommendedPrice;
+  const ownPrice = sauce && blankOrPrice(form.salePrice) ? toDecimal(priceText(form.salePrice)) : null;
+  const priceHint = ownPrice && servingCost && ownPrice.gt(0) ? `Per serving, ${new Decimal(1).minus(servingCost.div(ownPrice)).times(100).toFixed(1)}% margin`
+    : !ownPrice && marginPrice ? `Per serving. Left blank: ${money(marginPrice)} at the default margin`
+    : 'Per serving';
 
   return (
     <main className="page">
@@ -328,6 +353,13 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
                   <span aria-hidden="true">{SAUCE_UOM}</span>
                 </span>
               </Field>
+              <Field label="Sale price" hint={priceHint}>
+                <span className="money-input">
+                  <span aria-hidden="true">$</span>
+                  <input className="input num" inputMode="decimal" value={form.salePrice} placeholder={marginPrice ?? '0.00'} aria-label="Sale price per serving" aria-invalid={!blankOrPrice(form.salePrice)}
+                    onChange={(e) => setForm({ ...form, salePrice: e.target.value })} />
+                </span>
+              </Field>
             </>
           ) : (
             <Field label="One batch makes" hint="Servings, saved with the blend">
@@ -351,6 +383,22 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
             <small>Scales the amounts below; the saved blend doesn’t change.</small>
           </div>
         )}
+        {sauce && (
+          <div className="margin-slider blend-scale">
+            <div className="margin-slider-head">
+              <label htmlFor="quarts-to-make">Quarts to make</label>
+              <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <span className={scaled ? 'scaled' : 'muted'}>×{scale.toDecimalPlaces(2).toString()}</span>
+                <input className="input num" style={{ width: 80 }} inputMode="decimal" value={qtText} aria-label="Quarts to make (number)"
+                  title="Fractions work: 1/2, 1 1/2, ½" aria-invalid={!quartsOk} onChange={(e) => setMakeQt(e.target.value)} />
+              </span>
+            </div>
+            <input id="quarts-to-make" type="range" min={QT_STEP} max={qtSliderMax} step={QT_STEP} value={qtSlider}
+              onChange={(e) => setMakeQt(e.target.value)}
+              style={{ '--fill': `${((qtSlider - QT_STEP) / (qtSliderMax - QT_STEP)) * 100}%` }} />
+            <small>Scales the amounts and weights below; the saved sauce stays at one {form.container} container.</small>
+          </div>
+        )}
       </section>
 
       <section className="panel">
@@ -367,7 +415,8 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
                 <th className="num">In g</th>
                 <th className="num">Share</th>
                 <th className="num" title={`Unit price × amount used, from the ${noun}'s latest purchase`}>Total cost</th>
-                {scaled && <th className="num" title="Amount × servings needed ÷ servings one batch makes">Scaled amount</th>}
+                {scaled && <th className="num" title={sauce ? 'Amount × quarts to make ÷ quarts in one container' : 'Amount × servings needed ÷ servings one batch makes'}>Scaled amount</th>}
+                {scaled && <th className="num">Scaled g</th>}
                 {scaled && <th className="num">Scaled cost</th>}
                 <th><span className="visually-hidden">Remove</span></th>
               </tr>
@@ -375,9 +424,9 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
             <tbody>
               {form.items.map((it, i) => {
                 const b = breakdown.items[i];
-                // Offer the linked ingredient's own unit too, so a "box" of garlic can be costed.
+                // Offer the linked ingredient's own unit too, so a "box" of garlic can be costed, and cloves of it.
                 const own = it.uom ? normalizeUnit(it.uom) ?? it.uom.trim().toLowerCase() : null;
-                const units = [...new Set([...(sauce ? SAUCE_UNITS : BLEND_UNITS), own, it.unit].filter(Boolean))];
+                const units = [...new Set([...(sauce ? SAUCE_UNITS : BLEND_UNITS), ...unitsForName(it.name), own, it.unit].filter(Boolean))];
                 const priced = it.ingredientId && toDecimal(it.packPrice) !== null;
                 return (
                   <tr key={it.key} {...rowProps(i)}>
@@ -412,16 +461,17 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
                         </select>
                       </span>
                     </td>
-                    <td className="num muted">{b?.grams ? qty(b.grams) : '—'}</td>
+                    <td className="num muted">{b?.grams ? qty(b.grams, 0) : '—'}</td>
                     <td className="num">{b?.share ? `${b.share}%` : '—'}</td>
                     <td className="num" style={{ fontWeight: 650 }}>{b?.cost ? money(b.cost) : priced ? <span title={`${it.unit} can’t be converted to ${it.uom}: set what 1 ${it.uom} weighs in the ingredient’s details`}>—</span> : '—'}</td>
-                    {scaled && <td className="num nowrap scaled">{amountProblem(it) ? '—' : `${qty(parseAmount(it.amount).times(scale))} ${it.unit}`}</td>}
+                    {scaled && <td className="num nowrap scaled">{amountProblem(it) ? '—' : `${qty(parseAmount(it.amount).times(scale), it.unit === BLEND_UOM ? 0 : 3)} ${it.unit}`}</td>}
+                    {scaled && <td className="num scaled">{b?.grams ? qty(toDecimal(b.grams).times(scale), 0) : '—'}</td>}
                     {scaled && <td className="num scaled">{b?.cost ? money(toDecimal(b.cost).times(scale)) : '—'}</td>}
                     <td><button className="icon-btn" aria-label={`Remove ${it.name || `${noun} ${i + 1}`}`} onClick={() => removeItem(it.key)}><Icon.trash /></button></td>
                   </tr>
                 );
               })}
-              {!form.items.length && <tr><td colSpan={12} className="muted" style={{ padding: 18 }}>Add {noun}s from the ingredient database, or type any {noun} name below.</td></tr>}
+              {!form.items.length && <tr><td colSpan={13} className="muted" style={{ padding: 18 }}>Add {noun}s from the ingredient database, or type any {noun} name below.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -447,6 +497,16 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
             {sauce ? (
               <>
                 <div><span>One container</span><b>{qty(batch)} {SAUCE_UOM}</b><small>{form.container}</small></div>
+                {scaled && (
+                  <div>
+                    <span>For {qty(quarts)} qt</span>
+                    <b className="scaled">{qty(grams.times(scale), 0)} g</b>
+                    <small>
+                      {qty(batch.times(scale))} {SAUCE_UOM}{perContainer ? `, ${qty(perContainer.times(scale), 1)} servings` : ''}
+                      {breakdown.cost ? `, ${money(toDecimal(breakdown.cost).times(scale))}` : ''}
+                    </small>
+                  </div>
+                )}
                 <div>
                   <span>Servings</span>
                   <b>{perContainer ? qty(perContainer, 1) : '—'}</b>
@@ -455,10 +515,10 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
               </>
             ) : (
               <>
-                <div><span>One batch ({base} serving{base === 1 ? '' : 's'})</span><b>{qty(grams)} g</b><small>about {qty(tsp, 1)} tsp</small></div>
+                <div><span>One batch ({base} serving{base === 1 ? '' : 's'})</span><b>{qty(grams, 0)} g</b><small>about {qty(tsp, 1)} tsp</small></div>
                 <div>
                   <span>For {wholeNumber(needed) ? needed : base} serving{(wholeNumber(needed) ? Number(needed) : base) === 1 ? '' : 's'}</span>
-                  <b className={scaled ? 'scaled' : ''}>{qty(grams.times(scale))} g</b>
+                  <b className={scaled ? 'scaled' : ''}>{qty(grams.times(scale), 0)} g</b>
                   <small>about {qty(tsp.times(scale), 1)} tsp</small>
                 </div>
               </>

@@ -163,3 +163,40 @@ export function findDuplicates(ingredients, { aliases = [], dismissed = [] } = {
 function strip({ key, dropped, ...ingredient }) {
   return ingredient;
 }
+
+/** Receipt shorthand and filler that say nothing about which ingredient a line is. */
+const RECEIPT_NOISE = new Set(['org', 'pkg', 'bag', 'box', 'btl', 'can', 'jar', 'bulk', 'brand', 'item', 'the', 'and', 'with', 'for']);
+
+/** The words of a name worth matching on: stemmed, 3+ letters, no pack sizes, grade words or receipt filler. */
+const matchWords = (name) => [...new Set(ingredientKey(name).split(' ')
+  .filter((w) => w.length >= 3 && !/\d/.test(w) && !RECEIPT_NOISE.has(w)))];
+
+/**
+ * Ingredients a receipt's wording might be, by the words they share: "KS ORG BABY SPINACH 2LB"
+ * finds "Baby spinach" and "Spinach". A receipt word of 4+ letters also matches a word it begins,
+ * for stores that cut words short ("TOMAT" finds tomatoes). Each of `ingredients` ({ id, name,
+ * aliases?: [] , … }) scores its best name or saved receipt name: the most words matched, then the
+ * largest share of its own words. Best first, at most `limit`; each comes back with `words`, the
+ * words it matched on.
+ */
+export function wordMatches(receiptName, ingredients, limit = 5) {
+  const wanted = matchWords(receiptName);
+  if (!wanted.length) return [];
+  const hit = (w) => wanted.some((r) => r === w || (r.length >= 4 && w.startsWith(r)));
+  const scored = [];
+  for (const ing of ingredients) {
+    let best = null;
+    for (const name of [ing.name, ...(ing.aliases ?? [])]) {
+      const own = matchWords(name);
+      const words = own.filter(hit);
+      if (!words.length) continue;
+      const score = { words, share: words.length / own.length };
+      if (!best || words.length > best.words.length || (words.length === best.words.length && score.share > best.share)) best = score;
+    }
+    if (best) scored.push({ ing, ...best });
+  }
+  return scored
+    .sort((a, b) => b.words.length - a.words.length || b.share - a.share || a.ing.name.length - b.ing.name.length)
+    .slice(0, limit)
+    .map(({ ing, words }) => ({ ...ing, words }));
+}

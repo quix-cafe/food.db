@@ -39,6 +39,7 @@ function blendFields(body) {
     notes: text(body.notes, 'Notes', { max: 4000 }),
     servings,
     servingOz,
+    salePrice: kind === 'sauce' ? number(body.salePrice, 'Sale price', { min: 0 }) : null,
     items,
   };
 }
@@ -86,7 +87,7 @@ router.post('/', async (req, res) => {
   const f = blendFields(req.body ?? {});
   try {
     const id = await tx(async (c) => {
-      const { rows } = await c.query('INSERT INTO spice_blends (name, kind, container, notes, servings, serving_oz) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [f.name, f.kind, f.container, f.notes, f.servings, f.servingOz]);
+      const { rows } = await c.query('INSERT INTO spice_blends (name, kind, container, notes, servings, serving_oz, sale_price) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id', [f.name, f.kind, f.container, f.notes, f.servings, f.servingOz, f.salePrice]);
       await writeItems(c, rows[0].id, f.items);
       return rows[0].id;
     });
@@ -105,7 +106,7 @@ router.put('/:id', async (req, res) => {
   const f = blendFields({ ...req.body, kind: current.kind });
   try {
     await tx(async (c) => {
-      const { rowCount } = await c.query('UPDATE spice_blends SET name=$2, container=$3, notes=$4, servings=$5, serving_oz=$6, updated_at=now() WHERE id=$1', [id, f.name, f.container, f.notes, f.servings, f.servingOz]);
+      const { rowCount } = await c.query('UPDATE spice_blends SET name=$2, container=$3, notes=$4, servings=$5, serving_oz=$6, sale_price=$7, updated_at=now() WHERE id=$1', [id, f.name, f.container, f.notes, f.servings, f.servingOz, f.salePrice]);
       if (!rowCount) throw notFound('Spice blend');
       await writeItems(c, id, f.items);
     });

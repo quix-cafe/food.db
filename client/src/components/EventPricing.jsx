@@ -33,7 +33,8 @@ export function pricingFor(recipe, p = {}) {
 export function SalePriceInput({ value, recipePrice, onChange, label, id }) {
   const [draft, setDraft] = useState(null);
   const recipeText = recipePrice == null ? '' : toDecimal(recipePrice).toFixed(2);
-  const shown = draft ?? (value !== '' ? value : recipeText);
+  // The draft only matters while the box is being cleared; any other text is already `value`, which may also change from another window.
+  const shown = draft !== null && draft.trim() === '' ? draft : (value !== '' ? value : recipeText);
   const set = value !== '' && !(toDecimal(priceText(value))?.eq(recipeText || -1));
   return (
     <span className="sale-price">
@@ -59,17 +60,35 @@ export function SalePriceInput({ value, recipePrice, onChange, label, id }) {
 }
 
 /** An optional deal: `amount` off every `qty` servings ("buy 2, get $1 off"); a blank count is per serving. */
-export function DealInput({ amount, qty, onChange, label }) {
+export function DealInput({ amount, qty, onChange, label, autoFocus = false }) {
   return (
     <span className="deal-input" title="For a deal like “buy 2, get $1 off”: $1.00 off per 2 servings">
       <span className="money-input">
         <span aria-hidden="true">$</span>
-        <input className="input num" inputMode="decimal" value={amount} placeholder="0.00" aria-label={`${label}: discount amount`}
+        <input className="input num" inputMode="decimal" value={amount} placeholder="0.00" autoFocus={autoFocus} aria-label={`${label}: discount amount`}
           aria-invalid={!blankOrPrice(amount)} onChange={(e) => onChange({ discountAmount: e.target.value, discountQty: qty })} />
       </span>
       <span className="muted nowrap">off per</span>
       <input className="input num deal-qty" inputMode="numeric" value={qty} placeholder="1" aria-label={`${label}: discount applies per this many servings`}
         aria-invalid={!blankOrCount(qty)} onChange={(e) => onChange({ discountAmount: amount, discountQty: e.target.value })} />
+    </span>
+  );
+}
+
+/** A deal that stays out of the way: a checkbox, with the inputs only once it's ticked. Unticking removes the deal. */
+export function DealToggle({ amount, qty, onChange, label }) {
+  const [ticked, setOpen] = useState(false);
+  const open = ticked || amount !== '' || qty !== ''; // a deal can also arrive from another window
+  const [typing, setTyping] = useState(false); // ticked just now, so the amount is what comes next
+  return (
+    <span className="deal-toggle-cell">
+      <input type="checkbox" className="deal-check" checked={open} aria-label={`${label}: has a discount`}
+        onChange={(e) => {
+          setOpen(e.target.checked);
+          setTyping(e.target.checked);
+          if (!e.target.checked) onChange({ discountAmount: '', discountQty: '' });
+        }} />
+      {open && <DealInput amount={amount} qty={qty} label={label} autoFocus={typing} onChange={onChange} />}
     </span>
   );
 }

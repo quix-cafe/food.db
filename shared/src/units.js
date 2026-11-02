@@ -13,8 +13,8 @@ const TSP = {
 /** Weight units, in grams. */
 const GRAMS = { g: 1, kg: 1000, oz: 28.3495, lb: 453.592 };
 
-/** Counted units, by a typical weight in grams: a bunch of herbs is about 75 g (2.6 oz). */
-const COUNT_GRAMS = { bunch: 75 };
+/** Counted units, by a typical weight in grams: a bunch of herbs is about 75 g (2.6 oz), a clove of garlic 7 g (8 to 2 oz). */
+const COUNT_GRAMS = { bunch: 75, clove: 7 };
 
 /** Ground spices weigh roughly 2–3 g per teaspoon; used only to put weights and volumes on one scale. */
 export const SPICE_GRAMS_PER_TSP = 2.5;
@@ -39,8 +39,16 @@ const ALIASES = {
   teaspoon: 'tsp', t: 'tsp', tablespoon: 'tbsp', tbs: 'tbsp', tbl: 'tbsp',
   'fluid ounce': 'fl oz', floz: 'fl oz', ounce: 'oz', gram: 'g', gm: 'g', kilogram: 'kg',
   pound: 'lb', lbs: 'lb', liter: 'l', litre: 'l', milliliter: 'ml', millilitre: 'ml',
-  pint: 'pt', quart: 'qt', gallon: 'gal', cups: 'cup', pinches: 'pinch', dashes: 'dash', bunches: 'bunch', bn: 'bunch',
+  pint: 'pt', quart: 'qt', gallon: 'gal', cups: 'cup', pinches: 'pinch', dashes: 'dash', bunches: 'bunch', bn: 'bunch', cloves: 'clove',
 };
+
+/** Garlic itself, not a product made from it ("Garlic powder"). */
+const FRESH_GARLIC = /\bgarlic\b(?!.*\b(powder|granulated|salt|oil|paste|sauce|bread)\b)/i;
+
+/** Units only some ingredients can be measured in, by name: garlic comes in cloves. */
+export function unitsForName(name) {
+  return FRESH_GARLIC.test(String(name ?? '')) ? ['clove'] : [];
+}
 
 /** Canonical unit name ("Tablespoons" → "tbsp"), or null when it isn't a known kitchen unit. */
 export function normalizeUnit(unit) {
@@ -104,9 +112,9 @@ export function parseAmount(text) {
   return d;
 }
 
-/** One of a unit kitchen measures can't reach is taken to weigh about this: a box 750 g, anything else (can, jar, each) 75 g like a bunch. */
+/** One of a unit kitchen measures can't reach is taken to weigh about this: a box 750 g, a small fresh chili 2 g, anything else (can, jar, each) 75 g like a bunch. */
 export const ESTIMATED_UNIT_GRAMS = COUNT_GRAMS.bunch;
-const ESTIMATED_GRAMS_BY_UNIT = { box: 750, boxes: 750 };
+const ESTIMATED_GRAMS_BY_UNIT = { box: 750, boxes: 750, chili: 2, chilis: 2, chilies: 2, chile: 2, chiles: 2 };
 
 /** The estimated weight in grams of one `unit` when its ingredient doesn't say. */
 export function estimatedUnitGrams(unit) {

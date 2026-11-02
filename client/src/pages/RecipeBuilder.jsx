@@ -11,7 +11,7 @@ import { AddToEventModal } from './RecipeGallery.jsx';
 import { IngredientDrawer } from '../components/IngredientDrawer.jsx';
 
 let nextKey = 1;
-const blank = { name: '', baseServings: '4', servingSize: '', totalYield: '', yieldUnit: '', targetMargin: String(DEFAULT_MARGIN), lines: [] };
+const blank = { name: '', baseServings: '4', servingSize: '', totalYield: '', yieldUnit: '', targetMargin: String(DEFAULT_MARGIN), targetPrice: '', lines: [] };
 
 // The recipe stores its total yield; the header edits it as size per serving × expected
 // (base) servings, so the size per serving is derived from it on load.
@@ -33,6 +33,7 @@ const fromServer = (r) => ({
   totalYield: r.totalYield ? toDecimal(r.totalYield).toString() : '',
   yieldUnit: r.yieldUnit ?? '',
   targetMargin: toDecimal(r.targetMargin).toString(),
+  targetPrice: r.targetPrice ? toDecimal(r.targetPrice).toFixed(2) : '', // set by hand: kept when costs change
   isTest: r.isTest,
   lines: laborLast(r.lines).map((l) => ({
     key: nextKey++,
@@ -147,6 +148,7 @@ export default function RecipeBuilder() {
           baseServings: form.baseServings,
           expectedServings: toDecimal(expected) ? expected : form.baseServings,
           targetMargin: form.targetMargin,
+          targetPrice: form.targetPrice || null,
           totalYield: form.totalYield,
         }),
       };
@@ -170,7 +172,8 @@ export default function RecipeBuilder() {
   };
   const unitLabel = form.yieldUnit.trim() || 'units';
 
-  // Typing a target price sets the margin that produces it: margin = 1 − cost / price.
+  // Typing a price sets it by hand: it's saved and kept when ingredient costs change. The margin it
+  // makes (1 − cost / price) is saved too, as where the slider starts if the price is let go.
   const cps = costing && toDecimal(costing.costPerServing);
   const draftPrice = priceDraft === null ? null : toDecimal(priceDraft);
   const priceProblem = priceDraft === null || !cps ? null
@@ -182,8 +185,11 @@ export default function RecipeBuilder() {
     const p = toDecimal(text);
     if (!cps || cps.isZero() || !p || p.lt(cps)) return;
     const margin = p.minus(cps).div(p).times(100).toDecimalPlaces(6);
-    setForm((f) => ({ ...f, targetMargin: margin.toString() }));
+    setForm((f) => ({ ...f, targetMargin: margin.toString(), targetPrice: p.toFixed(2) }));
   };
+  // With a price set by hand the slider shows the margin that price makes now.
+  const shownMargin = costing?.priceSet ? costing.targetMargin : form.targetMargin;
+  const marginLoss = costing?.priceSet && toDecimal(costing.targetMargin).lt(0);
   const setLine = (key, patch) => setForm((f) => ({ ...f, lines: f.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) }));
   const removeLine = (key) => setForm((f) => ({ ...f, lines: f.lines.filter((l) => l.key !== key) }));
   const addIngredient = (ing) => {
@@ -413,7 +419,7 @@ export default function RecipeBuilder() {
             <div className="margin-slider">
               <div className="margin-slider-head">
                 <label htmlFor="margin">Target margin</label>
-                <output htmlFor="margin">{percent(form.targetMargin)}</output>
+                <output htmlFor="margin" style={marginLoss ? { color: 'var(--tomato)' } : undefined}>{percent(shownMargin)}</output>
               </div>
               <input
                 id="margin"
@@ -421,9 +427,9 @@ export default function RecipeBuilder() {
                 min="0"
                 max="95"
                 step="1"
-                value={toDecimal(form.targetMargin)?.toNumber() ?? 70}
-                onChange={(e) => { setPriceDraft(null); set('targetMargin')(e); }}
-                style={{ '--fill': `${(Math.min(toDecimal(form.targetMargin)?.toNumber() ?? 70, 95) / 95) * 100}%` }}
+                value={Math.max(0, toDecimal(shownMargin)?.toNumber() ?? 70)}
+                onChange={(e) => { setPriceDraft(null); setForm((f) => ({ ...f, targetMargin: e.target.value, targetPrice: '' })); }}
+                style={{ '--fill': `${(Math.min(Math.max(0, toDecimal(shownMargin)?.toNumber() ?? 70), 95) / 95) * 100}%` }}
               />
               <div className="price-input">
                 <label htmlFor="target-price">Menu Price per Order</label>
@@ -443,7 +449,10 @@ export default function RecipeBuilder() {
                 </span>
               </div>
               <small id="target-price-note" style={priceProblem ? { color: 'var(--tomato)' } : undefined}>
-                {priceProblem ?? 'Set either one; the other follows. The margin is saved, so the price moves with ingredient costs.'}
+                {priceProblem ?? (form.targetPrice
+                  ? <>Price set by hand: it stays when ingredient costs change, and the margin moves instead.{marginLoss && <> It’s now below the cost per serving.</>}{' '}
+                    <button type="button" className="link-btn" onClick={() => { setPriceDraft(null); setForm((f) => ({ ...f, targetPrice: '' })); }}>Follow the margin instead</button></>
+                  : 'The price follows ingredient costs at this margin. Type a price to set it by hand and keep it fixed.')}
               </small>
             </div>
             {calcError && <Notice kind="error">{calcError}</Notice>}

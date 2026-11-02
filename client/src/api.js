@@ -1,4 +1,9 @@
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+  }
+}
 
 // Test mode (per browser): every request carries X-Test-Data, and whatever the server adds
 // while it's on is marked test data, removable in one go from the Backup page.
@@ -36,7 +41,7 @@ export async function api(path, { method = 'GET', body } = {}) {
   }
   if (res.status === 204) return null;
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError(data?.error ?? `Request failed (${res.status})`);
+  if (!res.ok) throw new ApiError(data?.error ?? `Request failed (${res.status})`, res.status);
   return data;
 }
 

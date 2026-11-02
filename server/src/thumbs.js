@@ -12,7 +12,7 @@ import gif from '@jimp/js-gif';
 import { methods as resize } from '@jimp/plugin-resize';
 import { thumbDir, thumbName, uploadDir } from './images.js';
 
-const Jimp = createJimp({ formats: [jpeg, png, gif], plugins: [resize] });
+export const Jimp = createJimp({ formats: [jpeg, png, gif], plugins: [resize] });
 
 /** Longest side of a thumbnail, in pixels: a recipe card's cover at 2× density. */
 export const THUMB_SIZE = 640;
