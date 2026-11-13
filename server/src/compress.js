@@ -1,6 +1,7 @@
 // Shrinking stored photos (Backup page, "Compress photos"): any recipe or receipt photo larger
 // than a chosen size on its longest side is resampled down to it, in place of the original.
 // JPEG and PNG only (what jimp can both read and write here); WebP and GIF are left alone.
+// Turning a photo a quarter turn (a receipt photographed sideways) rewrites it the same way.
 
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, stat, writeFile } from 'node:fs/promises';
@@ -9,7 +10,7 @@ import { query } from './db.js';
 import { removeFiles, uploadDir } from './images.js';
 import { Jimp } from './thumbs.js';
 
-export const COMPRESSIBLE = new Set(['image/jpeg', 'image/png']);
+const COMPRESSIBLE = new Set(['image/jpeg', 'image/png']);
 /** Smallest and largest longest side the page offers. */
 export const MIN_SIDE = 1024;
 export const MAX_SIDE = 4096;
@@ -18,7 +19,7 @@ const JPEG_QUALITY = 85;
 const SOF = (m) => m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc;
 
 /** Width and height from a JPEG, PNG or GIF file's header, or null. Cheap: nothing is decoded. */
-export function imageSize(buf) {
+function imageSize(buf) {
   if (buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47) return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
   if (buf.length > 10 && buf.toString('ascii', 0, 4) === 'GIF8') return { width: buf.readUInt16LE(6), height: buf.readUInt16LE(8) };
   if (buf.length > 4 && buf[0] === 0xff && buf[1] === 0xd8) {
@@ -85,18 +86,66 @@ export async function compressPhoto(id, maxSide) {
     return { id, before, after: before, status: 'failed' };
   }
   if (out.length >= before) return { id, before, after: before, status: 'larger' };
+  if (!(await replaceFile(id, img, out))) return { id, status: 'missing' };
+  return { id, before, after: out.length, status: 'done' };
+}
 
+/**
+ * Turn one photo a quarter turn, clockwise or not, rewriting it under a new file name like
+ * compressPhoto. Returns 'done', 'missing', or 'unsupported' (not a JPEG or PNG, or it won't decode).
+ */
+export async function rotatePhoto(id, clockwise) {
+  const { rows: [img] } = await query('SELECT filename, mime FROM images WHERE id = $1', [id]);
+  if (!img) return 'missing';
+  if (!COMPRESSIBLE.has(img.mime)) return 'unsupported';
+  const buf = await readFile(path.join(uploadDir(), img.filename)).catch(() => null);
+  if (!buf) return 'missing';
+  let out;
+  try {
+    const image = quarterTurn(await Jimp.fromBuffer(buf), clockwise); // fromBuffer applies the EXIF orientation
+    out = img.mime === 'image/png' ? await image.getBuffer('image/png') : await image.getBuffer('image/jpeg', { quality: ROTATE_QUALITY });
+  } catch {
+    return 'unsupported';
+  }
+  return (await replaceFile(id, img, out)) ? 'done' : 'missing';
+}
+
+/** Re-encoding a turned JPEG loses a little, so less is given up than when compressing. */
+const ROTATE_QUALITY = 92;
+
+function quarterTurn(image, clockwise) {
+  const { width: w, height: h, data: src } = image.bitmap;
+  const turned = new Jimp({ width: h, height: w });
+  const dst = turned.bitmap.data;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const to = clockwise ? (x * h + (h - 1 - y)) * 4 : ((w - 1 - x) * h + y) * 4;
+      const from = (y * w + x) * 4;
+      dst[to] = src[from];
+      dst[to + 1] = src[from + 1];
+      dst[to + 2] = src[from + 2];
+      dst[to + 3] = src[from + 3];
+    }
+  }
+  return turned;
+}
+
+/**
+ * Store `out` as an image's file in place of `img.filename`, removing the old file and its
+ * thumbnail. False when the image was deleted or replaced meanwhile.
+ */
+async function replaceFile(id, img, out) {
   // A new name rather than an overwrite: a crash mid-write never leaves a half-written photo.
   const filename = `${randomUUID()}${path.extname(img.filename)}`;
   const tmp = path.join(uploadDir(), `.${filename}.partial`);
   await writeFile(tmp, out);
   await rename(tmp, path.join(uploadDir(), filename));
   const { rowCount } = await query('UPDATE images SET filename = $2, size_bytes = $3 WHERE id = $1 AND filename = $4', [id, filename, out.length, img.filename]);
-  if (!rowCount) { // deleted or replaced meanwhile
+  if (!rowCount) {
     await removeFiles([filename]);
-    return { id, status: 'missing' };
+    return false;
   }
   await removeFiles([img.filename]);
   sizes.delete(img.filename);
-  return { id, before, after: out.length, status: 'done' };
+  return true;
 }

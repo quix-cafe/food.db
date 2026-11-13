@@ -26,7 +26,7 @@ export const LATEST_PURCHASE = `
   ) lp ON true`;
 
 export const INGREDIENT_COLUMNS = `
-  i.id, i.name, i.category, i.uom, i.unit_grams AS "unitGrams",
+  i.id, i.name, i.category, i.uom, i.unit_grams AS "unitGrams", i.cup_grams AS "cupGrams",
   i.created_at AS "createdAt", i.is_test AS "isTest",
   lp.unit_cost AS "latestPackPrice",
   lp.pack_size AS "latestPackSize",
@@ -39,7 +39,7 @@ export const INGREDIENT_COLUMNS = `
 export const RECIPE_LINES = `
   SELECT ri.recipe_id AS "recipeId", ri.position, ri.blend_id AS "blendId",
          i.id AS "ingredientId", i.name, i.category,
-         i.uom, ri.amount,
+         i.uom, ri.amount, ri.unit, i.cup_grams AS "cupGrams",
          lp.unit_cost AS "packPrice", lp.pack_size AS "packSize", lp.vendor, lp.purchase_date AS "priceDate",
          lp.created_at AS "priceSyncedAt"
   FROM recipe_ingredients ri
@@ -51,4 +51,5 @@ export const RECIPE_LINES = `
 export const RECIPE_COLUMNS = `
   r.id, r.name, r.base_servings AS "baseServings", r.total_yield AS "totalYield",
   r.yield_unit AS "yieldUnit", r.target_margin AS "targetMargin", r.target_price AS "targetPrice",
+  r.deal_qty AS "dealQty", r.deal_price AS "dealPrice",
   r.created_at AS "createdAt", r.updated_at AS "updatedAt", r.is_test AS "isTest"`;

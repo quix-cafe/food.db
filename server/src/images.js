@@ -6,8 +6,8 @@ import { mkdir, writeFile, rm, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import multer from 'multer';
-import { runAsTestData } from './db.js';
-import { HttpError } from './validate.js';
+import { query, runInContext, tx } from './db.js';
+import { HttpError, array, badRequest, notFound, uuid } from './validate.js';
 
 export const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -18,16 +18,16 @@ export const uploadDir = () => path.resolve(repoRoot, process.env.UPLOAD_DIR ?? 
 export const thumbDir = () => path.join(uploadDir(), 'thumbs');
 export const thumbName = (filename) => `${filename}.jpg`;
 
-export const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
 const multerImages = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_IMAGE_BYTES, files: 20, fieldSize: 2 * 1024 * 1024 },
 }).array('images', 20);
-// multer finishes in the request stream's callbacks, outside the test-mode context app.js set
-// up, so re-enter it for the route handler.
+// multer finishes in the request stream's callbacks, outside the context app.js set up, so
+// re-enter it for the route handler.
 export const uploadImages = (req, res, next) =>
-  multerImages(req, res, (err) => (req.testData ? runAsTestData(() => next(err)) : next(err)));
+  multerImages(req, res, (err) => (req.dbContext ? runInContext(req.dbContext, () => next(err)) : next(err)));
 
 /** Identify the format from the file's first bytes, not its name or claimed type. */
 function sniff(buf) {
@@ -39,12 +39,13 @@ function sniff(buf) {
   return null;
 }
 
-export const OWNER_COLUMNS = { recipe: 'recipe_id', receipt: 'receipt_id' };
+const OWNER_COLUMNS = { recipe: 'recipe_id', receipt: 'receipt_id' };
 
+// The URLs name the file, so a photo turned or compressed (stored under a new file) isn't served from cache.
 export const imageJson = (row) => ({
   id: row.id,
-  url: `/api/images/${row.id}`,
-  thumbUrl: `/api/images/${row.id}/thumb`,
+  url: `/api/images/${row.id}?v=${row.filename.slice(0, 8)}`,
+  thumbUrl: `/api/images/${row.id}/thumb?v=${row.filename.slice(0, 8)}`,
   originalName: row.original_name,
   position: row.position,
 });
@@ -103,7 +104,7 @@ export async function listImages(client, owner, ownerIds) {
 }
 
 /** Filenames owned by the given owner; read these before deleting the owner row. */
-export async function ownedFilenames(client, owner, ownerId) {
+async function ownedFilenames(client, owner, ownerId) {
   const { rows } = await client.query(`SELECT filename FROM images WHERE ${OWNER_COLUMNS[owner]} = $1`, [ownerId]);
   return rows.map((r) => r.filename);
 }
@@ -137,7 +138,7 @@ export async function copyImages(client, owner, fromId, toId) {
 }
 
 /** Rewrite positions so `orderedIds` (all of the owner's images) appear in that order. */
-export async function reorderImages(client, owner, ownerId, orderedIds) {
+async function reorderImages(client, owner, ownerId, orderedIds) {
   const col = OWNER_COLUMNS[owner];
   const { rows } = await client.query(`SELECT id FROM images WHERE ${col} = $1`, [ownerId]);
   const current = new Set(rows.map((r) => r.id));
@@ -147,4 +148,39 @@ export async function reorderImages(client, owner, ownerId, orderedIds) {
   for (const [position, id] of orderedIds.entries()) {
     await client.query('UPDATE images SET position = $2 WHERE id = $1', [id, position]);
   }
+}
+
+const OWNER_TABLES = { recipe: ['recipes', 'Recipe'], receipt: ['receipts', 'Receipt'] };
+
+/** An owner's photo routes: multipart `images` (up to 20 per request), appended after existing ones; and their order, the first being a recipe's cover. */
+export function imageRoutes(router, owner) {
+  const [table, label] = OWNER_TABLES[owner];
+  router.post('/:id/images', uploadImages, async (req, res) => {
+    const id = uuid(req.params.id, 'id');
+    if (!req.files?.length) throw badRequest('Attach at least one image in the "images" field');
+    const added = await tx(async (c) => {
+      const { rowCount } = await c.query(`SELECT 1 FROM ${table} WHERE id = $1`, [id]);
+      if (!rowCount) throw notFound(label);
+      return attachImages(c, owner, id, req.files);
+    });
+    res.status(201).json(added);
+  });
+  router.put('/:id/images/order', async (req, res) => {
+    const id = uuid(req.params.id, 'id');
+    const ids = array(req.body?.imageIds, 'imageIds').map((v, i) => uuid(v, `Image ${i + 1}`));
+    await tx((c) => reorderImages(c, owner, id, ids));
+    res.json((await listImages({ query }, owner, [id])).get(id));
+  });
+}
+
+/** Delete a recipe or receipt with its photos, files included. */
+export async function deleteImageOwner(owner, id) {
+  const [table, label] = OWNER_TABLES[owner];
+  const files = await tx(async (c) => {
+    const names = await ownedFilenames(c, owner, id);
+    const { rowCount } = await c.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
+    if (!rowCount) throw notFound(label);
+    return names;
+  });
+  await removeFiles(files);
 }

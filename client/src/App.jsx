@@ -23,7 +23,7 @@ const QUICK_ADD = [
   { tab: 'ingredient', label: 'Ingredient' },
   { tab: 'event', label: 'Event' },
   { to: '/recipes/new', label: 'Recipe' },
-  { to: '/spice-lab/new', label: 'Blend' },
+  { to: '/spice-lab/new', label: 'Spice Blend' },
   { to: '/spice-lab/new-sauce', label: 'Sauce' },
 ];
 

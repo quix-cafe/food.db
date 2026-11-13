@@ -1,0 +1,114 @@
+{
+  "merchant": "Dana Mandi 2",
+  "date": "2026-11-05",
+  "time": "17:20:31",
+  "items": [
+    {
+      "section": "Spices",
+      "entries": [
+        {
+          "description": "Laxmi Garam Masala 7oz",
+          "quantity_detail": "1 @ $3.99",
+          "price": 3.99
+        },
+        {
+          "description": "Swad Cumin Seeds 7oz",
+          "quantity_detail": "1 @ $2.99",
+          "price": 2.99
+        },
+        {
+          "description": "Cumin Powder 400g",
+          "quantity_detail": "1 @ $5.49",
+          "price": 5.49
+        },
+        {
+          "description": "Black Salt 100g",
+          "quantity_detail": "1 @ $1.49",
+          "price": 1.49
+        },
+        {
+          "description": "Kosher Salt",
+          "quantity_detail": "1 @ $2.99",
+          "price": 2.99
+        }
+      ]
+    },
+    {
+      "section": "Grocery",
+      "entries": [
+        {
+          "description": "Shan Ginger Garlic Paste",
+          "quantity_detail": "2 @ $2.49 ea",
+          "price": 4.98
+        },
+        {
+          "description": "Haldiram Pani Puri 200g",
+          "quantity_detail": "1 @ $3.29",
+          "price": 3.29
+        },
+        {
+          "description": "Golgappa Puri",
+          "quantity_detail": "1 @ $2.99",
+          "price": 2.99
+        },
+        {
+          "description": "Deep Chick Peas 4lb",
+          "quantity_detail": "1 @ $5.99",
+          "price": 5.99
+        },
+        {
+          "description": "Chana Dal 4lb",
+          "quantity_detail": "1 @ $6.49",
+          "price": 6.49
+        },
+        {
+          "description": "Basmati Rice 20lb",
+          "quantity_detail": "1 @ $21.99",
+          "price": 21.99
+        },
+        {
+          "description": "Mustard Oil 1L",
+          "quantity_detail": "1 @ $6.99",
+          "price": 6.99
+        },
+        {
+          "description": "Curry Leaves",
+          "quantity_detail": "3 @ $0.99 ea",
+          "price": 2.97
+        }
+      ]
+    },
+    {
+      "section": "Frozen & Dairy",
+      "entries": [
+        {
+          "description": "Egg Puff 6pc",
+          "quantity_detail": "1 @ $5.99",
+          "price": 5.99
+        },
+        {
+          "description": "Masala Puff Pastry",
+          "quantity_detail": "1 @ $4.99",
+          "price": 4.99
+        },
+        {
+          "description": "Desi Dahi 2lb",
+          "quantity_detail": "1 @ $4.49",
+          "price": 4.49
+        },
+        {
+          "description": "Deep Paneer 14oz",
+          "quantity_detail": "1 @ $5.99",
+          "price": 5.99
+        },
+        {
+          "description": "Onions",
+          "quantity_detail": "1 @ $3.99",
+          "price": 3.99
+        }
+      ]
+    }
+  ],
+  "subtotal": 98.09,
+  "total": 98.09
+}

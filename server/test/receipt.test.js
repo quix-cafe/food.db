@@ -100,8 +100,46 @@ test('tests/receipt2.json: grouped entries, coupon, quantity detail, subtotal re
 
 test('tests/receipt3.json: a weighed line sells by its weight', () => {
   const r = normalizeReceipt(fixture('receipt3.json'));
-  assert.equal(r.vendor, 'H MART');
+  assert.equal(r.vendor, 'H Mart'); // printed "H MART"
+  assert.equal(r.time, '19:29'); // printed "07:29pm"
   assert.deepEqual(byName(r, 'PLUM TOMATO'), [{ name: 'PLUM TOMATO', category: null, quantity: '1.46', unit: 'lb', unitCost: '1.79', totalCost: '2.61', note: null }]);
   assert.deepEqual(byName(r, 'CILANTRO').map((i) => [i.quantity, i.unitCost, i.totalCost]), [['3', '0.99', '2.97']]);
   assert.deepEqual(r.warnings, []); // the lines add up to the total
+});
+
+test('tests/receipt4.json: unit_of_measure and total_amount keys, a multi-buy, a coupon as a negative unit price', () => {
+  const r = normalizeReceipt(fixture('receipt4.json'));
+  assert.equal(r.vendor, 'Supremo Food Market');
+  assert.equal(r.time, '11:34');
+  const line = (name) => byName(r, name).map((i) => [i.quantity, i.unit, i.unitCost, i.totalCost]);
+  assert.deepEqual(line('GARLIC LOOSE'), [['0.21', 'LB', '4.99', '1.05']]); // sold by the lb, the printed total kept
+  assert.deepEqual(line('TOMATO PLUM USA MEX'), [['1.7', 'LB', '2.29', '3.9']]); // two weighed lines combined
+  assert.deepEqual(line('CILANTRO MEX'), [['2', null, '1.25', '2.5']]); // "2 @ 4 FOR": FOR is no unit
+  assert.deepEqual(line('MAZOLA CANOLA GAL'), [['1', 'EA', '13.99', '13.99']]);
+  assert.equal(byName(r, 'MAZOLA CANOLA GAL')[0].note, 'Includes $2.00 off (MAZOLA 128 FL TPR CO)');
+  assert.equal(r.items.length, 13);
+});
+
+// receipt5–7 are made up to stress ingredient matching (see the comments in each test); here they
+// only need to come through normalising whole, in their three shapes.
+test('tests/receipt5.json: a flat list with weighed lines and sizes in the names', () => {
+  const r = normalizeReceipt(fixture('receipt5.json'));
+  assert.deepEqual([r.vendor, r.date, r.time, r.items.length], ['H Mart', '2026-11-04', '18:12', 18]);
+  assert.deepEqual(byName(r, 'GINGER').map((i) => [i.quantity, i.unit, i.unitCost, i.totalCost]), [['0.62', 'lb', '2.99', '1.85']]);
+  assert.deepEqual(byName(r, 'PUFF PASTRY').map((i) => [i.quantity, i.totalCost]), [['1', '6.49']]); // no quantity or unit printed
+  assert.deepEqual(r.warnings, []);
+});
+
+test('tests/receipt6.json: a sections map, the store as an object and the date one level down', () => {
+  const r = normalizeReceipt(fixture('receipt6.json'));
+  assert.deepEqual([r.vendor, r.date, r.time, r.items.length], ['Supremo Food Market', '2026-11-04', '10:41', 20]); // printed "SUPREMO FOOD MARKET"
+  assert.deepEqual(byName(r, 'QUESO COTIJA').map((i) => i.category), ['Dairy']);
+  assert.deepEqual(r.warnings, []);
+});
+
+test('tests/receipt7.json: groups of entries with "2 @ $2.49 ea" multi-buys', () => {
+  const r = normalizeReceipt(fixture('receipt7.json'));
+  assert.deepEqual([r.vendor, r.date, r.time, r.items.length], ['Dana Mandi 2', '2026-11-05', '17:20', 18]);
+  assert.deepEqual(byName(r, 'Shan Ginger Garlic Paste').map((i) => [i.quantity, i.unitCost, i.totalCost]), [['2', '2.49', '4.98']]);
+  assert.deepEqual(r.warnings, []);
 });

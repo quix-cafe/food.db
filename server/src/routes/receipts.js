@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { Decimal } from '@kitchen/shared';
 import { query, tx } from '../db.js';
-import { normalizeReceipt } from '../services/receipt.js';
-import { matchItems } from '../matching.js';
-import { uploadImages, attachImages, listImages, ownedFilenames, removeFiles, reorderImages } from '../images.js';
-import { badRequest, notFound, text, date, uuid, array } from '../validate.js';
+import { normalizeReceipt, receiptTime } from '../services/receipt.js';
+import { matchItems, vendorSpelling } from '../matching.js';
+import { uploadImages, attachImages, listImages, imageRoutes, deleteImageOwner } from '../images.js';
+import { badRequest, notFound, text, date, uuid } from '../validate.js';
 
 const router = Router();
 
@@ -30,11 +30,11 @@ async function extractLines(c, receiptId, source) {
   }
 }
 
-// GET /api/receipts — newest first, with their images.
+// GET /api/receipts — newest first, with their images and the time printed on each ('HH:MM', or null).
 router.get('/', async (_req, res) => {
-  const { rows } = await query(`SELECT ${RECEIPT_COLUMNS} FROM receipts r ORDER BY coalesce(r.receipt_date, r.created_at::date) DESC, r.created_at DESC`);
+  const { rows } = await query(`SELECT ${RECEIPT_COLUMNS}, r.source FROM receipts r ORDER BY coalesce(r.receipt_date, r.created_at::date) DESC, r.created_at DESC`);
   const images = await listImages({ query }, 'receipt', rows.map((r) => r.id));
-  res.json(rows.map((r) => ({ ...r, images: images.get(r.id) })));
+  res.json(rows.map(({ source, ...r }) => ({ ...r, time: receiptTime(source), images: images.get(r.id) })));
 });
 
 // Create a receipt (multipart: `images` files + `vendor`, `date`, `source` JSON text).
@@ -53,7 +53,7 @@ router.post('/', uploadImages, async (req, res) => {
   const id = await tx(async (c) => {
     const { rows } = await c.query(
       'INSERT INTO receipts (vendor, receipt_date, source) VALUES ($1,$2,$3) RETURNING id',
-      [vendor, day, source],
+      [await vendorSpelling(c, vendor), day, source],
     );
     await attachImages(c, 'receipt', rows[0].id, req.files);
     await extractLines(c, rows[0].id, source);
@@ -87,41 +87,19 @@ async function getReceipt(id) {
     unitCost: l.unitCost === null ? null : new Decimal(l.unitCost).toString(),
     totalCost: l.totalCost === null ? null : new Decimal(l.totalCost).toString(),
   })));
-  return { ...rows[0], images: images.get(id), purchases: purchases.rows, pendingLines };
+  return { ...rows[0], time: receiptTime(rows[0].source), images: images.get(id), purchases: purchases.rows, pendingLines };
 }
 
 router.get('/:id', async (req, res) => {
   res.json(await getReceipt(uuid(req.params.id, 'id')));
 });
 
-router.post('/:id/images', uploadImages, async (req, res) => {
-  const id = uuid(req.params.id, 'id');
-  if (!req.files?.length) throw badRequest('Attach at least one image in the "images" field');
-  const added = await tx(async (c) => {
-    const { rowCount } = await c.query('SELECT 1 FROM receipts WHERE id = $1', [id]);
-    if (!rowCount) throw notFound('Receipt');
-    return attachImages(c, 'receipt', id, req.files);
-  });
-  res.status(201).json(added);
-});
-
-router.put('/:id/images/order', async (req, res) => {
-  const id = uuid(req.params.id, 'id');
-  const ids = array(req.body?.imageIds, 'imageIds').map((v, i) => uuid(v, `Image ${i + 1}`));
-  await tx((c) => reorderImages(c, 'receipt', id, ids));
-  res.json((await listImages({ query }, 'receipt', [id])).get(id));
-});
+imageRoutes(router, 'receipt');
 
 // Removes the receipt and its photos; the purchases stay as price history.
 router.delete('/:id', async (req, res) => {
   const id = uuid(req.params.id, 'id');
-  const files = await tx(async (c) => {
-    const names = await ownedFilenames(c, 'receipt', id);
-    const { rowCount } = await c.query('DELETE FROM receipts WHERE id = $1', [id]);
-    if (!rowCount) throw notFound('Receipt');
-    return names;
-  });
-  await removeFiles(files);
+  await deleteImageOwner('receipt', id);
   res.status(204).end();
 });
 

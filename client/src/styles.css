@@ -2,10 +2,14 @@
    actions, saffron for scaled/what-if values, tomato reserved for warnings. */
 
 :root {
+  --edit-wash: #fbf0d6; /* a line edited by hand (packs to buy): its background, and its bar and box */
+  --edit-line: #b9831a;
   color-scheme: light;
   --steel: #e6eaec;
   --steel-2: #d9dfe2;
   --paper: #ffffff;
+  --chart-purchases: #2a78d6;
+  --chart-revenue: #eb6834;
   --ink: #1c2a33;
   --ink-2: #44535c;
   --muted: #6f7d85;
@@ -17,6 +21,9 @@
   --saffron: #b9831a;
   --magenta: #e5007e;
   --magenta-dark: #b80066;
+  --pos-violet: #6d3fd8;
+  --pos-teal: #12a5a0;
+  --link-alt: #6d3fd8;
   --carrot: #c2541a;
   --blue: #2b62b0;
   --blue-dark: #1f4d8f;
@@ -75,7 +82,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* ---------- Shell ---------- */
 
-.shell { display: grid; grid-template-columns: var(--sidebar) 1fr; min-height: 100vh; }
+/* The page never scrolls sideways (wide tables scroll in their own .table-wrap); clip, unlike hidden,
+   makes no scroll container, so the sticky sidebar and table heads still stick. */
+.shell { display: grid; grid-template-columns: var(--sidebar) 1fr; min-height: 100vh; overflow-x: clip; }
 
 .sidebar {
   background: var(--side);
@@ -155,8 +164,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn.quick-add-btn:hover { background: linear-gradient(180deg, var(--blue), var(--blue-dark)); border-color: var(--blue-dark); }
 .btn.quick-add-btn:active { box-shadow: 0 1px 2px rgba(31, 77, 143, 0.3) inset; }
 .btn.quick-add-btn:focus-visible { outline-color: var(--blue); }
-.btn.pos-btn { background: var(--magenta); border-color: var(--magenta-dark); color: #fff; font-weight: 750; text-decoration: none; box-shadow: 0 2px 8px rgba(229, 0, 126, 0.4); }
-.btn.pos-btn:hover { background: var(--magenta-dark); }
+.btn.pos-btn { background: linear-gradient(120deg, var(--magenta), var(--pos-violet)); border-color: var(--magenta-dark); color: #fff; font-weight: 750; text-decoration: none; box-shadow: 0 2px 8px rgba(229, 0, 126, 0.4); }
+.btn.pos-btn:hover { background: linear-gradient(120deg, var(--magenta-dark), var(--pos-violet)); }
 .btn.pos-btn:focus-visible { outline-color: var(--magenta); }
 .btn.danger { color: var(--tomato); }
 .btn.danger:hover { border-color: var(--tomato); }
@@ -198,6 +207,13 @@ textarea.input { resize: vertical; font-size: 0.85rem; line-height: 1.4; }
 .search { position: relative; flex: 1; max-width: 520px; }
 .search .input { padding-left: 34px; }
 .search > svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+/* The Ingredients page's name filter, with its own clear button in place of the browser's. */
+.name-filter { position: relative; display: inline-block; width: 260px; max-width: 100%; }
+.name-filter .input { width: 100%; padding-right: 34px; }
+.name-filter .input::-webkit-search-cancel-button { display: none; }
+.clear-filter { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 50%; background: none; color: var(--muted); cursor: pointer; }
+.clear-filter:hover, .clear-filter:focus-visible { background: var(--wash); color: var(--ink); }
+.clear-filter svg { width: 16px; height: 16px; }
 
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip {
@@ -412,6 +428,7 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 .name-btn:focus-visible { outline: 2px solid var(--basil); }
 @media (hover: none) { .name-btn svg { opacity: 1; } }
 .name-status { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 0.8rem; }
+.name-status.unit-warning { display: block; color: var(--saffron-ink); max-width: 36ch; }
 .link-btn { all: unset; cursor: pointer; color: var(--basil); font-weight: 650; text-decoration: underline; text-underline-offset: 2px; }
 .link-btn:focus-visible { outline: 2px solid var(--basil); }
 .alias-list { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -443,7 +460,12 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 .thumb-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .thumb-img:focus-visible { outline: 2px solid var(--basil); outline-offset: 2px; }
 .thumb figcaption { display: flex; justify-content: space-between; align-items: center; min-height: 32px; font-size: 0.85rem; }
-.thumb figcaption .icon-btn { margin-left: auto; }
+.thumb figcaption > .icon-btn { margin-left: auto; }
+.rotate-btns { display: inline-flex; gap: 2px; }
+.thumb-img { position: relative; }
+.thumb-img:disabled { cursor: progress; }
+/* Over a photo being turned: dark in either theme, so the photo is plainly out of reach until it's back. */
+.turning-cover { position: absolute; inset: 0; display: flex; gap: 8px; align-items: center; justify-content: center; background: rgba(18, 26, 31, 0.72); color: #fff; font-weight: 650; font-size: 0.9rem; border-radius: inherit; cursor: progress; }
 .cover-badge { position: absolute; top: 6px; left: 6px; background: var(--solid); color: var(--on-solid); }
 .add-tile {
   aspect-ratio: 4 / 3; border: 2px dashed var(--line); border-radius: var(--radius); cursor: pointer;
@@ -451,6 +473,7 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 }
 .add-tile:hover, .add-tile:focus-within { border-color: var(--basil); color: var(--basil); }
 .lightbox { position: fixed; inset: 0; z-index: 70; background: rgba(18, 26, 31, 0.92); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; }
+.lightbox-photo { position: relative; display: flex; max-width: 100%; border-radius: 4px; }
 .lightbox img { max-width: 100%; max-height: calc(100vh - 100px); object-fit: contain; border-radius: 4px; }
 .lightbox-bar { display: flex; gap: 10px; align-items: center; color: #e6eaec; flex-wrap: wrap; justify-content: center; }
 .card-cover { display: block; aspect-ratio: 16 / 9; margin: -16px -16px 0; overflow: hidden; border-radius: var(--radius) var(--radius) 0 0; background: var(--steel-2); }
@@ -468,6 +491,20 @@ a.receipt-thumbs:hover img, a.receipt-thumbs:focus-visible img { outline: 2px so
 
 .backup-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: start; }
 .backup-card { display: flex; flex-direction: column; gap: 14px; }
+.sale-when { cursor: help; }
+.changes-log > summary { cursor: pointer; padding: 14px 18px; }
+.changes-log > summary h2 { display: inline; }
+.changes-log .table-wrap { border-top: 1px solid var(--line-soft); }
+.change-line summary { cursor: pointer; }
+.change-line ul { list-style: none; margin: 6px 0 2px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.change-line li b { font-weight: 650; }
+.change-fields { color: var(--ink-2); font-size: 0.85rem; overflow-wrap: anywhere; white-space: normal; }
+.changes-more { padding: 12px 18px; }
+.save-state { flex-wrap: wrap; }
+/* Who last changed the plan and entered an order, under the event page's footer. */
+.last-edits { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: -8px 0 0; color: var(--muted); font-size: 0.86rem; }
+.changes-filter { display: flex; align-items: center; gap: 8px; padding: 0 18px 12px; font-size: 0.92rem; cursor: pointer; }
+.changes-filter input { width: 18px; height: 18px; accent-color: var(--basil); }
 .compress-slider { max-width: 560px; }
 .compress-marks { display: flex; gap: 8px; flex-wrap: wrap; }
 .compress-mark { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 8px 12px; min-width: 170px; font: inherit; text-align: left; color: inherit; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
@@ -562,8 +599,16 @@ a.receipt-thumbs:hover img, a.receipt-thumbs:focus-visible img { outline: 2px so
 .unit-input { position: relative; display: inline-block; width: 104px; }
 .unit-input .input { padding-right: 42px; }
 .unit-input > span { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); width: 32px; text-align: left; font-size: 0.82rem; color: var(--muted); pointer-events: none; overflow: hidden; text-overflow: ellipsis; }
+.unit-input.unit-pick { display: inline-flex; gap: 4px; width: auto; }
+.unit-input.unit-pick .input { padding-right: 9px; }
+.unit-input.unit-pick > .input:first-child { width: 72px; }
+.unit-input.unit-pick select.input { width: auto; padding: 0 4px; font-size: 0.85rem; }
 .needed-input { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .needed-input .unit-input { display: flex; width: 88px; }
+.labor-input { display: inline-flex; align-items: center; gap: 4px; justify-content: flex-end; }
+.labor-input > span[aria-hidden] { color: var(--muted); font-size: 0.9rem; }
+.needed-input .labor-input .unit-input.rate { width: 108px; }
+@media (max-width: 640px) { .labor-sm.show-sm { display: flex !important; flex-direction: column; align-items: flex-end; gap: 4px; margin-top: 4px; } }
 
 /* The review grid's save button, kept in reach while scrolling a long receipt. */
 .floating-save {
@@ -611,11 +656,11 @@ a.receipt-thumbs:hover img, a.receipt-thumbs:focus-visible img { outline: 2px so
 
 /* Labor lines: costed like ingredients, always last, tinted so they read as a different kind of cost. */
 tr.labor-row > td { background: var(--basil-wash); }
-.labor-rate { background: var(--basil-wash); border-color: var(--basil-line); }
 .pack-size-edit .input { width: 72px; padding: 4px 6px; }
+.pack-size-edit.money-input { display: inline-block; }
+.pack-size-edit.money-input .input { width: 84px; padding: 4px 6px 4px 18px; font-size: inherit; font-weight: inherit; font-stretch: inherit; }
+.pack-size-edit.money-input > span { left: 7px; }
 .input.vendor-edit { width: 150px; padding: 4px 6px; }
-.rate-history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
-.rate-history li { display: flex; justify-content: space-between; max-width: 320px; border-bottom: 1px dashed var(--line); padding: 3px 0; }
 tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 
 /* The ticket: the recipe's financials clipped to a kitchen ticket rail. */
@@ -695,6 +740,21 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 
 .dash-figure { color: inherit; text-decoration: none; }
 .dash-figure:hover { background: var(--wash); }
+.dash-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 1000px) { .dash-row { grid-template-columns: minmax(0, 1fr); } }
+.dash-trend { display: flex; flex-direction: column; gap: 10px; }
+.dash-chart { height: 280px; }
+.line-key { display: inline-block; width: 14px; height: 2px; margin-right: 6px; vertical-align: middle; border-radius: 1px; }
+.chart-tip .tip-value { display: inline; margin: 0; font-variant-numeric: tabular-nums; }
+.dash-table summary { cursor: pointer; font-size: 0.86rem; color: var(--ink-2); }
+.dash-table .table-wrap { margin-top: 8px; max-height: 260px; overflow-y: auto; }
+.rank-list { list-style: none; counter-reset: rank; margin: 0; padding: 4px 0; }
+.rank-list li { counter-increment: rank; display: grid; grid-template-columns: 2ch minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 8px 18px; border-bottom: 1px solid var(--line-soft); }
+.rank-list li:last-child { border-bottom: 0; }
+.rank-list li::before { content: counter(rank); color: var(--muted); font-size: 0.86rem; font-variant-numeric: tabular-nums; text-align: right; }
+.rank-list a { color: inherit; text-decoration: none; font-weight: 600; overflow-wrap: anywhere; }
+.rank-list a:hover { text-decoration: underline; }
+.rank-list b { font-variant-numeric: tabular-nums; font-size: 1.05rem; }
 .event-list { display: flex; flex-direction: column; }
 .event-item { display: flex; align-items: center; border-bottom: 1px solid var(--line-soft); }
 .event-item:last-child { border-bottom: 0; }
@@ -707,7 +767,7 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 .date-block b { font-size: 1.6rem; font-stretch: 70%; line-height: 1; }
 .event-item.past .event-row { opacity: 0.7; }
 
-.figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 12px; }
 .figure { padding: 16px; display: flex; flex-direction: column; gap: 2px; }
 .figure span { font-size: 0.86rem; color: var(--ink-2); }
 .figure b { font-size: 2rem; font-weight: 780; font-stretch: 68%; line-height: 1.1; }
@@ -724,6 +784,56 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 .recipe-pick td { padding: 8px 12px; }
 .recipe-pick tr.off td:not(:first-child) { color: var(--muted); }
 .money-input.vendor-fee .input { font-size: 1rem; font-weight: 600; font-stretch: 100%; padding-top: 7px; padding-bottom: 7px; }
+
+/* The event page's top bar: its fields at the width their values need, then the plan's bottom line.
+   A wide bar puts every field on one line; a narrower one, two planned rows (what and when, then the
+   money); a phone, a two-column grid. Container queries, so it follows the panel, not the window. */
+.event-bar { display: flex; flex-direction: column; container-type: inline-size; }
+.event-bar-fields { padding: 16px 18px; }
+.event-bar-rows { display: flex; flex-direction: column; gap: 12px; }
+.event-bar-row { display: flex; gap: 12px; align-items: flex-start; }
+.event-bar-row .f-name { flex: 1 1 auto; min-width: 160px; max-width: 340px; }
+.event-bar-row .field > .input, .event-bar-row .field > .select { width: 100%; min-width: 0; } /* Firefox gives inputs a wide minimum of their own */
+.event-bar-row .f-date { flex: 0 0 150px; }
+.event-bar-row .f-type { flex: 0 0 170px; }
+.event-bar-row .f-num { flex: 0 0 76px; }
+.event-bar-row .f-money { flex: 0 0 128px; }
+.event-bar-row .f-pct { flex: 0 0 76px; }
+.event-bar-row .f-pct .unit-input { display: block; width: 100%; }
+.event-bar-row .f-pct .input { padding-top: 7px; padding-bottom: 7px; font-size: 1rem; font-weight: 600; }
+.event-bar-row .f-type .select { width: 100%; }
+/* One line: a grid whose columns are the first group's fields, then the money fields, so nothing can overlap. */
+@container (min-width: 1080px) {
+  .event-bar-rows { display: grid; grid-template-columns: minmax(220px, 340px) 150px 170px max-content; align-items: start; gap: 12px; }
+  .event-bar-row:first-child { display: contents; }
+}
+@container (max-width: 560px) {
+  .event-bar-row { display: grid; grid-template-columns: 1fr 1fr; }
+  .event-bar-row .f-name { grid-column: 1 / -1; max-width: none; min-width: 0; }
+}
+.bar-figures { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 0; margin: 0; border-top: 1px solid var(--line); background: var(--wash); border-radius: 0 0 var(--radius) var(--radius); transition: opacity 0.15s; }
+.bar-figures.pending { opacity: 0.55; }
+.bar-figures > div { padding: 10px 18px; border-right: 1px solid var(--line); min-width: 0; }
+.bar-figures > div:last-child { border-right: 0; }
+@container (max-width: 600px) {
+  .bar-figures { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .bar-figures > div { border-bottom: 1px solid var(--line); padding: 8px 12px; }
+  /* The last figure fills out its row, so none sits alone. */
+  .bar-figures > div:last-child:nth-child(3n + 1) { grid-column: 1 / -1; }
+  .bar-figures > div:last-child:nth-child(3n + 2) { grid-column: span 2; }
+}
+.bar-figures dt { font-size: 0.78rem; color: var(--ink-2); }
+.bar-figures dd { margin: 0; font-size: 1.35rem; font-weight: 780; font-stretch: 72%; font-variant-numeric: tabular-nums; line-height: 1.2; white-space: nowrap; }
+@container (max-width: 900px) {
+  .bar-figures > div { padding: 8px 12px; }
+  .bar-figures dd { font-size: 1.2rem; }
+}
+.bar-figures small { color: var(--muted); font-size: 0.75rem; }
+.bar-figures .profit dd { color: var(--basil); }
+.bar-figures .loss dd { color: var(--tomato); }
+@media (max-width: 640px) {
+  .event-bar-fields { padding: 12px; }
+}
 .sales-table tr.free td { color: var(--muted); }
 .sales-table tr.cancelled td { color: var(--muted); }
 .sales-table tr.cancelled td:nth-child(2), .sales-table tr.cancelled td:nth-child(6) { text-decoration: line-through; }
@@ -731,6 +841,7 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 .sales-table .deal-tag { margin-left: 6px; }
 .sales-confirm { font-size: 0.88rem; }
 .link-btn.danger { color: var(--tomato); }
+.link-btn.set-new { color: var(--link-alt); }
 
 /* Sales totals, and the POS screen's shared bits: big touch targets. */
 .sales-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }
@@ -742,8 +853,6 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 .stepper { display: flex; align-items: center; gap: 6px; }
 .stepper .btn { width: 46px; height: 46px; padding: 0; justify-content: center; font-size: 1.4rem; font-weight: 700; }
 .stepper output { min-width: 2ch; text-align: center; font-size: 1.25rem; font-weight: 750; }
-.deal-toggle { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
-.deal-toggle input { width: 22px; height: 22px; accent-color: var(--basil); }
 .pay-button { flex-direction: column; gap: 0; line-height: 1.15; }
 .pay-button small { font-size: 0.72rem; font-weight: 500; opacity: 0.85; white-space: normal; text-align: center; }
 
@@ -762,11 +871,16 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 .deal-input { display: inline-flex; align-items: center; gap: 6px; }
 .recipe-pick .money-input .input, .deal-input .money-input .input { width: 92px; padding: 4px 6px 4px 20px; font-size: 0.95rem; font-weight: 600; font-stretch: 100%; }
 .recipe-pick .money-input > span, .deal-input .money-input > span { left: 8px; }
+/* Under the 92px box: table cells don't wrap by default, and these would run into the next column. */
+.sale-price-note, .sale-price-error { max-width: 150px; white-space: normal; line-height: 1.25; }
+.sale-price-error { color: var(--tomato-ink); font-size: 0.78rem; }
 .form-grid .sale-price { align-items: stretch; }
 .form-grid .sale-price .money-input .input { width: 100%; max-width: 140px; }
 .deal-input .deal-qty { width: 42px; padding: 4px 6px; }
 .recipe-pick .deal-input .money-input .input { width: 72px; }
-.deal-toggle-cell { display: inline-flex; align-items: center; gap: 8px; min-height: 34px; }
+/* The checkbox and inputs always share a line; the note goes under them, no wider than they are. */
+.deal-toggle-cell { display: inline-grid; grid-template-columns: auto auto; align-items: center; gap: 4px 8px; min-height: 34px; }
+.deal-note { grid-column: 1 / -1; width: 0; min-width: 100%; color: var(--tomato-ink); font-size: 0.78rem; line-height: 1.25; }
 .deal-check { flex: none; width: 18px; height: 18px; accent-color: var(--basil); }
 
 /* ---------- Responsive ---------- */
@@ -833,7 +947,6 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 .serving-size .input { width: 50px; padding: 4px 6px; }
 .recipe-pick thead th { white-space: normal; vertical-align: bottom; }
 .recipe-pick .c-name { min-width: 150px; }
-@media (min-width: 641px) { .recipe-pick .c-makes { width: 1%; } }
 .sauce-holds span { white-space: nowrap; }
 .sauce-make { display: inline-flex; align-items: center; gap: 6px; }
 .sauce-make .input { width: 44px; }
@@ -842,11 +955,13 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 .serving-total { display: inline-block; margin-top: 4px; padding: 2px 8px; border-radius: 999px; background: var(--saffron-wash); color: var(--saffron-ink); box-shadow: inset 0 0 0 1px var(--saffron-line); font-size: 0.85rem; font-weight: 750; white-space: nowrap; }
 .recipe-pick tbody td:first-child { box-shadow: inset 7px 0 0 var(--tile, transparent); }
 @media (min-width: 641px) {
-  /* Names on the left, everything else centered under its heading; rules set the name and yield apart from the figures. */
+  /* Names on the left, everything else centered under its heading; a rule sets the name apart from the figures. */
   .recipe-pick.grid :is(th, td) { text-align: center; }
   .recipe-pick.grid :is(th:nth-child(2), td.c-name, .group-row td) { text-align: left; }
+  /* Each row's discount is a different width: left-aligned, the checkboxes line up. */
+  .recipe-pick.grid :is(th:nth-child(6), td.c-deal) { text-align: left; }
   .recipe-pick .sale-price { align-items: center; }
-  .recipe-pick :is(th:nth-child(2), td.c-name, th:nth-child(3), td.c-makes) { border-right: 1px solid var(--line); }
+  .recipe-pick :is(th:nth-child(2), td.c-name) { border-right: 1px solid var(--line); }
 }
 .event-tabs-area { display: flex; flex-direction: column; gap: 16px; }
 /* Phone: jump from the top of an event down to one of its tabs. */
@@ -884,7 +999,7 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
   /* Ingredients: category dropdown and name filter share one row. */
   .toolbar { padding: 10px 12px; gap: 8px; flex-wrap: nowrap; }
   .toolbar .category-select { flex: 1; width: auto; min-width: 0; }
-  .toolbar .name-filter { flex: 1; min-width: 0; max-width: none !important; }
+  .toolbar .name-filter { flex: 1; min-width: 0; width: auto; }
 
   /* Tables: tighter cells, so the columns a phone keeps fit across. */
   table.grid { font-size: 0.88rem; }
@@ -910,47 +1025,52 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
   .figure span { font-size: 0.75rem; }
   .figure b { font-size: 1.35rem; }
 
-  /* The event's recipe table becomes one card per recipe: name and servings, then its figures
-     (labelled from data-label), then price and deal. Unchosen rows show just their figures. */
+  /* The event's recipe table becomes one short card per recipe: name with the discount tick beside it, a row of
+     what gets typed, then what it comes to. A ticked discount takes a row of its own. Unchosen rows are one line. */
   .recipe-pick.cards-sm, .recipe-pick.cards-sm tbody { display: block; }
   .recipe-pick.cards-sm thead { display: none; }
   .recipe-pick.cards-sm tr {
     display: grid; grid-template-columns: 26px repeat(3, minmax(0, 1fr)); column-gap: 10px; row-gap: 8px;
-    grid-template-areas: 'check name name serv' '. makes cost margin' '. size size price' '. deal deal deal';
-    padding: 12px; border-bottom: 1px solid var(--line-soft); align-items: start;
+    grid-template-areas: 'check name name deal' 'serv serv size price' 'cost cost margin margin';
+    padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); align-items: start;
+    box-shadow: inset 7px 0 0 var(--tile, transparent);
   }
-  .recipe-pick.cards-sm tr.off { grid-template-areas: 'check name name name' '. makes cost price'; row-gap: 4px; padding: 10px 12px; }
+  .recipe-pick.cards-sm tr:has(.deal-input) { grid-template-areas: 'check name name name' 'serv serv size price' 'cost cost margin margin' 'deal deal deal deal'; }
+  .recipe-pick.cards-sm tr.off { grid-template-columns: 26px minmax(0, 1fr) auto; grid-template-areas: 'check name price'; align-items: center; padding: 8px 12px 8px 16px; }
   .recipe-pick.cards-sm td { display: block; padding: 0; border: 0; text-align: left; }
   .recipe-pick.cards-sm td[data-label]::before {
     content: attr(data-label); display: block; margin-bottom: 2px;
     font-size: 0.68rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
   }
-  .recipe-pick.cards-sm tr { box-shadow: inset 7px 0 0 var(--tile, transparent); }
   .recipe-pick.cards-sm tbody td:first-child { box-shadow: none; }
   .recipe-pick.cards-sm .c-check { grid-area: check; align-self: center; }
   .recipe-pick.cards-sm .c-name { grid-area: name; align-self: center; }
   .recipe-pick.cards-sm .c-serv { grid-area: serv; }
-  .recipe-pick.cards-sm .c-makes { grid-area: makes; }
   .recipe-pick.cards-sm .c-cost { grid-area: cost; }
   .recipe-pick.cards-sm .c-margin { grid-area: margin; }
   .recipe-pick.cards-sm .c-price { grid-area: price; }
   .recipe-pick.cards-sm .c-deal { grid-area: deal; }
   .recipe-pick.cards-sm .c-size { grid-area: size; }
-  .recipe-pick.cards-sm tr.off .c-size, .recipe-pick.cards-sm tr.off .c-deal, .recipe-pick.cards-sm tr.off .c-serv, .recipe-pick.cards-sm tr.off .c-margin, .recipe-pick.cards-sm .c-none { display: none; }
-  .recipe-pick.cards-sm .c-serv .input { width: 100% !important; }
-  /* A sauce's "2 × 1/2 qt" needs two columns; its margin moves beside the price. */
-  .recipe-pick.cards-sm tr.sauce-row:not(.off) { grid-template-areas: 'check name name serv' '. makes makes cost' '. price margin margin'; }
+  .recipe-pick.cards-sm tr.off :is(.c-size, .c-deal, .c-serv, .c-margin, .c-cost), .recipe-pick.cards-sm .c-none { display: none; }
+  .recipe-pick.cards-sm tr.off .c-price::before { display: none; }
+  .recipe-pick.cards-sm tr:not(.sauce-row) .c-serv .input { width: 100% !important; }
+  /* The figures read as one line, label beside value. */
+  .recipe-pick.cards-sm tr:not(.off) :is(.c-cost, .c-margin)::before { display: inline; margin-right: 5px; }
+  .recipe-pick.cards-sm tr:not(.off) :is(.c-cost, .c-margin) { align-self: center; font-size: 0.9rem; }
+  .recipe-pick.cards-sm tr:not(.off) .c-margin { color: var(--basil-ink); font-weight: 650; }
+  .recipe-pick.cards-sm .c-deal:not(:has(.deal-input)) { display: flex; align-items: center; justify-content: flex-end; gap: 6px; align-self: center; }
+  .recipe-pick.cards-sm .c-deal:not(:has(.deal-input))::before { margin: 0; }
+  .recipe-pick.cards-sm .c-deal:has(.deal-input) { border-top: 1px dashed var(--line); padding-top: 8px; }
+  /* A sauce's "2 × 1/2 qt" needs the room; it has no size or discount. */
+  .recipe-pick.cards-sm tr.sauce-row:not(.off) { grid-template-areas: 'check name name name' 'serv serv serv price' 'cost cost margin margin'; }
   .recipe-pick.cards-sm .c-name .badge { margin-left: 2px; }
+  .recipe-pick.cards-sm .c-name a { font-size: 1.08rem; line-height: 1.25; }
+  .recipe-pick.cards-sm tr.off .c-name a { font-size: 0.98rem; }
   .recipe-pick.cards-sm .sale-price { align-items: flex-start; }
   .recipe-pick.cards-sm .sale-price small { white-space: normal; }
   .recipe-pick.cards-sm .deal-input .money-input .input { width: 76px; }
-  /* Divisions: a larger name, the figures as three tinted tiles, and price and deal under a rule. */
-  .recipe-pick.cards-sm tr { padding: 14px 12px; border-bottom: 1px solid var(--line); }
-  .recipe-pick.cards-sm .c-name a { font-size: 1.12rem; line-height: 1.25; }
-  .recipe-pick.cards-sm tr:not(.off) :is(.c-makes, .c-cost, .c-margin) { background: var(--wash); border-radius: var(--radius); padding: 6px 8px; }
-  .recipe-pick.cards-sm tr:not(.off) :is(.c-size, .c-price, .c-deal) { border-top: 1px dashed var(--line); padding-top: 8px; }
-  .recipe-pick.cards-sm tr:not(.off) .c-margin { color: var(--basil-ink); font-weight: 650; }
-  .recipe-pick.cards-sm tr.off .c-name a { font-size: 1rem; }
+  .recipe-pick.cards-sm .c-price .money-input { width: 100%; }
+  .recipe-pick.cards-sm .c-price .money-input .input { width: 100%; }
   .recipe-pick.cards-sm tr.group-row { display: block; padding: 8px 12px; background: var(--wash); }
   .recipe-pick.cards-sm tr.group-row td { background: none; padding: 0; }
 }
@@ -973,6 +1093,9 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
    Screen only, so printing stays black on white. */
 @media screen {
   :root[data-theme='dark'] {
+    --link-alt: #b39bf5;
+    --pos-violet: #7c55e6; /* lighter: outlines on the dark surface need the contrast, and white text still has it */
+    --chart-revenue: #e8622c; /* the light one is too bright for the dark surface */
     color-scheme: dark;
     --steel: #0a0d0f;
     --steel-2: #171d21;
@@ -994,6 +1117,8 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
     --blue-dark: #224a80;
     --blue-light: #3567ab;
     --saffron-wash: #231c0b;
+    --edit-wash: #0f1c2c;
+    --edit-line: #4f8fe0;
     --saffron-ink: #e6c070;
     --saffron-stripe: #1c170a;
     --saffron-line: #3a3014;
@@ -1034,7 +1159,7 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 .order-name.none { color: var(--muted); font-weight: 600; font-size: 0.95rem; text-decoration: underline; text-underline-offset: 2px; }
 .order-name:focus-visible { outline: 2px solid var(--basil); }
 .order-items { margin: 0; padding: 0; list-style: none; }
-.order-timing { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0; }
+.order-timing { display: grid; grid-template-columns: 1fr; gap: 6px; margin: 0; }
 .order-timing > div { padding: 3px 8px; border-left: 3px solid var(--line); }
 .order-timing dt { font-size: 0.76rem; color: var(--muted); }
 .order-timing dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -1054,7 +1179,7 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 body.pos-open { overflow: hidden; }
 .pos { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .pos-pad { padding: 20px; }
-.pos-bar { display: flex; align-items: center; gap: 16px; padding: 8px 16px; background: var(--side); color: #fff; border-bottom: 4px solid var(--magenta); }
+.pos-bar { display: flex; align-items: center; gap: 16px; padding: 8px 16px; background: var(--side); color: #fff; border-bottom: 4px solid; border-image: linear-gradient(90deg, var(--magenta), var(--pos-violet) 50%, var(--pos-teal)) 1; }
 .pos-event { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; }
 .pos-bar h1 { font-size: clamp(1.25rem, 1rem + 1.2vw, 1.9rem); font-weight: 800; overflow-wrap: anywhere; }
 .pos-bar .ticket-pick { gap: 6px; }
@@ -1067,30 +1192,44 @@ body.pos-open { overflow: hidden; }
 .pos-stats { align-items: center; }
 .pos-stats b { color: var(--ink); font-variant-numeric: tabular-nums; }
 /* A stage's color: its count here, and the box around its orders on the board. */
-.pos-stage { padding: 1px 10px; border-radius: 999px; font-weight: 700; }
-.pos-stage.placed { background: var(--carrot); color: #fff; }
+.pos-stage { padding: 1px 10px; border: 0; border-radius: 999px; font: inherit; font-weight: 700; touch-action: manipulation; }
+.pos-stage:focus-visible { outline: 2px solid var(--pos-violet); outline-offset: 2px; }
 .pos-stage.in_progress { background: var(--magenta); color: #fff; }
 .pos-stage b { color: inherit; }
 .pos-panes { display: none; background: var(--paper); padding: 0 8px; }
-.pos-panes .tab.has-orders { color: var(--tomato); font-weight: 800; }
+.pos-open-orders { padding: 2px 10px; border-radius: 999px; background: var(--tomato); color: #fff; font-weight: 800; }
 .pos-desk { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 11fr) minmax(0, 12fr); }
 .pos-sell { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 320px; border-right: 1px solid var(--line); }
 .pos-menu { min-height: 0; overflow-y: auto; padding: 12px; }
 .pos-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.pos-tile-group { display: grid; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); overflow: hidden; }
+.pos-tile-group.in-line { border-color: var(--pos-violet); box-shadow: 0 0 0 1px var(--pos-violet); }
+.pos-tile-group.has-deal { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+/* A narrower tile: the name gets the whole width, and the count moves down beside "sold". */
+.pos-tile-group.has-deal .pos-tile b { padding-right: 0; overflow-wrap: break-word; }
+.pos-tile-group.has-deal .pos-qty { top: auto; bottom: 6px; }
+.pos-add-deal {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 8px 2px; cursor: pointer;
+  background: color-mix(in srgb, var(--basil) 20%, var(--paper)); color: var(--basil-ink); border: 2px solid var(--basil); border-radius: 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0; font: inherit; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.pos-add-deal b { font-size: 1.35rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.pos-add-deal small { font-size: 0.8rem; font-weight: 650; }
+.pos-add-deal:hover:not(:disabled) { background: color-mix(in srgb, var(--basil) 32%, var(--paper)); }
+.pos-add-deal:active:not(:disabled) { transform: scale(0.97); }
+.pos-add-deal:focus-visible { outline: 2px solid var(--pos-violet); outline-offset: -3px; }
+.pos-line-deal { grid-column: 1 / -1; justify-self: start; margin-left: 0; }
 .pos-tile {
   position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-height: 112px; padding: 12px 12px 10px 18px; text-align: left; cursor: pointer;
-  background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); font: inherit; touch-action: manipulation; -webkit-tap-highlight-color: transparent; overflow: hidden;
+  background: transparent; color: var(--ink); border: 0; font: inherit; touch-action: manipulation; -webkit-tap-highlight-color: transparent; overflow: hidden;
 }
 .pos-tile::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 9px; background: var(--tile); }
 .pos-tile:hover:not(:disabled) { background: var(--wash-hover); }
 .pos-tile:active:not(:disabled) { transform: scale(0.98); }
-.pos-tile:focus-visible { outline: 2px solid var(--magenta); outline-offset: 2px; }
-.pos-tile.in-line { border-color: var(--magenta); box-shadow: 0 0 0 1px var(--magenta); }
+.pos-tile:focus-visible { outline: 2px solid var(--pos-violet); outline-offset: -3px; }
 .pos-tile b { padding-right: 26px; font-size: 1.05rem; line-height: 1.2; overflow-wrap: anywhere; }
-.pos-tile > span:not(.deal-tag) { font-weight: 650; }
-.pos-tile .deal-tag { margin-left: 0; }
+.pos-tile > span { font-weight: 650; }
 .pos-tile small { margin-top: auto; color: var(--muted); }
-.pos-qty { position: absolute; top: 6px; right: 6px; min-width: 30px; height: 30px; display: grid; place-items: center; border-radius: 999px; background: var(--magenta); color: #fff; font-style: normal; font-weight: 800; }
+.pos-qty { position: absolute; top: 6px; right: 6px; min-width: 30px; height: 30px; display: grid; place-items: center; border-radius: 999px; background: var(--pos-violet); color: #fff; font-style: normal; font-weight: 800; }
 .pos-ticket { min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--paper); border-left: 1px solid var(--line); }
 .pos-lines { flex: 1; min-height: 40px; overflow-y: auto; }
 .pos-lines > p { margin: 8px 0; }
@@ -1100,13 +1239,20 @@ body.pos-open { overflow: hidden; }
 .pos-line .stepper .btn { width: 36px; height: 36px; font-size: 1.15rem; }
 .pos-line .stepper output { font-size: 1.05rem; }
 .pos-line-name { overflow-wrap: anywhere; font-size: 0.95rem; }
+.pos-line-note-add { grid-column: 1 / -1; justify-self: start; font-size: 0.85rem; }
+.input.pos-line-note { grid-column: 1 / -1; min-height: 36px; padding: 4px 8px; font-size: 0.92rem; }
+.input.order-note-input { min-height: 44px; padding: 6px 12px; font-size: 1rem; }
+.order-note { font-size: 0.85rem; font-style: italic; color: var(--tomato-ink); overflow-wrap: anywhere; }
+.order-note-btn { all: unset; cursor: pointer; font-size: 0.85rem; font-style: italic; color: var(--tomato-ink); overflow-wrap: anywhere; }
+.order-note-btn.none { font-style: normal; color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
+.order-note-btn:focus-visible { outline: 2px solid var(--basil); }
 .pos-total { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--ink-2); font-size: 0.9rem; }
 .pos-total b { color: var(--ink); font-family: var(--font-heading); font-size: 1.9rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 .pos-pay { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .pos-pay .btn { min-height: 54px; justify-content: center; font-size: 1.02rem; }
 .pos-pay .btn:nth-last-child(-n + 2) { min-height: 40px; font-size: 0.92rem; }
 .pos-board { min-height: 0; display: flex; flex-direction: column; }
-.pos-columns { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pos-columns { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .pos-column { min-height: 0; overflow-y: auto; padding: 0 8px 12px; border-right: 1px solid var(--line); }
 .pos-column:last-child { border-right: 0; }
 .pos-column h2 { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; margin: 0 -8px 8px; padding: 10px 12px 8px; background: var(--steel); font-size: 1rem; }
@@ -1115,7 +1261,6 @@ body.pos-open { overflow: hidden; }
 .pos-column > ul { display: flex; flex-direction: column; gap: 8px; }
 .pos-column > p { margin: 8px 4px; font-size: 0.9rem; }
 .pos-card { display: flex; flex-direction: column; align-items: stretch; gap: 3px; padding: 6px 8px; background: var(--paper); border: 1px solid var(--line); border-top: 3px solid var(--line); border-radius: var(--radius); }
-.pos-card.placed { border: 2px solid var(--carrot); }
 .pos-card.in_progress { border: 2px solid var(--magenta); }
 .pos-card.completed { border-top-color: var(--basil); }
 .pos-card.cancelled { border-top-color: var(--tomato); opacity: 0.75; }
@@ -1133,6 +1278,7 @@ body.pos-open { overflow: hidden; }
 .pos-card-actions .btn.big { grid-column: 1 / -1; min-height: 42px; font-size: 1rem; }
 @media (max-width: 1180px) {
   .pos-panes { display: flex; }
+  .pos-stage { cursor: pointer; }
   .pos-desk { grid-template-columns: minmax(0, 1fr); }
   .pos-desk > [data-shown='false'] { display: none; }
   .pos-sell { border-right: 0; }
@@ -1155,3 +1301,29 @@ body.pos-open { overflow: hidden; }
 
 /* A menu item's color, the same on every screen for an event (recipeColors). */
 :is(li, div, span).tiled { border-left: 6px solid var(--tile, transparent); padding-left: 8px; }
+
+
+/* A prepaid event's POS (supper club, personal chef job): one big Order button, Clear under it. */
+.pos-pay .btn.pos-order { grid-column: 1 / -1; min-height: 60px; font-size: 1.1rem; }
+.pos-pay .pos-order ~ .btn { grid-column: 1 / -1; }
+
+/* Packs to buy on an event's shopping list: typed over by the chef, the calculated packs under it. */
+.packs-input { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.packs-input .input { width: 64px; height: 32px; font-weight: 700; }
+.packs-input small { font-weight: 400; white-space: nowrap; }
+/* An edited line: a wash, with a bar at its start and around its box (saffron; blue in the dark theme). */
+tr.packs-set > td { background: var(--edit-wash); }
+tr.packs-set > td:first-child { box-shadow: inset 3px 0 0 var(--edit-line); }
+tr.packs-set .packs-input .input { border-color: var(--edit-line); }
+.packs-adjust { display: flex; flex-direction: column; align-items: flex-end; font-weight: 500; color: var(--muted); }
+
+/* Recipes: Grid / Table switch, and the table view. */
+.view-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); padding: 2px; gap: 2px; background: var(--paper); }
+.view-toggle .btn { border: 0; background: transparent; box-shadow: none; }
+.view-toggle .btn[aria-pressed='true'] { background: var(--steel-2); color: var(--ink); }
+.recipe-cell { display: flex; align-items: center; gap: 10px; }
+.recipe-cell img, .recipe-cell .no-cover { flex: none; width: 40px; height: 40px; border-radius: 6px; object-fit: cover; background: var(--wash); }
+.recipe-cell-badges { display: flex; gap: 4px; margin-top: 3px; }
+.recipe-table td { vertical-align: middle; }
+/* The last rows' menus open upward, so the table's scroll box doesn't cut them off. */
+.recipe-table tbody tr:nth-last-child(-n + 2):not(:first-child) .menu-list { top: auto; bottom: calc(100% + 4px); }

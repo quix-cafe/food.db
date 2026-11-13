@@ -9,7 +9,7 @@ import CategoryCombobox from './CategoryCombobox.jsx';
 export const emptyPurchase = () => ({ date: todayIso(), vendor: '', quantity: '1', packSize: '1', unitCost: '', totalCost: '' });
 
 /** Common units of measure, offered as suggestions; any text is allowed. */
-export const UOM_OPTIONS = ['each', 'lb', 'oz', 'g', 'kg', 'dz', 'fl oz', 'ml', 'L', 'qt', 'gal', 'cup', 'bunch', 'hours'];
+const UOM_OPTIONS = ['each', 'lb', 'oz', 'g', 'kg', 'dz', 'fl oz', 'ml', 'L', 'qt', 'gal', 'cup', 'bunch', 'hours'];
 
 export function UomInput({ value, onChange, ...rest }) {
   return (

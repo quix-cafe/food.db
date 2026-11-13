@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { combinePurchases, completePurchaseCosts, findDuplicates, percentChange, CalcError } from '@kitchen/shared';
+import { canonicalUom, combinePurchases, completePurchaseCosts, findDuplicates, isGenericName, percentChange, CalcError } from '@kitchen/shared';
 import { query, tx, fkViolation } from '../db.js';
 import { LATEST_PURCHASE, INGREDIENT_COLUMNS } from '../sql.js';
 import { normalizeReceipt } from '../services/receipt.js';
-import { ambiguousName, resolveName, matchItems } from '../matching.js';
+import { ambiguousName, resolveName, matchItems, vendorSpelling } from '../matching.js';
 import { mergeIngredients } from '../merge.js';
 import { HttpError, badRequest, notFound, text, number, date, uuid, array, today } from '../validate.js';
 
@@ -19,10 +19,12 @@ function ingredientFields(body, { partial = false } = {}) {
   const out = {};
   if (!partial || 'name' in body) out.name = text(body.name, 'Name', { required: true });
   if (!partial || 'category' in body) out.category = text(body.category, 'Category', { max: 80 });
-  if (!partial || 'uom' in body) out.uom = text(body.uom, 'Unit of measurement', { max: 20 }) ?? (partial ? undefined : 'each');
+  if (!partial || 'uom' in body) out.uom = canonicalUom(text(body.uom, 'Unit of measurement', { max: 20 })) ?? (partial ? undefined : 'each');
   if (partial && out.uom === undefined) delete out.uom;
   // What one unit weighs, in grams (blank clears it); only sent from the ingredient's details.
   if ('unitGrams' in body) out.unitGrams = number(body.unitGrams, 'Weight of one unit', { min: 0, minExclusive: true });
+  // What one cup of it weighs, in grams (blank: estimated by name), so recipes can measure by volume what's bought by weight.
+  if ('cupGrams' in body) out.cupGrams = number(body.cupGrams, 'Weight of one cup', { min: 0, minExclusive: true, max: 9999 });
   return out;
 }
 
@@ -51,12 +53,13 @@ function purchaseFields(p) {
 }
 
 async function insertPurchase(client, ingredientId, p, receiptId = null) {
+  const vendor = await vendorSpelling(client, p.vendor);
   const { rows } = await client.query(
     `INSERT INTO ingredient_purchases
        (ingredient_id, purchase_date, vendor, quantity, pack_size, unit_cost, total_cost, receipt_id)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
      RETURNING ${PURCHASE_COLUMNS}`,
-    [ingredientId, p.date, p.vendor, p.quantity, p.packSize, p.unitCost, p.totalCost, receiptId],
+    [ingredientId, p.date, vendor, p.quantity, p.packSize, p.unitCost, p.totalCost, receiptId],
   );
   return rows[0];
 }
@@ -180,7 +183,7 @@ router.post('/purchase', async (req, res) => {
         ingredientId: uuid(item.ingredientId, 'Ingredient', { required: false }),
         name: text(item.name, 'Item name'),
         alias: text(item.alias, 'Receipt name'),
-        uom: text(item.uom, 'Unit of measurement', { max: 20 }),
+        uom: canonicalUom(text(item.uom, 'Unit of measurement', { max: 20 })),
         receiptLine: number(item.receiptLine, 'Receipt line', { integer: true, min: 0 }),
         // The reviewer saw this receipt name as ambiguous (not matched through its alias).
         skipAlias: item.skipAlias === true,
@@ -230,7 +233,7 @@ router.post('/purchase', async (req, res) => {
         }
       }
       // Pack sizes are in the ingredient's unit; a purchase can't quietly switch it.
-      if (item.uom && uom && item.uom.toLowerCase() !== uom.toLowerCase()) {
+      if (item.uom && uom && item.uom !== canonicalUom(uom)) {
         throw badRequest(`${name} is measured in ${uom}, not ${item.uom}. Enter the pack size in ${uom}.`);
       }
       if (item.uom && !uom) await c.query('UPDATE ingredients SET uom = $1 WHERE id = $2', [item.uom, id]);
@@ -242,8 +245,9 @@ router.post('/purchase', async (req, res) => {
         name = item.name;
         renamed.push({ id, name });
       }
-      if (item.alias && item.alias !== name) {
+      if (item.alias && item.alias !== name && !isGenericName(item.alias)) {
         // Re-pointing an existing alias is deliberate: the reviewer chose this ingredient.
+        // A generic one ("GROCERY") would only mislead the next receipt, so it isn't kept.
         await c.query(
           `INSERT INTO ingredient_aliases (ingredient_id, alias) VALUES ($1, $2)
            ON CONFLICT ((lower(alias))) DO UPDATE SET ingredient_id = EXCLUDED.ingredient_id`,
@@ -280,6 +284,20 @@ router.post('/purchase', async (req, res) => {
 // Parse receipt JSON from the external extractor into rows for review. Saves nothing.
 router.post('/import-receipt', async (req, res) => {
   const receipt = normalizeReceipt(req.body);
+  receipt.vendor = await vendorSpelling({ query }, receipt.vendor);
+  // The same store and day with mostly the same lines: probably this receipt, imported before.
+  receipt.alreadyImported = [];
+  if (receipt.date && receipt.items.length) {
+    const { rows } = await query(
+      `SELECT r.id, r.vendor, r.receipt_date AS "date", r.created_at AS "createdAt",
+              count(l.position) FILTER (WHERE lower(l.name) = ANY($3::text[]))::int AS same, count(l.position)::int AS lines
+         FROM receipts r LEFT JOIN receipt_lines l ON l.receipt_id = r.id
+        WHERE r.receipt_date = $1 AND lower(coalesce(r.vendor, '')) = lower(coalesce($2, ''))
+        GROUP BY r.id ORDER BY r.created_at`,
+      [receipt.date, receipt.vendor, receipt.items.map((i) => i.name.toLowerCase())],
+    );
+    receipt.alreadyImported = rows.filter((r) => r.same * 2 >= Math.max(r.lines, receipt.items.length)).map(({ same, lines, ...r }) => r);
+  }
 
   // `match`: resolved without asking; `suggestion`: offered to the reviewer, never applied.
   await matchItems({ query }, receipt.items);
@@ -296,7 +314,7 @@ router.get('/:id', async (req, res) => {
  * already saved in other capitals is kept as it was; an alias that is now exactly the name goes.
  */
 async function keepOldName(c, id, oldName, newName) {
-  if (oldName === newName) return;
+  if (oldName === newName || isGenericName(oldName)) return;
   await c.query('DELETE FROM ingredient_aliases WHERE ingredient_id = $1 AND alias = $2', [id, newName]);
   await c.query(
     `INSERT INTO ingredient_aliases (ingredient_id, alias) VALUES ($1, $2)
@@ -308,7 +326,7 @@ async function keepOldName(c, id, oldName, newName) {
 router.patch('/:id', async (req, res) => {
   const id = uuid(req.params.id, 'id');
   const fields = ingredientFields(req.body ?? {}, { partial: true });
-  const cols = { name: 'name', category: 'category', uom: 'uom', unitGrams: 'unit_grams' };
+  const cols = { name: 'name', category: 'category', uom: 'uom', unitGrams: 'unit_grams', cupGrams: 'cup_grams' };
   const keys = Object.keys(fields);
   if (keys.length) {
     try {
@@ -361,22 +379,43 @@ router.post('/:id/purchases', async (req, res) => {
   res.status(201).json(purchase);
 });
 
-// Correct a purchase's pack size (a mis-entered "case 36 lb"). The one field that can change:
-// the price paid stays as recorded, so the price history remains append-only.
-// Correct a mis-entered pack size or a missing or wrong vendor. The price paid isn't changed.
+// Correct a purchase entered wrong: its pack size (a mis-entered "case 36 lb"), vendor, or how many
+// and at what price (a weight typed over with a count). The purchase stays where it is in the history.
+// Quantity, pack price and total have to agree; a new quantity alone keeps the total, which is what
+// the receipt says was paid, and a new pack price or total alone works out the other.
 router.patch('/:id/purchases/:purchaseId', async (req, res) => {
   const body = req.body ?? {};
   const sets = [];
   const values = [uuid(req.params.purchaseId, 'purchaseId'), uuid(req.params.id, 'id')];
+  if (['quantity', 'unitCost', 'totalCost'].some((k) => k in body)) {
+    const { rows: [old] } = await query('SELECT quantity, unit_cost, total_cost FROM ingredient_purchases WHERE id = $1 AND ingredient_id = $2', values);
+    if (!old) throw notFound('Purchase');
+    const quantity = 'quantity' in body ? number(body.quantity, 'Quantity', { required: true, min: 0, minExclusive: true }) : old.quantity;
+    const given = (k) => (k in body ? number(body[k], k === 'unitCost' ? 'Pack price' : 'Total', { min: 0 }) : null);
+    let unitCost = given('unitCost');
+    let totalCost = given('totalCost');
+    if (unitCost === null && totalCost === null) totalCost = old.total_cost;
+    let costs;
+    try {
+      costs = completePurchaseCosts({ quantity, unitCost, totalCost });
+    } catch (err) {
+      if (err instanceof CalcError) throw badRequest(err.message);
+      throw err;
+    }
+    for (const [col, v] of [['quantity', quantity], ['unit_cost', costs.unitCost], ['total_cost', costs.totalCost]]) {
+      values.push(v);
+      sets.push(`${col} = $${values.length}`);
+    }
+  }
   if ('packSize' in body) {
     values.push(number(body.packSize, 'Pack size', { required: true, min: 0, minExclusive: true }));
     sets.push(`pack_size = $${values.length}`);
   }
   if ('vendor' in body) {
-    values.push(text(body.vendor, 'Vendor', { max: 120 })); // blank clears it
+    values.push(await vendorSpelling({ query }, text(body.vendor, 'Vendor', { max: 120 }))); // blank clears it
     sets.push(`vendor = $${values.length}`);
   }
-  if (!sets.length) throw badRequest('Nothing to change: send packSize or vendor');
+  if (!sets.length) throw badRequest('Nothing to change: send packSize, vendor, quantity, unitCost or totalCost');
   const { rows } = await query(
     `UPDATE ingredient_purchases SET ${sets.join(', ')} WHERE id = $1 AND ingredient_id = $2 RETURNING ${PURCHASE_COLUMNS}`,
     values,
@@ -481,12 +520,12 @@ router.get('/:id/history', async (req, res) => {
     [id],
   );
 
-  // Where it's used: recipes listing it directly (amount in its UOM), and Spice Lab blends and
-  // sauces holding it, each with the recipes that use that blend.
+  // Where it's used: recipes listing it directly (amount in its UOM, else in the unit the recipe
+  // measures it in), and Spice Lab blends and sauces holding it, each with the recipes that use that blend.
   const { rows: recipes } = await query(
-    `SELECT r.id, r.name, sum(ri.amount)::text AS amount, r.is_test AS "isTest"
+    `SELECT r.id, r.name, sum(ri.amount)::text AS amount, ri.unit, r.is_test AS "isTest"
        FROM recipe_ingredients ri JOIN recipes r ON r.id = ri.recipe_id
-      WHERE ri.ingredient_id = $1 GROUP BY r.id ORDER BY lower(r.name)`,
+      WHERE ri.ingredient_id = $1 GROUP BY r.id, ri.unit ORDER BY lower(r.name), ri.unit NULLS FIRST`,
     [id],
   );
   const { rows: blends } = await query(

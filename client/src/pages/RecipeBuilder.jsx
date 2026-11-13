@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { calculateRecipe, DEFAULT_MARGIN, isLabor, laborLast, parseAmount } from '@kitchen/shared';
+import { calculateRecipe, DEFAULT_MARGIN, parseAmount, recipeUnits, scaleAmounts } from '@kitchen/shared';
 import { api, imageForm, notifyDataChanged } from '../api.js';
 import { useLeaveGuard, useRowReorder } from '../hooks.js';
 import ImageGallery, { useLocalImages } from '../components/ImageGallery.jsx';
@@ -35,13 +35,17 @@ const fromServer = (r) => ({
   targetMargin: toDecimal(r.targetMargin).toString(),
   targetPrice: r.targetPrice ? toDecimal(r.targetPrice).toFixed(2) : '', // set by hand: kept when costs change
   isTest: r.isTest,
-  lines: laborLast(r.lines).map((l) => ({
+  dealQty: r.dealQty,
+  dealPrice: r.dealPrice,
+  lines: r.lines.map((l) => ({
     key: nextKey++,
     ingredientId: l.ingredientId,
     blendId: l.blendId,
     name: l.name,
     category: l.category,
     uom: l.uom,
+    unit: l.unit ?? '', // blank: measured in the ingredient's own unit
+    cupGrams: l.cupGrams,
     packSize: l.packSize,
     packPrice: l.packPrice,
     vendor: l.vendor,
@@ -50,21 +54,49 @@ const fromServer = (r) => ({
   })),
 });
 
-// Each line's amount is in the ingredient's unit of measure (lb, oz, each…), priced from
-// its latest purchase: price per unit = store price / store pack size. A spice blend line is
+// Each line's amount is in the ingredient's unit of measure (lb, oz, each…), or in a kitchen unit
+// picked for the line (cups of rice bought by the lb), priced from its latest purchase: price per
+// unit = store price / store pack size. A spice blend line is
 // measured in grams (a sauce in oz), its "pack" being one batch of the blend.
 // Amounts are typed as decimals or fractions ("1/2", "1 1/2", "½") and sent as decimals.
 const amountOf = (l) => parseAmount(l.amount)?.toString() ?? l.amount;
-const apiLines = (lines) => lines.map((l) => (l.blendId ? { blendId: l.blendId, amount: amountOf(l) } : { ingredientId: l.ingredientId, amount: amountOf(l) }));
+const lineUnit = (l) => (l.unit && l.unit !== l.uom ? l.unit : null);
+const apiLines = (lines) => lines.map((l) => (l.blendId ? { blendId: l.blendId, amount: amountOf(l) } : { ingredientId: l.ingredientId, amount: amountOf(l), unit: lineUnit(l) }));
 const amountProblem = (lines) => lines.some((l) => { const a = parseAmount(l.amount); return !a || a.lt(0); });
 
 const savedShape = (f) => JSON.stringify({ ...f, lines: apiLines(f.lines) });
+
+/**
+ * A line's amount, in the ingredient's unit or one picked for the line: an ingredient bought by
+ * weight can be measured by volume once a cup of it has a weight (rice: about 185 g), and the
+ * other way round. The number stays as typed when the unit changes.
+ */
+function AmountInput({ line: l, problem, onChange }) {
+  const units = l.blendId ? [l.uom ?? 'each'] : recipeUnits(l);
+  const unit = lineUnit(l) ?? l.uom ?? 'each';
+  const input = (
+    <input className="input num" value={l.amount} title="Fractions work: 1/2, 1 1/2, ½" aria-label={`${l.name} amount used, in ${unit}`} aria-invalid={problem}
+      onChange={(e) => onChange({ amount: e.target.value })} />
+  );
+  if (units.length < 2 && !lineUnit(l)) {
+    return <span className="unit-input">{input}<span aria-hidden="true">{unit}</span></span>;
+  }
+  return (
+    <span className="unit-input unit-pick">
+      {input}
+      <select className="input" value={unit} aria-label={`Unit for ${l.name}`} onChange={(e) => onChange({ unit: e.target.value === l.uom ? '' : e.target.value })}>
+        {[...new Set([...units, unit])].map((u) => <option key={u} value={u}>{u}</option>)}
+      </select>
+    </span>
+  );
+}
 
 export default function RecipeBuilder() {
   const { id } = useParams();
   const [form, setForm] = useState(id ? null : blank);
   const [saved, setSaved] = useState(id ? null : savedShape(blank));
   const [expected, setExpected] = useState(id ? '' : blank.baseServings);
+  const sizeStart = useRef(null); // the size and amounts when the size box was entered, so typing can't compound
   const [loadError, setLoadError] = useState(null);
   const [removing, setRemoving] = useState(null); // the line waiting on "Remove it?"
   const [saveError, setSaveError] = useState(null);
@@ -76,7 +108,7 @@ export default function RecipeBuilder() {
     const lines = f.lines.slice();
     const [item] = lines.splice(from, 1);
     lines.splice(to, 0, item);
-    return { ...f, lines: laborLast(lines) };
+    return { ...f, lines };
   }));
   const [addToEvent, setAddToEvent] = useState(false);
   const [images, setImages] = useState([]); // saved photos (existing recipe)
@@ -101,6 +133,7 @@ export default function RecipeBuilder() {
           name: ing.name,
           category: ing.category,
           uom: ing.uom,
+          cupGrams: ing.cupGrams,
           packSize: ing.latestPackSize,
           packPrice: ing.latestPackPrice,
           vendor: ing.latestVendor,
@@ -144,7 +177,7 @@ export default function RecipeBuilder() {
     try {
       return {
         costing: calculateRecipe({
-          lines: form.lines.map((l) => ({ ...l, amount: amountOf(l) })),
+          lines: form.lines.map((l) => ({ ...l, unit: lineUnit(l), amount: amountOf(l) })),
           baseServings: form.baseServings,
           expectedServings: toDecimal(expected) ? expected : form.baseServings,
           targetMargin: form.targetMargin,
@@ -162,9 +195,12 @@ export default function RecipeBuilder() {
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   // Total qty needed follows size per serving × expected servings; it's what's saved as the yield.
+  // The servings stay, so each needs more or less of everything: the amounts scale with the size.
   const setServingSize = (e) => {
     const servingSize = e.target.value;
-    setForm((f) => ({ ...f, servingSize, totalYield: totalQty(servingSize, f.baseServings) }));
+    const { size, amounts } = sizeStart.current;
+    const scaled = scaleAmounts(amounts, size, servingSize);
+    setForm((f) => ({ ...f, servingSize, totalYield: totalQty(servingSize, f.baseServings), lines: f.lines.map((l, i) => ({ ...l, amount: scaled[i] })) }));
   };
   const setServings = (e) => {
     const baseServings = e.target.value;
@@ -198,18 +234,20 @@ export default function RecipeBuilder() {
       : null;
     setForm((f) => ({
       ...f,
-      lines: laborLast([...f.lines, line ?? {
+      lines: [...f.lines, line ?? {
         key: nextKey++,
         ingredientId: ing.id,
         name: ing.name,
         category: ing.category,
         uom: ing.uom,
+        unit: '',
+        cupGrams: ing.cupGrams,
         packSize: ing.latestPackSize,
         packPrice: ing.latestPackPrice,
         vendor: ing.latestVendor,
         priceDate: ing.latestPurchaseDate,
         amount: '1',
-      }]),
+      }],
     }));
     setSearch('');
   };
@@ -293,8 +331,9 @@ export default function RecipeBuilder() {
             <div className="recipe-header">
               <Field label="Recipe name"><input className="input" value={form.name} onChange={set('name')} placeholder="e.g. Marinara sauce" /></Field>
               <Field label="Unit of measurement" hint="What a serving is measured in"><input className="input" value={form.yieldUnit} onChange={set('yieldUnit')} placeholder="oz, tacos, bowls…" /></Field>
-              <Field label="Size per serving" hint={`${unitLabel} in one serving`}>
+              <Field label="Size per serving" hint={`${unitLabel} in one serving; changing it scales the amounts`}>
                 <input className="input num" inputMode="decimal" value={form.servingSize} onChange={setServingSize} placeholder="Optional"
+                  onFocus={() => { sizeStart.current = { size: form.servingSize, amounts: form.lines.map((l) => l.amount) }; }}
                   aria-invalid={form.servingSize.trim() !== '' && !(toDecimal(form.servingSize)?.gt(0))} />
               </Field>
               <Field label="Expected servings" hint="What the recipe makes as written"><input className="input num" inputMode="numeric" value={form.baseServings} onChange={setServings} /></Field>
@@ -331,7 +370,7 @@ export default function RecipeBuilder() {
                   {form.lines.map((l, i) => {
                     const c = lineById.get(l.key);
                     return (
-                      <tr key={l.key} {...rowProps(i)} className={`${isLabor(l) ? 'labor-row' : ''} ${rowProps(i).className}`}>
+                      <tr key={l.key} {...rowProps(i)} className={rowProps(i).className}>
                         <td>
                           <button className="icon-btn drag-handle" aria-label={`Move ${l.name} (drag, or use arrow keys)`} {...handleProps(i)}><Icon.grip /></button>
                         </td>
@@ -346,21 +385,19 @@ export default function RecipeBuilder() {
                             ? <small><Link to={`/spice-lab/${l.blendId}`} className="muted"><Icon.starburst /> {l.category}, batch of {qty(l.packSize)} {l.uom}</Link>{c?.missingPrice && <> <span className="badge warn">No prices</span></>}</small>
                             : c?.missingPrice
                               ? <span className="badge warn">No purchase price</span>
-                              : isLabor(l)
-                                ? <small className="muted">Service rate</small>
-                                : <small className="muted">{l.vendor ? `${l.vendor}, ` : ''}bought {date(l.priceDate)}</small>}
+                              : <small className="muted">{l.vendor ? `${l.vendor}, ` : ''}bought {date(l.priceDate)}</small>}
                         </td>
                         <td className="num nowrap">{c?.unitPrice ? (l.blendId ? `${money(c.unitPrice)} / ${l.uom}` : perUnit(c.unitPrice, l.uom)) : '—'}</td>
-                        <td className="num nowrap">{l.packPrice && !isLabor(l) ? pack(l.packSize, l.uom) : '—'}</td>
-                        <td className="num">{l.packPrice && !isLabor(l) ? (l.blendId ? money(l.packPrice) : unitMoney(l.packPrice)) : '—'}</td>
+                        <td className="num nowrap">{l.packPrice ? pack(l.packSize, l.uom) : '—'}</td>
+                        <td className="num">{l.packPrice ? (l.blendId ? money(l.packPrice) : unitMoney(l.packPrice)) : '—'}</td>
                         <td className="num">
-                          <span className="unit-input">
-                            <input className="input num" value={l.amount} title="Fractions work: 1/2, 1 1/2, ½" aria-label={`${l.name} amount used, in ${l.uom ?? 'each'}`} aria-invalid={amountProblem([l])} onChange={(e) => setLine(l.key, { amount: e.target.value })} />
-                            <span aria-hidden="true">{l.uom ?? 'each'}</span>
-                          </span>
+                          <AmountInput line={l} problem={amountProblem([l]) || !!c?.unitProblem} onChange={(patch) => setLine(l.key, patch)} />
+                          {c && lineUnit(l) && (c.unitProblem
+                            ? <div><small className="badge warn" title="Set what a cup of it weighs in its details">Can’t convert to {l.uom}</small></div>
+                            : <div><small className="muted">≈ {qty(c.amountInUom)} {l.uom}</small></div>)}
                         </td>
                         <td className="num" style={{ fontWeight: 650 }}>{c ? money(c.baseCost) : '—'}</td>
-                        {scaled && <td className="num scaled nowrap">{c ? `${qty(c.scaledAmount)} ${l.uom ?? ''}` : '—'}</td>}
+                        {scaled && <td className="num scaled nowrap">{c ? `${qty(c.scaledLineAmount)} ${lineUnit(l) ?? l.uom ?? ''}` : '—'}</td>}
                         {scaled && <td className="num scaled">{c ? money(c.scaledCost) : '—'}</td>}
                         <td><button className="icon-btn" aria-label={`Remove ${l.name}`} onClick={() => (l.name ? setRemoving(l) : removeLine(l.key))}><Icon.trash /></button></td>
                       </tr>
@@ -427,9 +464,9 @@ export default function RecipeBuilder() {
                 min="0"
                 max="95"
                 step="1"
-                value={Math.max(0, toDecimal(shownMargin)?.toNumber() ?? 70)}
+                value={Math.max(0, toDecimal(shownMargin)?.toNumber() ?? DEFAULT_MARGIN)}
                 onChange={(e) => { setPriceDraft(null); setForm((f) => ({ ...f, targetMargin: e.target.value, targetPrice: '' })); }}
-                style={{ '--fill': `${(Math.min(Math.max(0, toDecimal(shownMargin)?.toNumber() ?? 70), 95) / 95) * 100}%` }}
+                style={{ '--fill': `${(Math.min(Math.max(0, toDecimal(shownMargin)?.toNumber() ?? DEFAULT_MARGIN), 95) / 95) * 100}%` }}
               />
               <div className="price-input">
                 <label htmlFor="target-price">Menu Price per Order</label>
@@ -498,7 +535,7 @@ export default function RecipeBuilder() {
       <LeaveModal blocker={blocker} error={saveError} onSave={id ? save : undefined} saving={saving}>
         Your changes to {form.name || 'this recipe'} haven’t been saved. If you leave now, they’re lost.
       </LeaveModal>
-      {addToEvent && <AddToEventModal recipe={{ id, name: form.name, baseServings: form.baseServings, costPerServing: costing?.costPerServing, recommendedPrice: costing?.recommendedPrice }} onClose={() => setAddToEvent(false)} />}
+      {addToEvent && <AddToEventModal recipe={{ id, name: form.name, baseServings: form.baseServings, costPerServing: costing?.costPerServing, recommendedPrice: costing?.recommendedPrice, dealQty: form.dealQty, dealPrice: form.dealPrice }} onClose={() => setAddToEvent(false)} />}
     </main>
   );
 }

@@ -17,13 +17,18 @@ import dashboard from './routes/dashboard.js';
 import exportRoutes from './routes/export.js';
 import multer from 'multer';
 import { HttpError } from './validate.js';
-import { query, runAsTestData } from './db.js';
+import { query, runInContext } from './db.js';
+import { actorFor, isLocalProxy } from './audit.js';
+import audit from './routes/audit.js';
 import { embedded } from './embedded.js';
 
 const clientDist = fileURLToPath(new URL('../../client/dist/', import.meta.url));
 
 export function createApp() {
   const app = express();
+  // Reached through a local proxy (Tailscale, or Docker's gateway), the client is what it says in
+  // X-Forwarded-For. Anyone else's say-so is ignored.
+  app.set('trust proxy', (addr, hop) => hop === 0 && isLocalProxy(addr));
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/api/health', async (_req, res) => {
@@ -34,12 +39,15 @@ export function createApp() {
       res.status(503).json({ ok: false, error: 'Database unreachable' });
     }
   });
-  // Test mode (the client sends X-Test-Data: 1): whatever a request adds is marked test data.
-  // Not for backup/restore or clearing, which handle data wholesale.
-  app.use('/api', (req, _res, next) => {
+  // Test mode (the client sends X-Test-Data: 1): whatever a request adds is marked test data. Not for
+  // backup/restore or clearing, which handle data wholesale. Whatever changes something says who it is.
+  app.use('/api', async (req, _res, next) => {
     const test = req.get('x-test-data') === '1' && !/^\/(backup|test-data)(\/|$)/.test(req.path);
     req.testData = test;
-    return test ? runAsTestData(next) : next();
+    const changing = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
+    if (!test && !changing) return next();
+    req.dbContext = { test, actor: changing ? await actorFor(req.ip) : null };
+    return runInContext(req.dbContext, next);
   });
   app.use('/api/ingredients', ingredients);
   app.use('/api/recipes', recipes);
@@ -51,6 +59,7 @@ export function createApp() {
   app.use('/api/blends', blends);
   app.use('/api/test-data', testData);
   app.use('/api/dashboard', dashboard);
+  app.use('/api/audit', audit);
   app.use('/api/export', exportRoutes);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 

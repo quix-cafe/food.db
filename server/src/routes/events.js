@@ -1,21 +1,30 @@
 import { Router } from 'express';
-import { CalcError, Decimal, ORDER_STATUSES, SAUCE_CONTAINERS, isLabor, menuItemName, paymentFee, saleItem, summarizeEvent } from '@kitchen/shared';
+import { CalcError, Decimal, EVENT_KINDS, ORDER_STATUSES, SAUCE_CONTAINERS, menuItemName, paymentFee, saleItem, summarizeEvent } from '@kitchen/shared';
 import { query, tx, fkViolation } from '../db.js';
-import { loadRecipes } from './recipes.js';
+import { loadRecipes, rememberDeal } from './recipes.js';
 import { loadBlends } from '../blends.js';
 import { HttpError, badRequest, notFound, text, number, date, uuid, array } from '../validate.js';
 import { sendCsv, slug } from '../csv.js';
+import { lastEdit, lastOrder, orderHistory } from '../audit.js';
 
 const router = Router();
 
 const EVENT_COLUMNS = `e.id, e.name, e.event_date AS "date", e.guest_count AS "guestCount", e.created_at AS "createdAt", e.is_test AS "isTest",
   e.actual_guests AS "actualGuests", e.actual_revenue AS "actualRevenue", e.actual_cost AS "actualCost", e.notes,
-  e.vendor_fee AS "vendorFee", e.version`;
+  e.vendor_fee AS "vendorFee", e.kind, e.flat_price AS "flatPrice", e.hoamsy_percent AS "hoamsyPercent", e.labor_hours AS "laborHours", e.labor_rate AS "laborRate", e.version`;
 
-/** The vendor fee and after-the-event results, as columns to set: only the fields present in the body (blank clears one). */
+const eventKind = (v) => {
+  if (!EVENT_KINDS.includes(v)) throw badRequest('The event type must be a market, personal cheffing or a supper club');
+  return v;
+};
+
+/** The vendor fee, type and rate, and after-the-event results, as columns to set: only the fields present in the body (blank clears one). */
 function resultFields(body) {
   const fields = {
     vendorFee: ['vendor_fee', (v) => number(v, 'Vendor fee', { min: 0 })],
+    kind: ['kind', eventKind],
+    flatPrice: ['flat_price', (v) => number(v, body.kind === 'supper_club' ? 'Plate price' : 'Flat rate', { min: 0 })],
+    hoamsyPercent: ['hoamsy_percent', (v) => number(v, 'Hoamsy fee', { min: 0, max: 100, maxExclusive: true })],
     actualGuests: ['actual_guests', (v) => number(v, 'Actual guests', { integer: true, min: 0 })],
     actualRevenue: ['actual_revenue', (v) => number(v, 'Actual revenue', { min: 0 })],
     actualCost: ['actual_cost', (v) => number(v, 'Actual spend', { min: 0 })],
@@ -26,7 +35,7 @@ function resultFields(body) {
 
 /**
  * A recipe's price at this event: `salePrice` per serving (blank: the recipe's own price) and an
- * optional deal of `discountAmount` off every `discountQty` servings (blank count: per serving),
+ * optional deal of `dealQty` servings for `dealPrice` ("3 for $15"),
  * for a serving of `servingSize` in the recipe's yield unit (blank: the recipe's own size).
  * Returns only the fields present in `r`, as columns.
  */
@@ -34,17 +43,15 @@ function pricingFields(r, label) {
   const out = {};
   if ('salePrice' in r) out.sale_price = number(r.salePrice, `${label}: sale price`, { min: 0 });
   if ('servingSize' in r) out.serving_size = number(r.servingSize, `${label}: size per serving`, { min: 0.0001 });
-  if ('discountAmount' in r || 'discountQty' in r) {
-    const amount = number(r.discountAmount, `${label}: discount`, { min: 0 });
-    const qty = number(r.discountQty, `${label}: discount servings`, { integer: true, min: 1 });
-    const none = amount === null || Number(amount) === 0;
-    out.discount_amount = none ? null : amount;
-    out.discount_qty = none || qty === 1 ? null : qty;
+  if ('dealPrice' in r || 'dealQty' in r) {
+    out.deal_price = number(r.dealPrice, `${label}: deal price`, { min: 0, minExclusive: true });
+    out.deal_qty = number(r.dealQty, `${label}: deal servings`, { integer: true, min: 2 });
+    if ((out.deal_price === null) !== (out.deal_qty === null)) throw badRequest(`${label}: a deal needs how many and a price`);
   }
   return out;
 }
 
-const PRICING_COLUMNS = ['sale_price', 'discount_amount', 'discount_qty', 'serving_size'];
+const PRICING_COLUMNS = ['sale_price', 'deal_price', 'deal_qty', 'serving_size'];
 
 function eventFields(body) {
   const recipes = body.recipes === undefined
@@ -95,6 +102,8 @@ async function replaceRecipes(c, eventId, recipes) {
       `INSERT INTO event_recipes (event_id, recipe_id, expected_servings, ${PRICING_COLUMNS.join(', ')}) VALUES ($1,$2,$3${PRICING_COLUMNS.map((_, i) => `,$${i + 4}`).join('')})`,
       [eventId, r.recipeId, r.expectedServings, ...PRICING_COLUMNS.map((col) => p[col])],
     );
+    const had = before.get(r.recipeId);
+    if (r.pricing.deal_qty && (r.pricing.deal_qty !== had?.deal_qty || Number(r.pricing.deal_price) !== Number(had?.deal_price))) await rememberDeal(c, r.recipeId, r.pricing.deal_qty, r.pricing.deal_price);
   }
 }
 
@@ -118,7 +127,7 @@ async function getEvent(id) {
   const { rows: recipes } = await query(
     `SELECT er.recipe_id AS "recipeId", r.name, r.base_servings AS "baseServings",
             er.expected_servings AS "expectedServings", er.sale_price AS "salePrice",
-            er.discount_amount AS "discountAmount", er.discount_qty AS "discountQty", er.serving_size AS "servingSize"
+            er.deal_price AS "dealPrice", er.deal_qty AS "dealQty", er.serving_size AS "servingSize"
      FROM event_recipes er JOIN recipes r ON r.id = er.recipe_id
      WHERE er.event_id = $1 ORDER BY lower(r.name)`,
     [id],
@@ -142,7 +151,7 @@ router.get('/', async (req, res) => {
             count(er.recipe_id)::int AS "recipeCount",
             coalesce(sum(er.expected_servings), 0)::int AS "totalServings",
             (SELECT count(*)::int FROM event_blends eb WHERE eb.event_id = e.id) AS "sauceCount",
-            (SELECT count(*)::int FROM event_sales s WHERE s.event_id = e.id AND s.status IN ('placed', 'in_progress')) AS "openOrders",
+            (SELECT count(*)::int FROM event_sales s WHERE s.event_id = e.id AND s.status = 'in_progress') AS "openOrders",
             (SELECT max(s.created_at) FROM event_sales s WHERE s.event_id = e.id) AS "lastOrderAt"
      FROM events e LEFT JOIN event_recipes er ON er.event_id = e.id
      ${day ? 'WHERE e.event_date = $1' : ''}
@@ -158,8 +167,11 @@ router.post('/', async (req, res) => {
   try {
     const id = await tx(async (c) => {
       const { rows } = await c.query(
-        'INSERT INTO events (name, event_date, guest_count, vendor_fee) VALUES ($1,$2,$3,$4) RETURNING id',
-        [f.name, f.date, f.guestCount, number(req.body?.vendorFee, 'Vendor fee', { min: 0 })],
+        // Labor's rate starts at the newest event's, the rate most likely still paid.
+        `INSERT INTO events (name, event_date, guest_count, vendor_fee, kind, flat_price, labor_rate)
+         VALUES ($1,$2,$3,$4,$5,$6, (SELECT labor_rate FROM events WHERE labor_rate IS NOT NULL ORDER BY created_at DESC LIMIT 1)) RETURNING id`,
+        [f.name, f.date, f.guestCount, number(req.body?.vendorFee, 'Vendor fee', { min: 0 }),
+          req.body?.kind === undefined ? 'market' : eventKind(req.body.kind), number(req.body?.flatPrice, 'Rate', { min: 0 })],
       );
       if (f.recipes) await replaceRecipes(c, rows[0].id, f.recipes);
       if (f.sauces) await replaceSauces(c, rows[0].id, f.sauces, req.body);
@@ -172,8 +184,11 @@ router.post('/', async (req, res) => {
   }
 });
 
+// The event page's own read and save say who last edited the plan and entered an order; nothing else needs to look it up.
+const eventForPage = async (id, req) => ({ ...await getEvent(id), lastEditedBy: await lastEdit(id, req.ip), lastOrderBy: await lastOrder(id) });
+
 router.get('/:id', async (req, res) => {
-  res.json(await getEvent(uuid(req.params.id, 'id')));
+  res.json(await eventForPage(uuid(req.params.id, 'id'), req));
 });
 
 router.put('/:id', async (req, res) => {
@@ -200,7 +215,7 @@ router.put('/:id', async (req, res) => {
     if (fkViolation(err)) throw badRequest('One of the recipes or sauces no longer exists');
     throw err;
   }
-  res.json(await getEvent(id));
+  res.json(await eventForPage(id, req));
 });
 
 // Attach (or update) a single recipe — used by "Add to Event" in the gallery.
@@ -219,6 +234,8 @@ router.post('/:id/recipes', async (req, res) => {
         [id, recipeId, servings, ...pricing.map(([, v]) => v)],
       );
       await c.query('UPDATE events SET version = version + 1 WHERE id = $1', [id]);
+      const deal = Object.fromEntries(pricing);
+      if (deal.deal_qty) await rememberDeal(c, recipeId, deal.deal_qty, deal.deal_price);
     });
   } catch (err) {
     if (fkViolation(err)) throw notFound('Event or recipe');
@@ -235,8 +252,8 @@ router.post('/:id/duplicate', async (req, res) => {
   const day = date(req.body?.date, 'Date');
   const newId = await tx(async (c) => {
     const { rows } = await c.query(
-      `INSERT INTO events (name, event_date, guest_count, vendor_fee)
-       SELECT coalesce($2, name || ' (copy)'), coalesce($3::date, event_date), guest_count, vendor_fee FROM events WHERE id = $1
+      `INSERT INTO events (name, event_date, guest_count, vendor_fee, kind, flat_price, hoamsy_percent, labor_hours, labor_rate)
+       SELECT coalesce($2, name || ' (copy)'), coalesce($3::date, event_date), guest_count, vendor_fee, kind, flat_price, hoamsy_percent, labor_hours, labor_rate FROM events WHERE id = $1
        RETURNING id`,
       [id, name, day],
     );
@@ -254,6 +271,10 @@ router.post('/:id/duplicate', async (req, res) => {
     );
     await c.query(
       `INSERT INTO event_amounts (event_id, ingredient_id, amount) SELECT $2, ingredient_id, amount FROM event_amounts WHERE event_id = $1`,
+      [id, copy],
+    );
+    await c.query(
+      `INSERT INTO event_packs (event_id, ingredient_id, packs) SELECT $2, ingredient_id, packs FROM event_packs WHERE event_id = $1`,
       [id, copy],
     );
     return copy;
@@ -286,15 +307,18 @@ async function eventSummary(id) {
         targetPrice: r.targetPrice,
         expectedServings: er.expectedServings,
         salePrice: er.salePrice,
-        discountAmount: er.discountAmount,
-        discountQty: er.discountQty,
+        dealPrice: er.dealPrice,
+        dealQty: er.dealQty,
         lines: r.lines,
       };
     }),
     await loadAmounts(event.id),
     {
+      packs: await loadPacks(event.id),
       vendorFee: event.vendorFee,
       sauces: event.sauces.map((b) => ({ ...b, blend: blends.get(b.blendId) })),
+      labor: { hours: event.laborHours, rate: event.laborRate },
+      format: { kind: event.kind, flatPrice: event.flatPrice, tickets: event.guestCount, hoamsyPercent: event.hoamsyPercent },
     },
   );
   return { event, ...summary };
@@ -319,7 +343,7 @@ router.get('/:id/shopping-list.csv', async (req, res) => {
     ['Leftover', 'leftover'],
     ['Vendor', 'vendor', { text: true }],
     ['Used in', (l) => l.recipes.join('; '), { text: true }],
-  ], shoppingList.filter((l) => !isLabor(l))); // labor isn't bought
+  ], shoppingList);
 });
 
 // ---------- Sales recorded during the event ----------
@@ -327,7 +351,7 @@ router.get('/:id/shopping-list.csv', async (req, res) => {
 const PAYMENT_METHODS = ['cash', 'card', 'venmo', 'cashapp', 'free'];
 
 const orderStatus = (value) => {
-  if (!ORDER_STATUSES.includes(value)) throw badRequest('Status must be placed, in progress, completed or cancelled');
+  if (!ORDER_STATUSES.includes(value)) throw badRequest('Status must be in progress, completed or cancelled');
   return value;
 };
 
@@ -335,11 +359,11 @@ const orderStatus = (value) => {
 async function salesReport(eventId) {
   const { rows: sales } = await query(
     `SELECT s.id, s.payment_method AS "paymentMethod", s.created_at AS "createdAt", s.fee::text AS fee,
-            s.customer_name AS "customerName", s.status, s.status_changed_at AS "statusChangedAt",
+            s.customer_name AS "customerName", s.note, s.status, s.status_changed_at AS "statusChangedAt",
             s.in_progress_at AS "inProgressAt", s.completed_at AS "completedAt",
             json_agg(json_build_object(
               'recipeId', i.recipe_id, 'blendId', i.blend_id, 'name', i.name, 'quantity', i.quantity, 'unitPrice', i.unit_price::text,
-              'deals', i.deals, 'discount', i.discount::text, 'amount', i.amount::text) ORDER BY i.position) AS items
+              'deals', i.deals, 'discount', i.discount::text, 'amount', i.amount::text, 'note', i.note) ORDER BY i.position) AS items
        FROM event_sales s JOIN event_sale_items i ON i.sale_id = s.id
       WHERE s.event_id = $1
       GROUP BY s.id ORDER BY s.created_at DESC, s.id`,
@@ -400,43 +424,48 @@ async function salesReport(eventId) {
 router.get('/:id/sales', async (req, res) => {
   const id = uuid(req.params.id, 'id');
   await getEvent(id); // 404 for an unknown event
-  res.json(await salesReport(id));
+  const report = await salesReport(id);
+  if (req.query.history) report.history = await orderHistory(report.sales.map((s) => s.id));
+  res.json(report);
 });
 
 // Record one line: the items a customer bought and how they paid ('free': given away), with
-// the customer's name if given. It's completed unless a `status` says it's still to be made.
+// the customer's name and notes for the kitchen (on the order, and on each item) if given. It's
+// completed unless a `status` says it's still to be made (in_progress, started now).
 // Prices and deals come from the event's current pricing, not the request.
 router.post('/:id/sales', async (req, res) => {
   const id = uuid(req.params.id, 'id');
   const method = req.body?.paymentMethod;
   if (!PAYMENT_METHODS.includes(method)) throw badRequest('Choose how it was paid: cash, card, Venmo, Cash App, or given away');
   const customerName = text(req.body?.customerName, 'Name', { max: 120 });
+  const note = text(req.body?.note, 'Note', { max: 500 });
   const status = req.body?.status === undefined ? 'completed' : orderStatus(req.body.status);
   // An item is a recipe ({ recipeId }) or a sauce sold by the container ({ blendId }).
   const items = array(req.body?.items, 'items').map((it, i) => ({
     ...(it?.blendId ? { blendId: uuid(it.blendId, `Item ${i + 1}`) } : { recipeId: uuid(it?.recipeId, `Item ${i + 1}`) }),
     quantity: number(it?.quantity, `Item ${i + 1}: quantity`, { required: true, integer: true, min: 1 }),
-    dealUsed: it?.dealUsed === true,
+    note: text(it?.note, `Item ${i + 1}: note`, { max: 300 }),
   }));
   if (!items.length) throw badRequest('Add at least one item to the sale');
   const itemKey = (it) => it.recipeId ?? `blend:${it.blendId}`;
   if (new Set(items.map(itemKey)).size !== items.length) throw badRequest('List each recipe once, with its quantity');
 
-  const { recipes, sauces } = await eventSummary(id);
+  const summary = await eventSummary(id);
+  // A personal chef job or supper club is paid for up front: its POS only sends orders to the
+  // kitchen, every dish free (the summary gives them no price).
+  if (summary.kind !== 'market' && method !== 'free') throw badRequest('This event’s dishes are paid for up front: place them as an order, with no payment');
   const byId = new Map([
-    ...recipes.map((r) => [r.recipeId, r]),
-    ...sauces.map((b) => [`blend:${b.blendId}`, { ...b, recipeId: null }]),
+    ...summary.recipes.map((r) => [r.recipeId, r]),
+    ...summary.sauces.map((b) => [`blend:${b.blendId}`, { ...b, recipeId: null }]),
   ]);
   const free = method === 'free';
   const lines = items.map((it) => {
     const r = byId.get(itemKey(it));
-    if (!r) throw badRequest(it.blendId ? 'That sauce isn’t on this event’s menu' : 'That recipe isn’t on this event’s menu');
-    if (it.dealUsed && !free) {
-      if (!r.discountAmount) throw badRequest(`${r.name} has no deal at this event`);
-      if (it.quantity < (r.discountQty ?? 1)) throw badRequest(`${r.name}’s deal needs ${r.discountQty} or more`);
+    if (!r) {
+      throw badRequest(it.blendId ? 'That sauce isn’t on this event’s menu' : 'That recipe isn’t on this event’s menu');
     }
     try {
-      return { name: menuItemName(r), recipeId: r.recipeId, blendId: r.blendId ?? null, ...saleItem({ ...r, quantity: it.quantity, dealUsed: it.dealUsed, free }) };
+      return { name: menuItemName(r), note: it.note, recipeId: r.recipeId, blendId: r.blendId ?? null, recipeServings: r.recipeServings ?? '1', ...saleItem({ ...r, quantity: it.quantity, free }) };
     } catch (err) {
       if (err instanceof CalcError) throw badRequest(err.message);
       throw err;
@@ -445,37 +474,40 @@ router.post('/:id/sales', async (req, res) => {
   await tx(async (c) => {
     const total = lines.reduce((sum, l) => sum.plus(l.amount), new Decimal(0));
     const { rows } = await c.query(
-      `INSERT INTO event_sales (event_id, payment_method, fee, customer_name, status, in_progress_at)
-       VALUES ($1, $2, $3, $4, $5, CASE WHEN $5 = 'in_progress' THEN now() END) RETURNING id`,
-      [id, method, paymentFee(method, total), customerName, status],
+      `INSERT INTO event_sales (event_id, payment_method, fee, customer_name, note, status, in_progress_at)
+       VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 = 'in_progress' THEN now() END) RETURNING id`,
+      [id, method, paymentFee(method, total), customerName, note, status],
     );
     for (const [position, l] of lines.entries()) {
       await c.query(
-        `INSERT INTO event_sale_items (sale_id, position, recipe_id, blend_id, name, quantity, unit_price, deals, discount, amount)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [rows[0].id, position, l.recipeId, l.blendId, l.name, l.quantity, l.unitPrice, l.deals, l.discount, l.amount],
+        `INSERT INTO event_sale_items (sale_id, position, recipe_id, blend_id, name, quantity, unit_price, deals, discount, amount, recipe_servings, note)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [rows[0].id, position, l.recipeId, l.blendId, l.name, l.quantity, l.unitPrice, l.deals, l.discount, l.amount, l.recipeServings, l.note],
       );
     }
   });
   res.status(201).json(await salesReport(id));
 });
 
-// Change an order's name or status, at any point and in any direction: only the fields present.
-// Going back to placed starts its timing over, from when it was placed; back to in progress keeps its start.
+// Change an order's name, note or status, at any point and in any direction: only the fields
+// present. Back to in progress (reopened) keeps its start and clears its end.
 router.patch('/:id/sales/:saleId', async (req, res) => {
   const id = uuid(req.params.id, 'id');
   const body = req.body ?? {};
   const name = 'customerName' in body;
+  const note = 'note' in body;
   const status = 'status' in body ? orderStatus(body.status) : null;
   const { rowCount } = await query(
     `UPDATE event_sales SET
        customer_name = CASE WHEN $3 THEN $4 ELSE customer_name END,
+       note = CASE WHEN $6 THEN $7 ELSE note END,
        status = coalesce($5, status),
        status_changed_at = CASE WHEN status IS DISTINCT FROM coalesce($5, status) THEN now() ELSE status_changed_at END,
-       in_progress_at = CASE WHEN $5 = 'placed' THEN NULL WHEN $5 = 'in_progress' THEN coalesce(in_progress_at, now()) ELSE in_progress_at END,
-       completed_at = CASE WHEN $5 IN ('placed', 'in_progress') THEN NULL WHEN $5 = 'completed' AND status <> 'completed' THEN now() ELSE completed_at END
+       in_progress_at = CASE WHEN $5 = 'in_progress' THEN coalesce(in_progress_at, now()) ELSE in_progress_at END,
+       completed_at = CASE WHEN $5 = 'in_progress' THEN NULL WHEN $5 = 'completed' AND status <> 'completed' THEN now() ELSE completed_at END
      WHERE id = $1 AND event_id = $2`,
-    [uuid(req.params.saleId, 'saleId'), id, name, name ? text(body.customerName, 'Name', { max: 120 }) : null, status],
+    [uuid(req.params.saleId, 'saleId'), id, name, name ? text(body.customerName, 'Name', { max: 120 }) : null, status,
+      note, note ? text(body.note, 'Note', { max: 500 }) : null],
   );
   if (!rowCount) throw notFound('Order');
   res.json(await salesReport(id));
@@ -490,12 +522,34 @@ router.delete('/:id/sales/:saleId', async (req, res) => {
   res.status(204).end();
 });
 
+async function loadPacks(eventId) {
+  const { rows } = await query('SELECT ingredient_id, packs FROM event_packs WHERE event_id = $1', [eventId]);
+  return Object.fromEntries(rows.map((r) => [r.ingredient_id, r.packs]));
+}
+
 async function loadAmounts(eventId) {
   const { rows } = await query('SELECT ingredient_id, amount FROM event_amounts WHERE event_id = $1', [eventId]);
   return Object.fromEntries(rows.map((r) => [r.ingredient_id, r.amount]));
 }
 
-// Set the shopping list's "needed" amount for one ingredient by hand (labor), or clear it
+// The event's labor, from its Financials: `hours` and the hourly `rate`, only the fields present
+// (a blank rate clears it). Apart from the plan's versioned save, which never sends them.
+router.put('/:id/labor', async (req, res) => {
+  const id = uuid(req.params.id, 'id');
+  const body = req.body ?? {};
+  const sets = [];
+  if ('hours' in body) sets.push(['labor_hours', number(body.hours, 'Hours', { required: true, min: 0, max: 999999 })]);
+  if ('rate' in body) sets.push(['labor_rate', number(body.rate, 'Rate', { min: 0, max: 99999999 })]);
+  if (!sets.length) throw badRequest('Send hours or a rate');
+  const { rowCount } = await query(
+    `UPDATE events SET ${sets.map(([col], i) => `${col} = $${i + 2}`).join(', ')} WHERE id = $1`,
+    [id, ...sets.map(([, v]) => v)],
+  );
+  if (!rowCount) throw notFound('Event');
+  res.json(await eventSummary(id));
+});
+
+// Set the shopping list's "needed" amount for one ingredient by hand, or clear it
 // to go back to the recipes' scaled total.
 router.put('/:id/amounts/:ingredientId', async (req, res) => {
   const id = uuid(req.params.id, 'id');
@@ -512,6 +566,31 @@ router.put('/:id/amounts/:ingredientId', async (req, res) => {
     throw err;
   }
   res.status(204).end();
+});
+
+// Set the shopping list's packs to buy for one ingredient by hand (stock on hand, a spare), or
+// clear it to go back to whole packs covering what's needed. Answers with the new summary.
+router.put('/:id/packs/:ingredientId', async (req, res) => {
+  const id = uuid(req.params.id, 'id');
+  const ingredientId = uuid(req.params.ingredientId, 'ingredientId');
+  const packs = number(req.body?.packs, 'Packs to buy', { required: true, min: 0, max: 99999999 });
+  try {
+    await query(
+      `INSERT INTO event_packs (event_id, ingredient_id, packs) VALUES ($1,$2,round($3::numeric, 2))
+       ON CONFLICT (event_id, ingredient_id) DO UPDATE SET packs = EXCLUDED.packs`,
+      [id, ingredientId, packs],
+    );
+  } catch (err) {
+    if (fkViolation(err)) throw notFound('Event or ingredient');
+    throw err;
+  }
+  res.json(await eventSummary(id));
+});
+
+router.delete('/:id/packs/:ingredientId', async (req, res) => {
+  const id = uuid(req.params.id, 'id');
+  await query('DELETE FROM event_packs WHERE event_id = $1 AND ingredient_id = $2', [id, uuid(req.params.ingredientId, 'ingredientId')]);
+  res.json(await eventSummary(id));
 });
 
 router.delete('/:id/amounts/:ingredientId', async (req, res) => {

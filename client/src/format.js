@@ -72,6 +72,13 @@ export function dateTime(iso) {
   return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+/** '19:29' → '7:29 PM'; '' when there's no time. */
+export function clock(hhmm) {
+  if (!hhmm) return '';
+  const [h, m] = hhmm.split(':').map(Number);
+  return new Date(2000, 0, 1, h, m).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
 export const todayIso = () => new Date().toLocaleDateString('en-CA');
 
 export { Decimal, toDecimal };

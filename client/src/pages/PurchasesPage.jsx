@@ -2,15 +2,45 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api, imageForm, notifyDataChanged } from '../api.js';
 import { useApi, useLeaveGuard } from '../hooks.js';
-import { date, dateTime, money, pack, perUnit, qty, toDecimal, unitMoney } from '../format.js';
+import { clock, date, dateTime, money, pack, perUnit, qty, toDecimal, unitMoney } from '../format.js';
 import ImageGallery from '../components/ImageGallery.jsx';
 import ReviewLinesTable, { rowsSnapshot, toRow, toPurchaseItem, savedMessage } from '../components/ReviewLines.jsx';
 import { Icon, LeaveModal, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
 import { ReceiptImportForm } from '../components/forms.jsx';
+import { IngredientDrawer } from '../components/IngredientDrawer.jsx';
+
+// Sortable columns; `first` is the direction a column starts in (newest, largest first).
+const COLUMNS = [
+  { key: 'printed', label: 'Date', first: -1 },
+  { key: 'vendor', label: 'Vendor', first: 1 },
+  { key: 'lineCount', label: 'Lines saved', num: true, first: -1 },
+  { key: 'savedTotal', label: 'Saved total', num: true, first: -1 },
+  { key: 'createdAt', label: 'Imported', first: -1 },
+];
+
+/** When the receipt was printed, as sortable text: its date and time, else the day it was imported. */
+const printed = (r) => `${r.date ?? r.createdAt.slice(0, 10)}T${r.time ?? '00:00'}`;
+
+function compare(a, b, key, num) {
+  const av = key === 'printed' ? printed(a) : a[key];
+  const bv = key === 'printed' ? printed(b) : b[key];
+  if (av == null && bv == null) return 0;
+  if (av == null) return 1;
+  if (bv == null) return -1;
+  if (num) return toDecimal(av).cmp(toDecimal(bv));
+  return String(av).localeCompare(String(bv), undefined, { sensitivity: 'base' });
+}
 
 export default function PurchasesPage() {
   const { data, error, loading } = useApi('/receipts');
   const [importing, setImporting] = useState(false);
+  const [sort, setSort] = useState({ key: 'printed', dir: -1 });
+  const toggleSort = (c) => setSort((s) => ({ key: c.key, dir: s.key === c.key ? -s.dir : c.first }));
+  const rows = useMemo(() => {
+    const col = COLUMNS.find((c) => c.key === sort.key);
+    // Ties (a vendor's receipts, say) newest first.
+    return (data ?? []).slice().sort((a, b) => sort.dir * compare(a, b, sort.key, col.num) || compare(b, a, 'printed') || b.createdAt.localeCompare(a.createdAt));
+  }, [data, sort]);
   return (
     <main className="page">
       <div className="page-head">
@@ -38,10 +68,20 @@ export default function PurchasesPage() {
         <section className="panel table-wrap">
           <table className="grid">
             <thead>
-              <tr><th>Photos</th><th>Vendor</th><th>Date</th><th className="num">Lines saved</th><th className="num">Saved total</th><th>Imported</th></tr>
+              <tr>
+                <th>Photos</th>
+                {COLUMNS.map((c) => (
+                  <th key={c.key} className={c.num ? 'num' : ''} aria-sort={sort.key === c.key ? (sort.dir > 0 ? 'ascending' : 'descending') : 'none'}>
+                    <button className="sort-btn" onClick={() => toggleSort(c)}>
+                      {c.label}
+                      {sort.key === c.key && (sort.dir > 0 ? <Icon.up /> : <Icon.down />)}
+                    </button>
+                  </th>
+                ))}
+              </tr>
             </thead>
             <tbody>
-              {data.map((r) => (
+              {rows.map((r) => (
                 <tr key={r.id}>
                   <td>
                     {r.images.length ? (
@@ -51,8 +91,8 @@ export default function PurchasesPage() {
                       </Link>
                     ) : <span className="muted">None</span>}
                   </td>
+                  <td className="nowrap">{date(r.date)}{r.time && <small className="muted"> {clock(r.time)}</small>}</td>
                   <td><Link to={`/purchases/${r.id}`} style={{ fontWeight: 650, color: 'inherit' }}>{r.vendor ?? 'Unknown vendor'}</Link> <TestBadge item={r} /></td>
-                  <td className="nowrap">{date(r.date)}</td>
                   <td className="num">{r.lineCount}{r.pendingCount > 0 && <> <span className="badge new">{r.pendingCount} not saved</span></>}</td>
                   <td className="num">{money(r.savedTotal)}</td>
                   <td className="nowrap muted">{dateTime(r.createdAt)}</td>
@@ -73,6 +113,7 @@ export function ReceiptDetailPage() {
   const [photoError, setPhotoError] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [showSource, setShowSource] = useState(false);
+  const [viewing, setViewing] = useState(null); // ingredient id whose panel is open over the receipt
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -92,6 +133,18 @@ export function ReceiptDetailPage() {
     }
   };
 
+  // Not photoAction: its busy state reads "Uploading…" on the add tile, and the gallery shows its own.
+  const rotate = async (img, direction) => {
+    setPhotoError(null);
+    try {
+      const turned = await api(`/images/${img.id}/rotate`, { method: 'POST', body: { direction } });
+      setData({ ...r, images: r.images.map((i) => (i.id === turned.id ? turned : i)) });
+      notifyDataChanged();
+    } catch (err) {
+      setPhotoError(err.message);
+    }
+  };
+
   const remove = async () => {
     await api(`/receipts/${id}`, { method: 'DELETE' });
     notifyDataChanged();
@@ -106,7 +159,7 @@ export function ReceiptDetailPage() {
           <Link to="/purchases" className="muted">Purchases</Link>
           <h1>{r.vendor ?? 'Unknown vendor'}<TestBadge item={r} /></h1>
           <p>
-            {date(r.date)}. {r.lineCount} {r.lineCount === 1 ? 'line' : 'lines'} saved for {money(r.savedTotal)}
+            {date(r.date)}{r.time ? `, ${clock(r.time)}` : ''}. {r.lineCount} {r.lineCount === 1 ? 'line' : 'lines'} saved for {money(r.savedTotal)}
             {r.pendingLines.length > 0 ? `, ${r.pendingLines.length} not saved yet` : ''}.
           </p>
         </div>
@@ -125,6 +178,7 @@ export function ReceiptDetailPage() {
             busy={busy}
             onAdd={(files) => photoAction(async () => [...r.images, ...(await api(`/receipts/${id}/images`, { method: 'POST', body: imageForm(files) }))])}
             onRemove={(img) => photoAction(async () => { await api(`/images/${img.id}`, { method: 'DELETE' }); return r.images.filter((i) => i.id !== img.id); })}
+            onRotate={rotate}
           />
           {photoError && <Notice kind="error">{photoError}</Notice>}
         </div>
@@ -140,7 +194,7 @@ export function ReceiptDetailPage() {
           <tbody>
             {r.purchases.map((p) => (
               <tr key={p.id}>
-                <td><Link to={`/ingredients?open=${p.ingredientId}`} style={{ color: 'inherit', fontWeight: 600 }}>{p.ingredientName}</Link></td>
+                <td><button type="button" className="line-name" data-tip="View/edit" aria-label={`${p.ingredientName}: view/edit`} onClick={() => setViewing(p.ingredientId)}>{p.ingredientName}</button></td>
                 <td>{p.category ?? '—'}</td>
                 <td className="num nowrap" style={{ fontWeight: 650 }}>{perUnit(toDecimal(p.unitCost).div(p.packSize), p.uom)}</td>
                 <td className="num">{qty(p.quantity)}</td>
@@ -157,6 +211,7 @@ export function ReceiptDetailPage() {
       </section>
 
       {r.pendingLines.length > 0 && <PendingLines receipt={r} />}
+      {viewing && <IngredientDrawer id={viewing} onClose={() => setViewing(null)} />}
 
       {showSource && (
         <Modal title="Receipt JSON" onClose={() => setShowSource(false)}>

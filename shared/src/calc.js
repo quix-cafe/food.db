@@ -3,23 +3,15 @@
 // through decimal.js; numbers are returned as strings to keep JSON float-free.
 
 import DecimalBase from 'decimal.js';
-import { SAUCE_CONTAINERS, SAUCE_GRAMS_PER_TSP, SPICE_GRAMS_PER_TSP, itemAmounts } from './units.js';
+import { SAUCE_CONTAINERS, SAUCE_GRAMS_PER_TSP, SPICE_GRAMS_PER_TSP, itemAmounts, lineAmountInUom } from './units.js';
 
 export const Decimal = DecimalBase.clone({ precision: 40, rounding: DecimalBase.ROUND_HALF_UP });
 
-export const DEFAULT_MARGIN = 70;
+export const DEFAULT_MARGIN = 75;
 export const COST_DP = 4;
 export const MONEY_DP = 2;
 
 export class CalcError extends Error {}
-
-const LABOR = /^labou?r$/i;
-
-/** Labor is costed like an ingredient but always listed last: category or name "Labor". */
-export const isLabor = (item) => LABOR.test((item?.category ?? '').trim()) || LABOR.test((item?.name ?? '').trim());
-
-/** Stable reorder that keeps relative order but moves labor to the end. */
-export const laborLast = (items) => [...items.filter((i) => !isLabor(i)), ...items.filter(isLabor)];
 
 /** Parse a number/string into a Decimal, or null when blank or not numeric. */
 export function toDecimal(value) {
@@ -86,13 +78,20 @@ export function combinePurchases(purchases) {
   };
 }
 
-/** Fill in whichever of unit cost / total cost is missing from the other and quantity. */
+/**
+ * Fill in whichever of unit cost / total cost is missing from the other and quantity. Given both,
+ * they must agree: quantity × unit cost may differ from the total by rounding (2.46 lb at $2.39 is
+ * $5.8794, printed $5.88), but not by more than a cent and a hair per unit.
+ */
 export function completePurchaseCosts({ quantity, unitCost, totalCost }) {
   const q = toDecimal(quantity);
   let u = toDecimal(unitCost);
   let t = toDecimal(totalCost);
   if (!q || q.lte(0)) throw new CalcError('Quantity must be greater than 0');
   if (u === null && t === null) throw new CalcError('Enter a unit cost or a total cost');
+  if (u !== null && t !== null && u.times(q).minus(t).abs().gt(q.times('0.00005').plus('0.01'))) {
+    throw new CalcError(`${q.toString()} × $${u.toFixed(2)} is $${u.times(q).toFixed(2)}, but the total is $${t.toFixed(2)}. Correct the quantity, the price or the total so they agree.`);
+  }
   if (u === null) u = t.div(q);
   if (t === null) t = u.times(q);
   return { unitCost: cost(u), totalCost: cost(t) };
@@ -107,9 +106,12 @@ function requirePositive(value, label) {
 /**
  * Cost a recipe and scale it to `expectedServings` without touching its base values.
  *
- * lines: [{ packPrice, packSize, amount, ...passthrough }]
+ * lines: [{ packPrice, packSize, amount, unit?, uom?, cupGrams?, ...passthrough }]
  *   packPrice / packSize come from the ingredient's most recent purchase (packPrice null if
- *   never bought); amount is how much of the ingredient's unit of measure the recipe uses.
+ *   never bought); amount is how much the recipe uses, in `unit` when the line has one (cups of
+ *   rice bought by the lb, converted by lineAmountInUom), else in the ingredient's unit of
+ *   measure. A line whose unit can't be converted costs nothing and says so (`unitProblem`).
+ *   `scaledAmount` is in the ingredient's unit of measure (for shopping), `scaledLineAmount` in the line's.
  * targetPrice: a menu price set by hand. It's the price whatever the cost, and `targetMargin`
  *   comes back as the margin it makes (below 0 once the cost passes it); `priceSet` says so.
  *   Without one, the price follows the cost at targetMargin.
@@ -139,15 +141,21 @@ export function calculateRecipe({
     if (amount.lt(0)) throw new CalcError('Amount used cannot be negative');
     if (packPrice === null) warnings.push(`${line.name ?? 'An ingredient'} has no purchase price yet`);
 
+    const used = lineAmountInUom(amount, line.unit, line);
+    if (used === null) warnings.push(`${line.name ?? 'An ingredient'}: can’t convert ${line.unit} to ${line.uom ?? 'its unit'}; set what a cup of it weighs`);
+
     const perUnit = packPrice === null ? new Decimal(0) : unitPrice(packPrice, line.packSize);
-    const itemCost = lineCost(perUnit, amount);
+    const itemCost = lineCost(perUnit, used ?? 0);
     baseCost = baseCost.plus(itemCost);
     return {
       ...line,
       missingPrice: packPrice === null,
+      unitProblem: used === null,
       unitPrice: packPrice === null ? null : cost(perUnit),
+      amountInUom: used === null ? null : cost(used),
       baseCost: cost(itemCost),
-      scaledAmount: cost(amount.times(scale)),
+      scaledAmount: cost((used ?? new Decimal(0)).times(scale)),
+      scaledLineAmount: cost(amount.times(scale)),
       scaledCost: cost(itemCost.times(scale)),
     };
   });
@@ -188,35 +196,48 @@ export function calculateRecipe({
  *   usedCost     = Σ recipe line costs             (what the recipes consume; sums to totalCost)
  *   purchaseCost = packsToBuy × Pack_Price         (what buying those whole packs costs)
  *   leftover     = packsToBuy × Pack_Size − amount (what's left of those packs, in the UOM)
+ * packs: { [ingredientId]: packs } — packs to buy set by hand (stock on hand, a spare): they
+ *   replace packsToBuy (`packsSet`, with `calculatedPacks`), so purchaseCost and leftover follow
+ *   (below 0: the rest comes from stock), never the food cost; `packsAdjustment` is what they
+ *   changed purchaseCost by.
  *
  * recipes: [{ recipeId, name, baseServings, targetMargin, expectedServings, servingSize?, totalYield?, yieldUnit?, lines }]
  *   where lines carry { ingredientId, name, uom, packPrice, packSize, amount }. expectedServings
  *   count this event's servings, so `servingSize` scales the food by eventServing's ratio.
- * amounts: { [ingredientId]: amount } set by hand for the event (e.g. labor). It replaces
+ * amounts: { [ingredientId]: amount } set by hand for the event. It replaces
  *   the scaled total; usedCost becomes amount × price per unit, and the difference from the
  *   recipes' cost is reported as `adjustment` and included in totalCost and profit.
  */
+/** What a deal of `dealQty` for `dealPrice` saves each time it applies; null with no deal, or one that isn't cheaper. */
+function dealSaving(price, dealPrice, dealQty) {
+  const together = toDecimal(dealPrice);
+  const qty = toDecimal(dealQty);
+  if (!together || !qty) return null;
+  const saving = price.times(qty).minus(together);
+  return saving.gt(0) ? saving : null;
+}
+
 /**
  * A recipe's price at one event. `salePrice` (per serving) replaces the recipe's own target price
- * when set. A deal takes `discountAmount` off every `discountQty` servings ("buy 2, get $1 off" is
- * $1 per 2; the default is per serving) and is assumed to apply to every serving sold, so the
- * projection is the cautious one. Margin per serving is after the discount.
+ * when set. A deal sells `dealQty` servings for `dealPrice` ("3 for $15") and is assumed to apply to
+ * every serving sold, so the projection is the cautious one. Margin per serving is after the deal.
+ * A deal that isn't cheaper than the servings at their price doesn't count, and comes back null.
  */
-export function eventPricing({ costPerServing, recommendedPrice, salePrice = null, discountAmount = null, discountQty = null, expectedServings = 0 }) {
+export function eventPricing({ costPerServing, recommendedPrice, salePrice = null, dealPrice = null, dealQty = null, expectedServings = 0 }) {
   const listPrice = (toDecimal(salePrice) ?? toDecimal(recommendedPrice) ?? new Decimal(0)).toDecimalPlaces(MONEY_DP);
-  const off = toDecimal(discountAmount) ?? new Decimal(0);
-  const per = toDecimal(discountQty) ?? new Decimal(1);
-  if (listPrice.lt(0) || off.lt(0)) throw new CalcError('Prices and discounts cannot be negative');
-  if (!per.isInteger() || per.lt(1)) throw new CalcError('A discount applies per 1 or more servings');
+  const qty = toDecimal(dealQty);
+  if (listPrice.lt(0) || toDecimal(dealPrice)?.lt(0)) throw new CalcError('Prices and deals cannot be negative');
+  if (qty && (!qty.isInteger() || qty.lt(2))) throw new CalcError('A deal is for 2 or more servings');
   const expected = toDecimal(expectedServings) ?? new Decimal(0);
-  const netPrice = listPrice.minus(off.div(per));
+  const saving = dealSaving(listPrice, dealPrice, dealQty);
+  const netPrice = saving ? listPrice.minus(saving.div(qty)) : listPrice;
   const margin = netPrice.minus(toDecimal(costPerServing) ?? 0);
-  const discount = off.times(expected.div(per).floor());
+  const discount = saving ? saving.times(expected.div(qty).floor()) : new Decimal(0);
   return {
     salePrice: money(listPrice),
     priceSet: toDecimal(salePrice) !== null,
-    discountAmount: off.isZero() ? null : money(off),
-    discountQty: off.isZero() ? null : per.toNumber(),
+    dealPrice: saving ? money(toDecimal(dealPrice)) : null,
+    dealQty: saving ? qty.toNumber() : null,
     netPrice: cost(netPrice),
     marginPerServing: cost(margin),
     marginPercent: netPrice.gt(0) ? margin.div(netPrice).times(100).toFixed(1) : null,
@@ -280,31 +301,30 @@ export function paymentFee(method, amount) {
 }
 
 /**
- * One recipe on a sale recorded during an event: what it's charged. With `dealUsed`, the
- * recipe's deal applies as many times as the quantity allows (3 on "buy 2, $1 off" is one deal).
+ * One recipe on a sale recorded during an event: what it's charged. The recipe's deal applies by
+ * itself as many times as the quantity allows (4 on "3 for $15" is one deal and one at full price).
  * Items given away (`free`) are charged nothing and use no deal.
  */
-export function saleItem({ quantity, salePrice, discountAmount = null, discountQty = null, dealUsed = false, free = false }) {
+export function saleItem({ quantity, salePrice, dealPrice = null, dealQty = null, free = false }) {
   const q = toDecimal(quantity);
   if (!q || !q.isInteger() || q.lt(1)) throw new CalcError('Quantity must be a whole number, 1 or more');
   const price = toDecimal(salePrice) ?? new Decimal(0);
-  const off = toDecimal(discountAmount) ?? new Decimal(0);
-  const per = toDecimal(discountQty) ?? new Decimal(1);
-  const deals = dealUsed && !free && off.gt(0) ? q.div(per).floor() : new Decimal(0);
-  const discount = off.times(deals);
-  const amount = free ? new Decimal(0) : Decimal.max(0, price.times(q).minus(discount));
+  const saving = free ? null : dealSaving(price, dealPrice, dealQty);
+  const deals = saving ? q.div(dealQty).floor() : new Decimal(0);
+  const discount = saving ? saving.times(deals) : new Decimal(0);
+  const amount = free ? new Decimal(0) : price.times(q).minus(discount);
   return { quantity: q.toNumber(), unitPrice: money(price), deals: deals.toNumber(), discount: money(discount), amount: money(amount) };
 }
 
-/** Where an order is, in queue order. Placed and in progress are still open; a cancelled order counts toward nothing. */
-export const ORDER_STATUSES = ['placed', 'in_progress', 'completed', 'cancelled'];
-export const OPEN_ORDER_STATUSES = ['placed', 'in_progress'];
+/** Where an order is. An order goes straight to the kitchen, so it's in progress until it's done; a cancelled one counts toward nothing. */
+export const ORDER_STATUSES = ['in_progress', 'completed', 'cancelled'];
+export const OPEN_ORDER_STATUSES = ['in_progress'];
 
 /**
- * How long an order has taken, in whole seconds: `waiting` from placed to started, `making` from
- * started to completed, `total` from placed to completed, each null when it doesn't apply (an
- * order completed without being started, a sale handed over on the spot). An open order's current
- * stage counts up to `now` and is named by `running`. Timestamps come from the server.
+ * How long an order has taken, in whole seconds: `making` from started (normally when it was
+ * placed) to completed, `total` from placed to completed, each null when it doesn't apply (a sale
+ * handed over on the spot). An open order counts up to `now` and is named by `running`.
+ * Timestamps come from the server.
  */
 export function orderTimes({ createdAt, inProgressAt = null, completedAt = null, status }, now = Date.now()) {
   const at = (t) => new Date(t).getTime();
@@ -312,13 +332,11 @@ export function orderTimes({ createdAt, inProgressAt = null, completedAt = null,
   const placed = at(createdAt);
   const started = inProgressAt ? at(inProgressAt) : null;
   const ended = completedAt ? at(completedAt) : null;
-  const isPlaced = status === 'placed';
   const isMaking = status === 'in_progress';
   return {
-    waiting: span(placed, started ?? (isPlaced ? now : null)),
     making: span(started, ended ?? (isMaking ? now : null)),
-    total: span(placed, ended ?? (isPlaced || isMaking ? now : null)),
-    running: isPlaced ? 'waiting' : isMaking ? 'making' : null,
+    total: span(started === null && ended === null ? null : placed, ended ?? (isMaking ? now : null)),
+    running: isMaking ? 'making' : null,
   };
 }
 
@@ -329,7 +347,7 @@ export function orderTimingSummary(sales) {
     const seen = timed.map((t) => t[key]).filter((v) => v !== null);
     return seen.length ? Math.round(seen.reduce((a, b) => a + b, 0) / seen.length) : null;
   };
-  return { count: timed.length, waiting: average('waiting'), making: average('making'), total: average('total') };
+  return { count: timed.length, making: average('making'), total: average('total') };
 }
 
 /**
@@ -380,12 +398,38 @@ export function sauceContainer(blend, container = null) {
 }
 
 /**
+ * How an event makes its money. A market sells each recipe by the serving at its own price. A
+ * personal chef job is a flat rate plus the groceries at cost; a supper club sells tickets, each a
+ * plate of everything on the menu at one price, and Hoamsy keeps a share of every ticket.
+ */
+export const EVENT_KINDS = ['market', 'personal_chef', 'supper_club'];
+export const HOAMSY_FEE_PERCENT = 25; // the default; each supper club can set its own
+
+/**
  * `vendorFee`: what the event charges for the stand, taken off the profit (not part of the food cost).
  * `sauces`: [{ blend (a loadBlends row), servings, container, salePrice }] — a sauce on the menu,
  *   sold by the serving (no deals) and made in whole containers: its cost is the containers
  *   made, and their ingredients join the shopping list.
+ * labor: { hours, rate } — the event's own labor (not in recipes, not bought): hours × rate is
+ *   part of totalCost, and comes back as `labor` with its `cost`.
+ * format: { kind, flatPrice, tickets, hoamsyPercent } — a personal chef job (`flatPrice` the flat
+ *   rate) or supper club (`flatPrice` a ticket, × `tickets`) has no per-recipe prices. Labor and the
+ *   vendor fee are passed through at cost (`flat.passThrough`): they're paid out first, and what's
+ *   left of the rate (for a personal chef job, plus the groceries the client pays for) is shared out
+ *   by each item's share of the food cost as its revenue. Its margin per serving is that less its
+ *   food and its share of amounts set by hand, so it's a margin on food, like a market recipe's; its
+ *   `profit` is revenue less its own food, so the Financials columns add up.
+ *   Hoamsy takes its fee (`hoamsyPercent`, default HOAMSY_FEE_PERCENT) off a supper club's tickets
+ *   first: only what's left is revenue, and that is what's shared out. `flat.suggestedPrice` is the
+ *   plate price or flat rate that sells the food at DEFAULT_MARGIN and covers labor and the vendor
+ *   fee at cost (so a $50 fee adds $50 of revenue, not $200).
+ * The summary's `grossMarginPercent` is the food's revenue less the food (amounts set by hand
+ *   included) over the food's revenue: the revenue, or at a flat-rate event what's left of it once
+ *   labor and the vendor fee are paid back, so it's the dishes' margin (75% at `suggestedPrice`).
+ *   `marginPercent` is the net margin, profit over all the revenue. A supper club's revenue is what's
+ *   left after Hoamsy's fee.
  */
-export function summarizeEvent(recipes = [], amounts = {}, { vendorFee = null, sauces = [] } = {}) {
+export function summarizeEvent(recipes = [], amounts = {}, { vendorFee = null, sauces = [], labor = null, format = null, packs = {} } = {}) {
   const fee = toDecimal(vendorFee) ?? new Decimal(0);
   let totalCost = new Decimal(0);
   let revenue = new Decimal(0);
@@ -417,7 +461,7 @@ export function summarizeEvent(recipes = [], amounts = {}, { vendorFee = null, s
     entry.amount = entry.amount.plus(amount);
     entry.usedCost = entry.usedCost.plus(used);
     entry.missingPrice ||= missingPrice;
-    if (!entry.recipes.includes(source)) entry.recipes.push(source);
+    if (source && !entry.recipes.includes(source)) entry.recipes.push(source);
   };
 
   const recipeSummaries = recipes.map((r) => {
@@ -435,8 +479,8 @@ export function summarizeEvent(recipes = [], amounts = {}, { vendorFee = null, s
       costPerServing: served.costPerServing,
       recommendedPrice: served.recommendedPrice,
       salePrice: r.salePrice,
-      discountAmount: r.discountAmount,
-      discountQty: r.discountQty,
+      dealPrice: r.dealPrice,
+      dealQty: r.dealQty,
       expectedServings: sold,
     });
     totalCost = totalCost.plus(calc.scaledCost);
@@ -452,10 +496,10 @@ export function summarizeEvent(recipes = [], amounts = {}, { vendorFee = null, s
       baseServings: calc.baseServings,
       targetMargin: calc.targetMargin,
       scaledCost: calc.scaledCost,
-      // The part of scaledCost that is labor, so Financials can list labor as its own cost.
-      laborCost: cost(calc.lines.filter(isLabor).reduce((sum, l) => sum.plus(l.scaledCost), new Decimal(0))),
       servingSize: r.servingSize ?? null, // at this event; null: the recipe's own
       servingLabel: served.servingLabel,
+      servingUnit: served.unit,
+      recipeServings: served.ratio.toString(), // of the recipe's own size, in one event serving
       costPerServing: served.costPerServing,
       recommendedPrice: served.recommendedPrice, // the recipe's own target price, for this size of serving
       ...pricing, // salePrice (what it sells for here), discount, revenue, margin per serving
@@ -519,25 +563,104 @@ export function summarizeEvent(recipes = [], amounts = {}, { vendorFee = null, s
     Object.assign(e, { calculatedAmount: cost(e.amount), amount: set, usedCost: used, amountSet: true });
   }
   totalCost = totalCost.plus(adjustment);
+  const hours = toDecimal(labor?.hours) ?? new Decimal(0);
+  const rate = toDecimal(labor?.rate);
+  const laborCost = rate ? hours.times(rate) : new Decimal(0);
+  totalCost = totalCost.plus(laborCost);
 
+  const kind = EVENT_KINDS.includes(format?.kind) ? format.kind : 'market';
+  let hoamsyFee = new Decimal(0);
+  let flat = null;
+  if (kind !== 'market') {
+    const items = [...recipeSummaries, ...sauceSummaries];
+    const food = items.map((i) => new Decimal(i.scaledCost));
+    const totalFood = food.reduce((a, b) => a.plus(b), new Decimal(0));
+    const price = toDecimal(format.flatPrice) ?? new Decimal(0);
+    if (price.lt(0)) throw new CalcError('The rate cannot be negative');
+    const supper = kind === 'supper_club';
+    const tickets = supper ? toDecimal(format.tickets) ?? new Decimal(0) : null;
+    const hoamsy = supper ? toDecimal(format.hoamsyPercent) ?? new Decimal(HOAMSY_FEE_PERCENT) : new Decimal(0);
+    if (hoamsy.lt(0) || hoamsy.gte(100)) throw new CalcError('The Hoamsy fee must be from 0 to under 100%');
+    const keep = new Decimal(1).minus(hoamsy.div(100)); // of each ticket, after Hoamsy's cut
+    const gross = supper ? price.times(tickets) : price;
+    hoamsyFee = gross.minus(gross.times(keep));
+    const pool = gross.minus(hoamsyFee);
+    const groceries = kind === 'personal_chef' ? totalFood.plus(adjustment) : new Decimal(0);
+    // Labor and the vendor fee are passed through at cost: they're paid out of the money first, and
+    // only what's left is shared across the menu as its revenue, so a dish's margin is on its food.
+    const passThrough = laborCost.plus(fee);
+    const forFood = pool.plus(groceries).minus(passThrough);
+    items.forEach((item, i) => {
+      const share = totalFood.gt(0) ? food[i].div(totalFood) : new Decimal(1).div(items.length);
+      // A personal chef job's groceries are billed in full (amounts set by hand too), each item its share;
+      // amounts set by hand are food, so each item carries its share of them.
+      const itemRevenue = forFood.times(share);
+      const made = itemRevenue.minus(food[i]).minus(adjustment.times(share));
+      const servings = new Decimal(item.expectedServings);
+      Object.assign(item, {
+        salePrice: null,
+        priceSet: false,
+        dealPrice: null,
+        dealQty: null,
+        discount: money(new Decimal(0)),
+        share: share.times(100).toFixed(1),
+        netPrice: servings.gt(0) ? cost(itemRevenue.div(servings)) : null,
+        marginPerServing: servings.gt(0) ? cost(made.div(servings)) : null,
+        marginPercent: itemRevenue.gt(0) ? made.div(itemRevenue).times(100).toFixed(1) : null,
+        revenue: money(itemRevenue),
+        profit: money(itemRevenue.minus(food[i])),
+      });
+    });
+    revenue = pool.plus(groceries);
+    // The price that sells the food at DEFAULT_MARGIN, as a recipe's price does (cost ÷ (1 − margin)),
+    // and covers labor and the vendor fee at cost: those are fixed amounts, so each adds its own
+    // amount (spread over the tickets after Hoamsy's cut), not a marked-up one.
+    const foodCost = totalFood.plus(adjustment);
+    const needed = foodCost.div(new Decimal(1).minus(new Decimal(DEFAULT_MARGIN).div(100))).plus(laborCost).plus(fee);
+    const suggested = supper
+      ? (tickets.gt(0) ? needed.div(keep).div(tickets) : null)
+      : Decimal.max(0, needed.minus(groceries));
+    const up = (d) => (d === null ? null : d.toDecimalPlaces(MONEY_DP, Decimal.ROUND_UP).toFixed(MONEY_DP));
+    flat = {
+      flatPrice: money(price),
+      tickets: tickets?.toString() ?? null,
+      hoamsyPercent: supper ? hoamsy.toString() : null,
+      gross: money(gross), // what the tickets bring in, before Hoamsy's fee
+      pool: money(pool), // what's shared out across the menu
+      groceries: money(groceries),
+      passThrough: money(passThrough), // labor and the vendor fee, paid back at cost before the menu's share
+      suggestedPrice: up(suggested),
+    };
+  }
+
+  // Hoamsy's fee came off the top, so it's already out of the revenue.
   const profit = revenue.minus(totalCost).minus(fee);
+  const allFood = totalCost.minus(laborCost); // what the food comes to, amounts set by hand included
+  // The food's revenue: at a flat-rate event, what's left once labor and the vendor fee are paid back.
+  const foodRevenue = flat ? revenue.minus(laborCost).minus(fee) : revenue;
   let purchaseCost = new Decimal(0);
+  let packsAdjustment = new Decimal(0); // what packs set by hand changed the trip's cost by
   const shoppingList = [...shopping.values()]
     .map((e) => {
       const size = toDecimal(e.packSize) ?? new Decimal(1);
-      const packs = e.amount.div(size).ceil();
-      const bought = e.packPrice === null ? null : packs.times(e.packPrice);
+      const calculated = e.amount.div(size).ceil();
+      // Packs set by hand (stock on hand, a spare) change what the trip buys, never the food cost.
+      const set = e.ingredientId ? toDecimal(packs[e.ingredientId]) : null;
+      const n = set ?? calculated;
+      const bought = e.packPrice === null ? null : n.times(e.packPrice);
       if (bought) purchaseCost = purchaseCost.plus(bought);
+      if (set !== null && e.packPrice !== null) packsAdjustment = packsAdjustment.plus(set.minus(calculated).times(e.packPrice));
       return {
         ...e,
         amount: cost(e.amount),
-        packsToBuy: packs.toString(),
-        leftover: cost(packs.times(size).minus(e.amount)),
+        packsToBuy: n.toString(),
+        ...(set !== null && { packsSet: true, calculatedPacks: calculated.toString() }),
+        leftover: cost(n.times(size).minus(e.amount)), // below 0: the rest comes from stock
         usedCost: cost(e.usedCost),
         purchaseCost: bought === null ? null : cost(bought),
       };
     })
-    .sort((a, b) => isLabor(a) - isLabor(b) || a.name.localeCompare(b.name));
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return {
     recipes: recipeSummaries,
@@ -545,10 +668,16 @@ export function summarizeEvent(recipes = [], amounts = {}, { vendorFee = null, s
     totalCost: cost(totalCost),
     adjustment: cost(adjustment),
     purchaseCost: cost(purchaseCost),
+    packsAdjustment: cost(packsAdjustment),
     revenue: money(revenue),
+    kind,
+    flat, // a personal chef job's or supper club's rate, tickets and what it all comes to; null at a market
     vendorFee: money(fee),
+    hoamsyFee: money(hoamsyFee),
+    labor: { hours: hours.toString(), rate: rate === null ? null : money(rate), cost: money(laborCost) },
     profit: money(profit),
-    marginPercent: revenue.isZero() ? null : profit.div(revenue).times(100).toFixed(1),
+    grossMarginPercent: foodRevenue.lte(0) ? null : foodRevenue.minus(allFood).div(foodRevenue).times(100).toFixed(1),
+    marginPercent: revenue.isZero() ? null : profit.div(revenue).times(100).toFixed(1), // net
     shoppingList,
     warnings,
   };

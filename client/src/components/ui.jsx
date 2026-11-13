@@ -6,7 +6,6 @@ export const Icon = {
   // Main menu: one distinct silhouette per section.
   carrot: () => <svg {...s}><path d="M3 21 10.6 8.6a4.6 4.6 0 0 1 6.8 6.8z" /><path d="M8.2 14.6l1.5 1.5M10.9 11.4l1.3 1.3" /><path d="M15 8c-.4-2.3.3-4.4 2-6M16.3 9.3 20.6 5M17.6 10.6c2.2-.6 4-.3 5.4.7" /></svg>,
   chefHat: () => <svg {...s}><path d="M6 13.9V20h12v-6.1a4 4 0 1 0-1.7-7.6 4.5 4.5 0 0 0-8.6 0A4 4 0 1 0 6 13.9z" /><path d="M6 16.5h12" /></svg>,
-  glass: () => <svg {...s}><path d="M7.5 3h9l-.4 5.5a4.1 4.1 0 0 1-8.2 0z" /><path d="M12 12.6V20M8 21h8" /><path d="M19.5 2.5v3M18 4h3" /></svg>,
   calendar: () => <svg {...s}><rect x="3.5" y="5" width="17" height="15.5" rx="2" /><path d="M3.5 10h17M8 3v4M16 3v4" /><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.5h.01M12 17.5h.01" /></svg>,
   cart: () => <svg {...s}><circle cx="9" cy="20" r="1.4" /><circle cx="17.5" cy="20" r="1.4" /><path d="M2 3h2.8l2.6 12a1.6 1.6 0 0 0 1.6 1.3h8.4a1.6 1.6 0 0 0 1.5-1.2L21 7H5.7" /></svg>,
   history: () => <svg {...s}><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5" /><path d="M3.5 3.5v5h5" /><path d="M12 7.5V12l3 2" /></svg>,
@@ -21,6 +20,8 @@ export const Icon = {
   close: () => <svg {...s}><path d="M6 6l12 12M18 6 6 18" /></svg>,
   dots: () => <svg {...s}><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></svg>,
   grip: () => <svg {...s} strokeWidth="2.5"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" /></svg>,
+  rotateLeft: () => <svg {...s}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>,
+  rotateRight: () => <svg {...s}><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></svg>,
   trash: () => <svg {...s}><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>,
   download: () => <svg {...s}><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>,
   upload: () => <svg {...s}><path d="M12 20V9M7 14l5-5 5 5M5 4h14" /></svg>,

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, notifyDataChanged, setTestMode } from '../api.js';
 import { useApi, useTestMode } from '../hooks.js';
 import { dateTime } from '../format.js';
@@ -17,11 +17,133 @@ const ROWS = [
 
 const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-export function bytes(n) {
+function bytes(n) {
   if (!n) return '0 KB';
   const units = ['bytes', 'KB', 'MB', 'GB'];
   const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
   return `${(n / 1024 ** i).toFixed(i < 2 ? 0 : 1)} ${units[i]}`;
+}
+
+/** The character each address goes by. */
+function WhosWhoCard() {
+  const { data, error } = useApi('/audit/actors');
+  return (
+    <section className="panel" id="whos-who">
+      <div className="panel-head">
+        <div>
+          <h2>Who’s who</h2>
+          <p className="muted" style={{ margin: 0 }}>Each network that changes something gets a character, so everyone on one home network shares a name, and a phone away from home has another. It tells you the connection, not the person.</p>
+        </div>
+      </div>
+      {error && <Notice kind="error">{error.message}</Notice>}
+      {data && (
+        <div className="table-wrap">
+          <table className="grid">
+            <thead><tr><th>Character</th><th>Network</th><th className="num">Changes</th><th>Last change</th><th>First seen</th></tr></thead>
+            <tbody>
+              {data.map((a) => (
+                <tr key={a.name}>
+                  <td style={{ fontWeight: 650 }}>{a.name}</td>
+                  <td className={a.ip ? '' : 'muted'}>{a.ip ?? 'Manual database changes'}</td>
+                  <td className="num">{a.changes}</td>
+                  <td>{a.lastChange ? dateTime(a.lastChange) : '—'}</td>
+                  <td>{a.ip ? dateTime(a.firstSeen) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+const ACTION_WORD = { insert: 'Added', update: 'Changed', delete: 'Removed', restore: 'Restored' };
+const fieldValue = (v) => (v === null ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+
+/** What one save did: a line per kind of thing, opening to each row and its fields. */
+function SaveChanges({ changes }) {
+  const kinds = new Map();
+  for (const c of changes) {
+    const key = `${ACTION_WORD[c.action]} ${c.label.toLowerCase()}`;
+    kinds.set(key, (kinds.get(key) ?? 0) + 1);
+  }
+  const line = [...kinds].map(([k, n]) => (n > 1 ? `${k} × ${n}` : k)).join(', ');
+  return (
+    <details className="change-line">
+      <summary>{line}</summary>
+      <ul>
+        {changes.map((c, i) => (
+          <li key={i}>
+            <b>{ACTION_WORD[c.action]} {c.label.toLowerCase()}{c.name ? `: ${c.name}` : ''}</b>
+            {c.fields.length > 0 && (
+              <div className="change-fields">
+                {c.fields.map((f) => (c.action === 'update'
+                  ? `${f.field}: ${fieldValue(f.from)} → ${fieldValue(f.to)}`
+                  : `${f.field}: ${fieldValue(c.action === 'delete' ? f.from : f.to)}`)).join(' · ')}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+/** Every change to the data, newest first, loaded only once it's opened. */
+function ChangesCard() {
+  const [open, setOpen] = useState(false);
+  const [saves, setSaves] = useState([]);
+  const [next, setNext] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [deletedOnly, setDeletedOnly] = useState(false);
+  const asked = useRef(0);
+  const load = async (before) => {
+    const ask = ++asked.current;
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ ...(before ? { before } : {}), ...(deletedOnly ? { only: 'deleted' } : {}) });
+      const page = await api(`/audit/changes?${params}`);
+      if (ask !== asked.current) return; // the filter changed while this was on its way
+      setSaves((s) => (before ? [...s, ...page.saves] : page.saves));
+      setNext(page.next);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      if (ask === asked.current) setLoading(false);
+    }
+  };
+  useEffect(() => { if (open) load(); }, [open, deletedOnly]);
+  return (
+    <details className="panel changes-log" id="changes" open={open} onToggle={(e) => setOpen(e.target.open)}>
+      <summary><h2>Database changes</h2></summary>
+      <label className="changes-filter">
+        <input type="checkbox" checked={deletedOnly} onChange={(e) => setDeletedOnly(e.target.checked)} /> Only what was deleted
+      </label>
+      {error && <Notice kind="error">{error}</Notice>}
+      {open && loading && !saves.length && <div className="changes-more"><Spinner /></div>}
+      {open && !loading && !error && !saves.length && !next && <p className="muted changes-more">{deletedOnly ? 'Nothing deleted since tracking began.' : 'No changes recorded yet.'}</p>}
+      {saves.length > 0 && (
+        <div className="table-wrap">
+          <table className="grid">
+            <thead><tr><th>When</th><th>Who</th><th>What changed</th></tr></thead>
+            <tbody>
+              {saves.map((s) => (
+                <tr key={s.id}>
+                  <td className="nowrap">{dateTime(s.at)}</td>
+                  <td className="nowrap" style={{ fontWeight: 650 }}>{s.actor}{s.test && <span className="badge" style={{ marginLeft: 6 }}>Test</span>}</td>
+                  <td><SaveChanges changes={s.changes} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {next && <div className="changes-more"><button className="btn small" disabled={loading} onClick={() => load(next)}>{loading ? 'Loading…' : 'Show older changes'}</button></div>}
+    </details>
+  );
 }
 
 export default function BackupPage() {
@@ -96,6 +218,8 @@ export default function BackupPage() {
           <p className="panel-pad muted">None yet.</p>
         )}
       </section>
+      <WhosWhoCard />
+      <ChangesCard />
     </main>
   );
 }

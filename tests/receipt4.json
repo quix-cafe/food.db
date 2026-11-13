@@ -1,0 +1,131 @@
+{
+  "date": "2026-09-22",
+  "time": "11:34:56",
+  "items": [
+    {
+      "category": "DAIRY",
+      "quantity": 1,
+      "unit_price": 3.99,
+      "description": "CF L BRWN EGGS",
+      "total_amount": 3.99,
+      "unit_of_measure": "EA"
+    },
+    {
+      "notes": "2 @ 4 FOR",
+      "category": "FRESH PRODUCE",
+      "quantity": 2,
+      "unit_price": 1.25,
+      "description": "CILANTRO MEX",
+      "total_amount": 2.5,
+      "unit_of_measure": "FOR"
+    },
+    {
+      "category": "FRESH PRODUCE",
+      "quantity": 2.46,
+      "unit_price": 2.39,
+      "description": "EGGPLANTS SPANISH",
+      "total_amount": 5.88,
+      "unit_of_measure": "LB"
+    },
+    {
+      "category": "FRESH PRODUCE",
+      "quantity": 0.21,
+      "unit_price": 4.99,
+      "description": "GARLIC LOOSE",
+      "total_amount": 1.05,
+      "unit_of_measure": "LB"
+    },
+    {
+      "category": "FRESH PRODUCE",
+      "quantity": 0.27,
+      "unit_price": 1.99,
+      "description": "GINGER ROOT",
+      "total_amount": 0.54,
+      "unit_of_measure": "LB"
+    },
+    {
+      "category": "FRESH PRODUCE",
+      "quantity": 2.66,
+      "unit_price": 1.99,
+      "description": "ONIONS RED MEDIUM",
+      "total_amount": 5.29,
+      "unit_of_measure": "LB"
+    },
+    {
+      "category": "FRESH PRODUCE",
+      "quantity": 2.47,
+      "unit_price": 0.99,
+      "description": "ONIONS YELL SPANISH",
+      "total_amount": 2.45,
+      "unit_of_measure": "LB"
+    },
+    {
+      "category": "FRESH PRODUCE",
+      "quantity": 1.19,
+      "unit_price": 1.29,
+      "description": "POTATOES IDAHO",
+      "total_amount": 1.54,
+      "unit_of_measure": "LB"
+    },
+    {
+      "notes": "4 @ 3 FOR",
+      "category": "FRESH PRODUCE",
+      "quantity": 4,
+      "unit_price": 1.335,
+      "description": "SCALLIONS BUNCH ICEL",
+      "total_amount": 5.34,
+      "unit_of_measure": "FOR"
+    },
+    {
+      "category": "FRESH PRODUCE",
+      "quantity": 1.52,
+      "unit_price": 1.99,
+      "description": "SQUASH GREEN",
+      "total_amount": 3.02,
+      "unit_of_measure": "LB"
+    },
+    {
+      "category": "FRESH PRODUCE",
+      "quantity": 1.68,
+      "unit_price": 2.49,
+      "description": "SQUASH YELLOW USA MEX",
+      "total_amount": 4.18,
+      "unit_of_measure": "LB"
+    },
+    {
+      "category": "FRESH PRODUCE",
+      "quantity": 0.85,
+      "unit_price": 2.29,
+      "description": "TOMATO PLUM USA MEX",
+      "total_amount": 1.95,
+      "unit_of_measure": "LB"
+    },
+    {
+      "category": "FRESH PRODUCE",
+      "quantity": 0.85,
+      "unit_price": 2.29,
+      "description": "TOMATO PLUM USA MEX",
+      "total_amount": 1.95,
+      "unit_of_measure": "LB"
+    },
+    {
+      "category": "GROCERY",
+      "quantity": 1,
+      "unit_price": 15.99,
+      "description": "MAZOLA CANOLA GAL",
+      "total_amount": 15.99,
+      "unit_of_measure": "EA"
+    },
+    {
+      "notes": "Coupon/discount",
+      "category": "GROCERY",
+      "quantity": 1,
+      "unit_price": -2,
+      "description": "MAZOLA 128 FL TPR CO",
+      "total_amount": -2,
+      "unit_of_measure": "EA"
+    }
+  ],
+  "total": 60.66,
+  "vendor": "Supremo Food Market"
+}

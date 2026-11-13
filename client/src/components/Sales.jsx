@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { OPEN_ORDER_STATUSES, menuItemName, saleItem } from '@kitchen/shared';
+import { useRef, useState } from 'react';
+import { menuItemName, orderTimes, orderTimingSummary, saleItem } from '@kitchen/shared';
 import { api, notifyDataChanged } from '../api.js';
 import { useApi } from '../hooks.js';
-import { Decimal, money, toDecimal } from '../format.js';
+import { Decimal, duration, money, toDecimal } from '../format.js';
 import { recipeColors } from '../palette.js';
 import { Icon, Notice, Spinner, useToast } from './ui.jsx';
 
@@ -14,29 +14,21 @@ export const PAYMENT_METHODS = [
 ];
 const METHOD_LABEL = { ...Object.fromEntries(PAYMENT_METHODS.map((m) => [m.value, m.label])), free: 'Given away' };
 
-/** "Buy 2, $1.00 off" / "$0.50 off each" for a recipe's deal at this event. */
-export const dealLabel = (r) =>
-  r.discountQty > 1 ? `Buy ${r.discountQty}, ${money(r.discountAmount)} off` : `${money(r.discountAmount)} off each`;
+/** "3 for $15.00": a recipe's deal at this event. */
+export const dealLabel = (r) => `${r.dealQty} for ${money(r.dealPrice)}`;
 
-export const ORDER_STATUS_LABEL = { placed: 'Placed', in_progress: 'In progress', completed: 'Completed', cancelled: 'Cancelled' };
-const STATUS_BADGE = { placed: 'new', in_progress: '', completed: 'good', cancelled: 'warn' };
+export const ORDER_STATUS_LABEL = { in_progress: 'In progress', completed: 'Completed', cancelled: 'Cancelled' };
+const STATUS_BADGE = { in_progress: '', completed: 'good', cancelled: 'warn' };
 export const OrderStatus = ({ status }) => <span className={`badge ${STATUS_BADGE[status]}`}>{ORDER_STATUS_LABEL[status]}</span>;
 
-/** Which orders count as open, completed and cancelled on the POS screen. */
-export const ORDER_VIEWS = [
-  { value: 'open', label: 'In progress', statuses: OPEN_ORDER_STATUSES },
-  { value: 'completed', label: 'Completed', statuses: ['completed'] },
-  { value: 'cancelled', label: 'Cancelled', statuses: ['cancelled'] },
-];
+/** Which menu item a sold line (or a recipe tally) is: a recipe or a sauce (null: since deleted). */
+const itemKey = (i) => i.recipeId ?? (i.blendId ? `blend:${i.blendId}` : null);
 
-/** One tab's orders: the queue is first come, first served; finished orders show the latest first. */
-export function ordersInView(sales, value) {
-  const { statuses } = ORDER_VIEWS.find((v) => v.value === value);
-  const orders = sales.filter((s) => statuses.includes(s.status));
-  return value === 'open' ? orders.reverse() : orders.sort((a, b) => new Date(b.statusChangedAt) - new Date(a.statusChangedAt));
-}
-
-/** What can be sold at an event, from its summary: the recipes, then the sauces sold by the container. */
+/**
+ * What can be sold at an event, from its summary: the recipes, then the sauces sold by the
+ * container. At a personal chef job or supper club, paid for up front, the summary gives them no
+ * price: the POS only places orders, free.
+ */
 export function saleMenu(s) {
   if (!s) return [];
   const menu = [
@@ -49,14 +41,14 @@ export function saleMenu(s) {
 
 /** The left border's color for a menu row, or a line on an order (`menu` still has what's still on the menu). */
 export const tile = (r) => (r?.color ? { '--tile': r.color } : undefined);
-export const orderItemTile = (menu, i) => tile(menu.find((r) => r.key === (i.recipeId ?? `blend:${i.blendId}`)));
+export const orderItemTile = (menu, i) => tile(menu.find((r) => r.key === itemKey(i)));
 
 export const paymentLabel = (method) => METHOD_LABEL[method];
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 export const time = (iso) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
 /** Sold / given away / taken, and the split by payment method, with the fees charged on top for Venmo and Cash App. */
-export function SalesTotals({ totals }) {
+function SalesTotals({ totals }) {
   return (
     <div className="sales-totals" aria-live="polite">
       <div><b>{totals.sold}</b><span>sold</span></div>
@@ -95,12 +87,13 @@ export function CustomerNameField({ draft }) {
 
 /**
  * One order being built on the POS screen. Prices come from the event (`items`:
- * saleMenu rows); the server re-prices each line the same way with `saleItem`. It joins the queue
- * as placed.
+ * saleMenu rows); the server re-prices each line the same way with `saleItem`. It goes straight
+ * to the kitchen, in progress. Each line, and the order, can carry a note for the kitchen.
  */
 export function useSaleDraft({ eventId, items: recipes, totals, onRecorded }) {
-  const [line, setLine] = useState({}); // key → { qty, deal }
+  const [line, setLine] = useState({}); // key → { qty, note }
   const [name, setNameText] = useState('');
+  const [note, setNote] = useState(''); // for the whole order
   const [unnamed, setUnnamed] = useState(null); // how they paid, while the missing-name warning is up
   const warnedAt = useRef(0);
   const nameRef = useRef(null);
@@ -108,14 +101,12 @@ export function useSaleDraft({ eventId, items: recipes, totals, onRecorded }) {
   const [error, setError] = useState(null);
   const toast = useToast();
 
-  const tally = new Map((totals?.byRecipe ?? []).map((r) => [r.recipeId ?? `blend:${r.blendId}`, r]));
-  const canDeal = (r, qty) => !!r.discountAmount && qty >= (r.discountQty ?? 1);
+  const tally = new Map((totals?.byRecipe ?? []).map((r) => [itemKey(r), r]));
   const items = recipes
     .filter((r) => line[r.key]?.qty > 0)
     .map((r) => {
-      const { qty, deal } = line[r.key];
-      const dealUsed = deal && canDeal(r, qty);
-      return { r, qty, dealUsed, priced: saleItem({ ...r, quantity: qty, dealUsed }) };
+      const { qty, note: itemNote = '' } = line[r.key];
+      return { r, qty, note: itemNote, priced: saleItem({ ...r, quantity: qty }) };
     });
   const count = items.reduce((n, i) => n + i.qty, 0);
   const total = items.reduce((sum, i) => sum.plus(i.priced.amount), new Decimal(0));
@@ -128,12 +119,12 @@ export function useSaleDraft({ eventId, items: recipes, totals, onRecorded }) {
   const change = (r, by) => { setUnnamed(null); setLine((l) => {
     const qty = Math.max(0, (l[r.key]?.qty ?? 0) + by);
     const next = { ...l };
-    if (qty) next[r.key] = { qty, deal: l[r.key]?.deal ?? false };
+    if (qty) next[r.key] = { ...l[r.key], qty };
     else delete next[r.key];
     return next;
   }); };
-  const toggleDeal = (r) => { setUnnamed(null); setLine((l) => ({ ...l, [r.key]: { ...l[r.key], deal: !l[r.key]?.deal } })); };
-  const clear = () => { setLine({}); setName(''); setUnnamed(null); };
+  const setLineNote = (key, text) => setLine((l) => (l[key] ? { ...l, [key]: { ...l[key], note: text } } : l));
+  const clear = () => { setLine({}); setName(''); setNote(''); setUnnamed(null); };
 
   const place = async (method) => {
     setBusy(true);
@@ -143,9 +134,10 @@ export function useSaleDraft({ eventId, items: recipes, totals, onRecorded }) {
         method: 'POST',
         body: {
           paymentMethod: method,
-          items: items.map((i) => ({ ...(i.r.blendId ? { blendId: i.r.blendId } : { recipeId: i.r.recipeId }), quantity: i.qty, dealUsed: i.dealUsed })),
+          items: items.map((i) => ({ ...(i.r.blendId ? { blendId: i.r.blendId } : { recipeId: i.r.recipeId }), quantity: i.qty, note: i.note })),
           customerName: name,
-          status: 'placed',
+          note,
+          status: 'in_progress',
         },
       });
       onRecorded(data);
@@ -178,15 +170,7 @@ export function useSaleDraft({ eventId, items: recipes, totals, onRecorded }) {
     place(method);
   };
 
-  return { line, name, setName, nameRef, unnamed, placeUnnamed, busy, error, tally, canDeal, items, count, total, discount, change, toggleDeal, clear, record };
-}
-
-/** Other phones and tablets take orders too, so whatever shows the queue keeps itself current. */
-export function useQueuePolling(reload) {
-  useEffect(() => {
-    const t = setInterval(() => { if (!document.hidden) reload(); }, 10000);
-    return () => clearInterval(t);
-  }, [reload]);
+  return { line, name, setName, note, setNote, setLineNote, nameRef, unnamed, placeUnnamed, busy, error, tally, items, count, total, discount, change, clear, record };
 }
 
 /**
@@ -194,13 +178,20 @@ export function useQueuePolling(reload) {
  * removed here too (asks first).
  */
 export function SalesTable({ eventId, onRecord }) {
-  const { data, error } = useApi(`/events/${eventId}/sales`);
+  const { data, error } = useApi(`/events/${eventId}/sales?history=1`);
   const [confirming, setConfirming] = useState(null);
   const [removeError, setRemoveError] = useState(null);
   const toast = useToast();
   if (error) return <Notice kind="error">{error.message}</Notice>;
   if (!data) return <Spinner />;
-  const { sales, totals } = data;
+  const { sales, totals, history } = data;
+  const averageTime = orderTimingSummary(sales).total;
+  // Rolling over an order's time says who entered and changed it.
+  const stamp = (iso) => new Date(iso).toLocaleString('en-US');
+  const whoDid = (s) => [
+    stamp(s.createdAt),
+    ...(history?.[s.id]?.map((h) => `${h.what} by ${h.actor}, ${stamp(h.at)}`) ?? ['From before changes were tracked']),
+  ].join('\n');
   const days = new Set(sales.map((s) => new Date(s.createdAt).toDateString())).size;
   const when = (iso) => (days > 1 ? `${new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${time(iso)}` : time(iso));
 
@@ -230,19 +221,27 @@ export function SalesTable({ eventId, onRecord }) {
           <div className="panel table-wrap">
             <table className="grid sales-table">
               <thead>
-                <tr><th>Time</th><th>Order</th><th>Status</th><th>Paid by</th><th className="num hide-sm">Discount</th><th className="num">Amount</th><th className="num" title="Charged on top and kept by Venmo (1.9% + $0.10) or Cash App (2.6% + $0.15)">Fee</th><th><span className="visually-hidden">Actions</span></th></tr>
+                <tr><th title="Roll over a time to see who entered and changed the order">Time</th><th>Order</th><th>Status</th><th className="num hide-sm" title="From placed to completed. Orders handed over on the spot aren't timed.">Ticket time</th><th>Paid by</th><th className="num hide-sm">Discount</th><th className="num">Amount</th><th className="num" title="Charged on top and kept by Venmo (1.9% + $0.10) or Cash App (2.6% + $0.15)">Fee</th><th><span className="visually-hidden">Actions</span></th></tr>
               </thead>
               <tbody>
                 {sales.map((s) => (
                   <tr key={s.id} className={s.status === 'cancelled' ? 'cancelled' : s.paymentMethod === 'free' ? 'free' : ''}>
-                    <td className="nowrap" title={new Date(s.createdAt).toLocaleString('en-US')}>{when(s.createdAt)}</td>
+                    <td className="nowrap sale-when" title={whoDid(s)}>{when(s.createdAt)}</td>
                     <td>
                       {s.customerName && <b>{s.customerName}</b>}
                       {s.items.map((i, n) => (
-                        <div key={n}>{i.quantity} × {i.name}{i.deals > 0 && <span className="deal-tag">{i.deals > 1 ? `${i.deals} deals` : 'deal'}</span>}</div>
+                        <div key={n}>
+                          {i.quantity} × {i.name}{i.deals > 0 && <span className="deal-tag">{i.deals > 1 ? `${i.deals} deals` : 'deal'}</span>}
+                          {i.note && <div className="order-note">{i.note}</div>}
+                        </div>
                       ))}
+                      {s.note && <div className="order-note">Note: {s.note}</div>}
                     </td>
-                    <td className="nowrap"><OrderStatus status={s.status} /></td>
+                    <td className="nowrap">
+                      <OrderStatus status={s.status} />
+                      {orderTimes(s).total !== null && <div className="show-sm"><small className="muted">{duration(orderTimes(s).total)}</small></div>}
+                    </td>
+                    <td className="num hide-sm">{orderTimes(s).total === null ? '—' : duration(orderTimes(s).total)}</td>
                     <td className="nowrap">{METHOD_LABEL[s.paymentMethod]}</td>
                     <td className="num hide-sm">{s.items.some((i) => toDecimal(i.discount).gt(0)) ? `−${money(s.items.reduce((sum, i) => sum.plus(i.discount), new Decimal(0)))}` : '—'}</td>
                     <td className="num" style={{ fontWeight: 650 }}>{s.paymentMethod === 'free' ? <span className="muted">Free</span> : money(s.total)}</td>
@@ -266,6 +265,7 @@ export function SalesTable({ eventId, onRecord }) {
                   <td>{plural(totals.sales, 'line')}</td>
                   <td>{totals.sold} sold{totals.givenAway ? `, ${totals.givenAway} given away` : ''}</td>
                   <td>{totals.byStatus.cancelled ? `${totals.byStatus.cancelled} cancelled, not counted` : ''}</td>
+                  <td className="num hide-sm" title="The average across completed orders that were timed">{averageTime === null ? '—' : `Avg ${duration(averageTime)}`}</td>
                   <td />
                   <td className="num hide-sm">{toDecimal(totals.discounts).gt(0) ? `−${money(totals.discounts)}` : '—'}</td>
                   <td className="num">{money(totals.revenue)}</td>

@@ -1,0 +1,117 @@
+{
+  "store_name": "H MART",
+  "date": "11/04/26",
+  "time": "06:12pm",
+  "items": [
+    {
+      "description": "EGG LARGE 18CT",
+      "quantity": 1,
+      "unit_price": 5.99,
+      "total": 5.99
+    },
+    {
+      "description": "EGGS BRWN 12CT",
+      "quantity": 1,
+      "unit_price": 4.49,
+      "total": 4.49
+    },
+    {
+      "description": "EGGPLANT CHINESE",
+      "weight": "1.56 lb",
+      "unit_price": 1.99,
+      "total": 3.12
+    },
+    {
+      "description": "EGG NOODLE",
+      "quantity": 1,
+      "unit_price": 2.79,
+      "total": 2.79
+    },
+    {
+      "description": "PUFF PASTRY",
+      "price": 6.49
+    },
+    {
+      "description": "SCALLION",
+      "quantity": 2,
+      "unit_price": 0.99,
+      "total": 1.98
+    },
+    {
+      "description": "GREEN ONION",
+      "quantity": 1,
+      "unit_price": 0.89,
+      "total": 0.89
+    },
+    {
+      "description": "KING OYSTER MUSHROOM",
+      "quantity": 1,
+      "unit_price": 3.99,
+      "total": 3.99
+    },
+    {
+      "description": "TOFU SOFT",
+      "quantity": 1,
+      "unit_price": 1.99,
+      "total": 1.99
+    },
+    {
+      "description": "GINGER",
+      "weight": "0.62 lb",
+      "unit_price": 2.99,
+      "total": 1.85
+    },
+    {
+      "description": "GINGER GARLIC PASTE",
+      "quantity": 1,
+      "unit_price": 3.49,
+      "total": 3.49
+    },
+    {
+      "description": "COCONUT MILK 13.5OZ",
+      "quantity": 2,
+      "unit_price": 1.79,
+      "total": 3.58
+    },
+    {
+      "description": "THAI CHILI",
+      "quantity": 1,
+      "unit_price": 1.29,
+      "total": 1.29
+    },
+    {
+      "description": "RICE",
+      "quantity": 1,
+      "unit_price": 18.99,
+      "total": 18.99
+    },
+    {
+      "description": "JASMINE RICE 25LB",
+      "quantity": 1,
+      "unit_price": 24.99,
+      "total": 24.99
+    },
+    {
+      "description": "SHRIMP 31/40 2LB",
+      "quantity": 1,
+      "unit_price": 15.99,
+      "total": 15.99
+    },
+    {
+      "description": "BOK CHOY",
+      "weight": "1.19 lb",
+      "unit_price": 1.99,
+      "total": 2.38
+    },
+    {
+      "description": "CHINESE BROCCOLI",
+      "quantity": 1,
+      "unit_price": 2.49,
+      "total": 2.49
+    }
+  ],
+  "subtotal": 106.78,
+  "tax": 0,
+  "total": 106.78,
+  "payment_method": "VISA"
+}

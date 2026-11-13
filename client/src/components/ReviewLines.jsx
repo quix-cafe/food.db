@@ -1,4 +1,5 @@
-import { perUnit, toDecimal } from '../format.js';
+import { canonicalUom, estimatedUnitGrams, receiptName, unitRatio } from '@kitchen/shared';
+import { perUnit, qty, toDecimal } from '../format.js';
 import CategoryCombobox from './CategoryCombobox.jsx';
 import { UomInput } from './forms.jsx';
 import ReceiptNameCell, { rowTarget } from './ReceiptNameCell.jsx';
@@ -10,37 +11,92 @@ import { Icon } from './ui.jsx';
 
 let nextKey = 1;
 
-/** item: a normalised receipt line ({ name, quantity, …, match, suggestion }); `line` is its receipt_lines position. */
-export const toRow = (item, line = item.line ?? null) => ({
-  key: nextKey++,
-  line,
-  source: item.name ?? '',
-  keep: !!item.name, // use the receipt's wording as-is
-  resolved: item.match ?? null, // what that wording resolves to (saved alias or exact name)
-  suggestion: item.suggestion ?? null,
-  candidates: item.candidates ?? null, // ingredients it might be: shared words, then the closest spelling
-  choices: item.choices ?? null, // a saved receipt name too generic to apply: what it was saved as before
-  ambiguous: item.ambiguous ?? null, // why: 'receipt' (several lines here) or 'history'
-  name: '', // the rename, when not keeping the receipt wording
-  ingredientId: null,
-  category: item.category ?? '',
-  note: item.note ?? null,
-  quantity: item.quantity ?? '1',
-  // A receipt unit ("2.21 lb", "2 ea") means the line was sold per that unit: packs of 1.
-  packSize: '1',
-  uom: normalizeUom(item.unit),
-  unitCost: item.unitCost ?? '',
-  totalCost: item.totalCost ?? '',
-  confirmed: false,
-});
+/** A unit things are weighed or measured out in (lb, oz, l), not counted. */
+const measured = (u) => !!(u && (unitRatio(u, 'g') || unitRatio(u, 'tsp')));
 
-function normalizeUom(unit) {
-  const u = (unit ?? '').trim();
-  return /^(ea|ct|pc|pcs)$/i.test(u) ? 'each' : u;
+/**
+ * item: a normalised receipt line ({ name, quantity, unit, …, match, candidates }); `line` is its receipt_lines position.
+ * A strong candidate (every word of its name on the receipt, nothing else as good) is chosen to start with, marked
+ * `suggested`, for the reviewer to confirm or undo. A line becoming a new ingredient starts with a tidier name than the
+ * receipt's (`clean`, receiptName in shared), the receipt's wording kept as its receipt name.
+ */
+export const toRow = (item, line = item.line ?? null) => {
+  const soldBy = canonicalUom(item.unit); // a receipt unit ("2.21 lb", "2 ea"): sold per that unit, packs of 1
+  const clean = receiptName(item.name);
+  const row = {
+    key: nextKey++,
+    line,
+    source: item.name ?? '',
+    keep: !!item.name, // use the receipt's wording as-is
+    resolved: item.match ?? null, // what that wording resolves to (saved alias or exact name)
+    suggestion: item.suggestion ?? null,
+    candidates: item.candidates ?? null, // ingredients it might be: shared words, then the closest spelling
+    choices: item.choices ?? null, // a saved receipt name too generic to apply: what it was saved as before
+    ambiguous: item.ambiguous ?? null, // why: 'receipt' (several lines here) or 'history'
+    name: '', // the rename, when not keeping the receipt wording
+    ingredientId: null,
+    suggested: false, // chosen from a strong candidate, not by the reviewer
+    addNew: false, // the reviewer chose a new ingredient over the candidates
+    clean: clean.name !== item.name ? clean.name : null,
+    soldBy,
+    category: item.category ?? '',
+    note: item.note ?? null,
+    quantity: item.quantity ?? '1',
+    packSize: '1',
+    uom: soldBy ?? '',
+    unitCost: item.unitCost ?? '',
+    totalCost: item.totalCost ?? '',
+    confirmed: false,
+  };
+  // A size in the name ("Garam Masala 14oz") is the pack, unless the receipt weighed it.
+  if (clean.packSize && !measured(soldBy)) Object.assign(row, { packSize: clean.packSize, uom: clean.uom });
+  const strong = !item.match && !item.choices?.length && item.candidates?.[0]?.strong ? item.candidates[0] : null;
+  if (strong) return withPackSize({ ...row, keep: false, name: strong.name, ingredientId: strong.id, ingredientUom: strong.uom, category: strong.category ?? row.category, suggested: true });
+  if (!item.match && !item.choices?.length && !item.candidates?.length && row.clean) Object.assign(row, { keep: false, name: row.clean });
+  return withPackSize(row);
+};
+
+/** A line sold by weight or volume, saved to an ingredient in another unit it converts to: the pack holds that many (1 lb = 16 oz). */
+function withPackSize(r) {
+  const t = rowTarget(r);
+  if (t.kind !== 'existing' || !measured(r.soldBy)) return r;
+  const ratio = unitRatio(r.soldBy, t.uom);
+  return ratio ? { ...r, packSize: ratio.toDecimalPlaces(4).toString() } : r;
+}
+
+/**
+ * Sold by weight (or volume) but saved to an ingredient counted another way (lb onto Onion Red, each):
+ * the pack size has to say how many of its unit make one, which can't be worked out. Null when that's not the case.
+ */
+export function unitMismatch(r) {
+  const t = rowTarget(r);
+  if (t.kind !== 'existing' || !measured(r.soldBy) || unitRatio(r.soldBy, t.uom)) return null;
+  // A guess from a typical weight (about 75 g for most units), offered only when it says how many to a pound or so.
+  const perUnit = toDecimal(unitRatio(r.soldBy, 'g')).div(estimatedUnitGrams(t.uom)).toDecimalPlaces(0);
+  return { soldBy: r.soldBy, uom: t.uom ?? 'each', estimate: perUnit.gte(2) ? perUnit.toString() : null };
+}
+
+/**
+ * The receipt's total is what was paid, so it stays when packs change and the pack price follows;
+ * a new pack price changes the total, and a new total the pack price.
+ */
+function keepCostsInStep(r, patch) {
+  const q = toDecimal(r.quantity);
+  if (!q || q.lte(0)) return r;
+  const round = (d) => d.toDecimalPlaces(4).toString();
+  if ('quantity' in patch || 'totalCost' in patch) {
+    const t = toDecimal(r.totalCost);
+    return t ? { ...r, unitCost: round(t.div(q)) } : r;
+  }
+  if ('unitCost' in patch) {
+    const u = toDecimal(r.unitCost);
+    return u ? { ...r, totalCost: round(u.times(q)) } : r;
+  }
+  return r;
 }
 
 /** Price per unit of measure for a row: pack price (or total ÷ qty) ÷ pack size; null if incomplete. */
-export function rowUnitPrice(r) {
+function rowUnitPrice(r) {
   const q = toDecimal(r.quantity);
   const size = toDecimal(r.packSize);
   const packPrice = toDecimal(r.unitCost) ?? (q && !q.isZero() ? toDecimal(r.totalCost)?.div(q) : null);
@@ -50,8 +106,10 @@ export function rowUnitPrice(r) {
 /** Comparable form of the rows (minus React keys), to tell whether anything was edited. */
 export const rowsSnapshot = (rows) => JSON.stringify(rows.map(({ key, ...r }) => r));
 
-export function rowProblem(r) {
-  if (!rowTarget(r).name) return r.source ? 'Type a name or keep the receipt name' : 'Needs a name';
+function rowProblem(r) {
+  const t = rowTarget(r);
+  if (!t.name) return r.source ? 'Type a name or keep the receipt name' : 'Needs a name';
+  if (t.kind === 'new' && r.candidates?.length && !r.addNew) return 'Pick what it might be, or add it as new';
   const q = toDecimal(r.quantity);
   if (!q || q.lte(0)) return 'Quantity must be above 0';
   const size = toDecimal(r.packSize);
@@ -96,7 +154,8 @@ export function savedMessage(res) {
 export default function ReviewLinesTable({ rows, setRows, pending = false, allowAdd = true, saveButton }) {
   const update = (key, patch) => setRows((rs) => rs.map((r) => {
     if (r.key !== key) return r;
-    const next = { ...r, ...patch };
+    let next = keepCostsInStep({ ...r, ...patch }, patch);
+    if ('ingredientId' in patch || 'keep' in patch) next = withPackSize(next);
     return next.confirmed && rowProblem(next) ? { ...next, confirmed: false } : next;
   }));
   const confirmed = rows.filter((r) => r.confirmed).length;
@@ -131,6 +190,15 @@ export default function ReviewLinesTable({ rows, setRows, pending = false, allow
                   <td>
                     <ReceiptNameCell row={r} index={i} onChange={(patch) => update(r.key, patch)} />
                     {problem && <div className="name-status" style={{ color: 'var(--tomato)' }}>{problem}</div>}
+                    {unitMismatch(r) && (() => {
+                      const m = unitMismatch(r);
+                      return (
+                        <div className="name-status unit-warning" role="note">
+                          Sold by the {m.soldBy}, but {rowTarget(r).name} is counted in {m.uom}. Set the pack size to how many {m.uom} make 1 {m.soldBy}
+                          {m.estimate && toDecimal(r.packSize)?.eq(1) && <> (<button type="button" className="link-btn" onClick={() => update(r.key, { packSize: m.estimate })}>about {qty(m.estimate)}?</button>)</>}.
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td><CategoryCombobox style={{ minWidth: 140 }} value={r.category} disabled={rowTarget(r).kind === 'existing'} ariaLabel={`Line ${i + 1} category`} placeholder="" onChange={(category) => update(r.key, { category })} /></td>
                   <td className="num nowrap" style={{ fontWeight: 650 }}>{rowUnitPrice(r) ? perUnit(rowUnitPrice(r), rowTarget(r).uom) : '—'}</td>

@@ -8,6 +8,7 @@ import { date as formatDate, money, pack, perUnit, qty, toDecimal, todayIso, Dec
 import ReviewLinesTable, { rowsSnapshot, toRow, toPurchaseItem, savedMessage } from '../components/ReviewLines.jsx';
 import { useLeaveGuard } from '../hooks.js';
 import { ReceiptImportForm } from '../components/forms.jsx';
+import { IngredientDrawer } from '../components/IngredientDrawer.jsx';
 import { Field, Icon, LeaveModal, Notice, Spinner, useToast } from '../components/ui.jsx';
 
 /** OCR "Review & Confirm": nothing is saved until each row is checked and committed. */
@@ -128,7 +129,7 @@ function ReviewGrid({ receipt, source, draftId }) {
         <div className="form-actions">
           {receiptId
             ? <button className="btn ghost" onClick={() => navigate(`/purchases/${receiptId}`)}>Finish later</button>
-            : <button className="btn ghost" onClick={() => { allowLeave(); navigate('/ingredients'); }}>Discard</button>}
+            : <button className="btn ghost" onClick={() => { allowLeave(); navigate('/purchases'); }}>Discard</button>}
         </div>
       </div>
 
@@ -181,6 +182,16 @@ function ReviewGrid({ receipt, source, draftId }) {
                 </span>
               </Field>
             </div>
+            {receipt.alreadyImported?.length > 0 && (
+              <Notice kind="error">
+                {receipt.alreadyImported.map((r) => (
+                  <div key={r.id}>
+                    This looks like a receipt already imported on {formatDate(new Date(r.createdAt).toLocaleDateString('en-CA'))} ({r.vendor || 'no store'}, {formatDate(r.date)}).{' '}
+                    <Link to={`/purchases/${r.id}`}>View that receipt</Link> before saving these lines again.
+                  </div>
+                ))}
+              </Notice>
+            )}
             {receipt.warnings.length > 0 && <Notice>{receipt.warnings.map((w) => <div key={w}>{w}</div>)}</Notice>}
           </div>
 
@@ -201,6 +212,7 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
  */
 function ReceiptSaved({ saved, vendor, date, receiptId, photos, onIngredients, onAnother }) {
   const heading = useRef(null);
+  const [viewing, setViewing] = useState(null); // ingredient id whose panel is open over the summary
   useEffect(() => {
     window.scrollTo(0, 0);
     heading.current?.focus();
@@ -241,7 +253,7 @@ function ReceiptSaved({ saved, vendor, date, receiptId, photos, onIngredients, o
               {purchases.map((p) => (
                 <tr key={p.id}>
                   <td>
-                    <Link to={`/ingredients?open=${p.ingredientId}`} style={{ color: 'inherit', fontWeight: 650 }}>{p.ingredientName}</Link>
+                    <button type="button" className="line-name" data-tip="View/edit" aria-label={`${p.ingredientName}: view/edit`} onClick={() => setViewing(p.ingredientId)}>{p.ingredientName}</button>
                     {created.has(p.ingredientId) && <> <span className="badge new">New ingredient</span></>}
                     {p.receiptName && <div className="muted" style={{ fontSize: '0.85rem' }}>Receipt: “{p.receiptName}”</div>}
                   </td>
@@ -276,6 +288,7 @@ function ReceiptSaved({ saved, vendor, date, receiptId, photos, onIngredients, o
           <Link className="link-btn" to={`/purchases/${receiptId}`}>View this receipt</Link>
         </div>
       </section>
+      {viewing && <IngredientDrawer id={viewing} onClose={() => setViewing(null)} />}
     </main>
   );
 }

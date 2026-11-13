@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
-import { isLabor, laborLast } from '@kitchen/shared';
 import { useApi, useDebounced } from '../hooks.js';
 import { date, money, pack, perUnit, toDecimal } from '../format.js';
 import { NewIngredientForm } from '../components/forms.jsx';
@@ -62,10 +61,10 @@ export default function IngredientsPage() {
 
   const rows = useMemo(() => {
     const col = COLUMNS.find((c) => c.key === sort.key);
-    return laborLast((data ?? [])
+    return (data ?? [])
       .filter((r) => !category || r.category === category)
       .slice()
-      .sort((a, b) => sort.dir * compare(a, b, sort.key, col?.num)));
+      .sort((a, b) => sort.dir * compare(a, b, sort.key, col?.num));
   }, [data, category, sort]);
 
   // A new filter, sort or page size starts again at page 1. Reloads (after a save) keep the page,
@@ -130,15 +129,19 @@ export default function IngredientsPage() {
           {/* Chips on a wide screen; on a phone, where they'd take several rows, a dropdown. */}
           <div className="chips hide-sm" role="group" aria-label="Filter by category">
             <button className="chip" aria-pressed={!category} onClick={() => setCategory(null)}>All</button>
-            {(categories ?? []).filter((c) => !isLabor({ category: c })).map((c) => (
+            {(categories ?? []).map((c) => (
               <button key={c} className="chip" aria-pressed={category === c} onClick={() => setCategory(category === c ? null : c)}>{c}</button>
             ))}
           </div>
           <select className="select show-sm category-select" aria-label="Filter by category" value={category ?? ''} onChange={(e) => setCategory(e.target.value || null)}>
             <option value="">All categories</option>
-            {(categories ?? []).filter((c) => !isLabor({ category: c })).map((c) => <option key={c} value={c}>{c}</option>)}
+            {(categories ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
-          <input className="input name-filter" style={{ maxWidth: 260 }} type="search" placeholder="Filter by name" aria-label="Filter ingredients by name" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          <span className="name-filter">
+            <input className="input" type="search" placeholder="Filter by name" aria-label="Filter ingredients by name" value={filter} onChange={(e) => setFilter(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape' && filter) { e.preventDefault(); setFilter(''); } }} />
+            {filter && <button type="button" className="clear-filter" aria-label="Clear the name filter" title="Clear" onClick={(e) => { setFilter(''); e.currentTarget.previousElementSibling.focus(); }}><Icon.close /></button>}
+          </span>
         </div>
 
         {error && <div className="panel-pad"><Notice kind="error">{error.message}</Notice></div>}
@@ -168,7 +171,7 @@ export default function IngredientsPage() {
               </thead>
               <tbody>
                 {pageRows.map((r) => (
-                  <tr key={r.id} className={`clickable ${isLabor(r) ? 'labor-row' : ''} ${openId === r.id ? 'selected' : ''}`} onClick={() => open(r.id)}>
+                  <tr key={r.id} className={`clickable ${openId === r.id ? 'selected' : ''}`} onClick={() => open(r.id)}>
                     <td>
                       <button className="sort-btn" style={{ fontWeight: 650 }} onClick={(e) => { e.stopPropagation(); open(r.id); }}>{r.name}</button> <TestBadge item={r} />
                     </td>
@@ -176,11 +179,11 @@ export default function IngredientsPage() {
                     <td className="num nowrap" style={{ fontWeight: 650 }} title={r.latestLines > 1 ? `Average of ${r.latestLines} lines on the latest receipt` : undefined}>
                       {r.latestUnitPrice ? <>{r.latestLines > 1 && <small className="muted">avg </small>}{perUnit(r.latestUnitPrice, r.uom)}</> : <span className="badge">No price</span>}
                     </td>
-                    <td className="num">{!isLabor(r) && r.latestPackSize ? pack(r.latestPackSize, r.uom) : '—'}</td>
-                    <td className="num">{!isLabor(r) && r.latestPackPrice ? money(r.latestPackPrice) : '—'}</td>
+                    <td className="num">{r.latestPackSize ? pack(r.latestPackSize, r.uom) : '—'}</td>
+                    <td className="num">{r.latestPackPrice ? money(r.latestPackPrice) : '—'}</td>
                     <td>{r.latestVendor ?? '—'}</td>
-                    <td className="nowrap">{isLabor(r) ? <span className="muted">Service rate</span> : date(r.latestPurchaseDate)}</td>
-                    <td className="num">{isLabor(r) ? '—' : r.purchaseCount}</td>
+                    <td className="nowrap">{date(r.latestPurchaseDate)}</td>
+                    <td className="num">{r.purchaseCount}</td>
                     <td className="num">{r.useCount || <span className="muted">—</span>}</td>
                   </tr>
                 ))}

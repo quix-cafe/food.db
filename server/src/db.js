@@ -31,27 +31,30 @@ function postgresPool(connectionString) {
 }
 
 /**
- * Test mode: rows inserted inside runAsTestData() get is_test = true (migration 011). The
- * column default reads `app.test_data`, set for the length of each transaction, so a query
- * in test mode always runs inside one.
+ * What a request's transactions need to know. `test`: rows inserted get is_test = true, as the
+ * column default reads `app.test_data`. `actor`: who audit_log's triggers record, from `app.actor`.
+ * Both last the length of a transaction, so a query with either always runs inside one.
  */
-const testMode = new AsyncLocalStorage();
-export const runAsTestData = (fn) => testMode.run(true, fn);
-const markTestData = (c) => c.query("SELECT set_config('app.test_data', 'on', true)");
+const requestContext = new AsyncLocalStorage();
+export const runInContext = (context, fn) => requestContext.run(context, fn);
+async function applyContext(c) {
+  const { test, actor } = requestContext.getStore() ?? {};
+  if (test) await c.query("SELECT set_config('app.test_data', 'on', true)");
+  if (actor) await c.query("SELECT set_config('app.actor', $1, true)", [actor]);
+}
 
 export const query = (text, params) =>
-  testMode.getStore() && !pool.inTransaction?.() ? tx((c) => c.query(text, params)) : pool.query(text, params);
+  requestContext.getStore() && !pool.inTransaction?.() ? tx((c) => c.query(text, params)) : pool.query(text, params);
 
 /** A row is still referenced: foreign_key_violation, or restrict_violation from Postgres 18 (PGlite) on ON DELETE RESTRICT. */
 export const fkViolation = (err) => err.code === '23503' || err.code === '23001';
 
 export async function tx(fn) {
-  const test = testMode.getStore();
-  if (pool.tx) return pool.tx(async (c) => { if (test) await markTestData(c); return fn(c); });
+  if (pool.tx) return pool.tx(async (c) => { await applyContext(c); return fn(c); });
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    if (test) await markTestData(client);
+    await applyContext(client);
     const result = await fn(client);
     await client.query('COMMIT');
     return result;

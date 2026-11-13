@@ -1,11 +1,11 @@
 import path from 'node:path';
 import { Router } from 'express';
 import { query } from '../db.js';
-import { uploadDir, removeFiles, thumbDir } from '../images.js';
+import { imageJson, uploadDir, removeFiles, thumbDir } from '../images.js';
 import { thumbFor } from '../thumbs.js';
-import { MAX_SIDE, MIN_SIDE, compressPhoto, photoSizes } from '../compress.js';
+import { MAX_SIDE, MIN_SIDE, compressPhoto, photoSizes, rotatePhoto } from '../compress.js';
 import { saveSnapshot } from '../backup.js';
-import { array, badRequest, notFound, number, uuid } from '../validate.js';
+import { HttpError, array, badRequest, notFound, number, uuid } from '../validate.js';
 
 const router = Router();
 
@@ -29,10 +29,23 @@ router.post('/compress', async (req, res) => {
   res.json({ results });
 });
 
+// Turn a photo a quarter turn: { direction: 'left' | 'right' }. Returns the image with its new URLs.
+router.post('/:id/rotate', async (req, res) => {
+  const id = uuid(req.params.id, 'id');
+  const direction = req.body?.direction;
+  if (direction !== 'left' && direction !== 'right') throw badRequest('Direction must be left or right');
+  const status = await rotatePhoto(id, direction === 'right');
+  if (status === 'missing') throw notFound('Image');
+  if (status === 'unsupported') throw new HttpError(400, 'Only JPEG and PNG photos can be turned');
+  const { rows } = await query('SELECT * FROM images WHERE id = $1', [id]);
+  res.json(imageJson(rows[0]));
+});
+
 router.get('/:id', async (req, res) => {
   const { rows } = await query('SELECT filename, mime FROM images WHERE id = $1', [uuid(req.params.id, 'id')]);
   if (!rows[0]) throw notFound('Image');
-  // Files are never rewritten (new uploads get new ids), so they can be cached forever.
+  // A file is never rewritten in place (turning or compressing a photo stores a new file, and its
+  // URL names the file), so it can be cached forever.
   res.set('Cache-Control', 'private, max-age=31536000, immutable');
   res.type(rows[0].mime);
   // `root` keeps send's dotfile check to the file name; the binary's data dir is under ~/.local on Linux.

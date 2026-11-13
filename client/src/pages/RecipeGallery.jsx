@@ -2,12 +2,42 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
 import { useApi } from '../hooks.js';
-import { date, money, percent, qty, toDecimal, todayIso } from '../format.js';
+import { Decimal, date, money, percent, qty, toDecimal, todayIso } from '../format.js';
 import { Field, Icon, Menu, Modal, Notice, Spinner, TestBadge, useToast } from '../components/ui.jsx';
-import { DealInput, MarginCell, SalePriceInput, blankOrCount, blankOrPrice, priceText, pricingFor } from '../components/EventPricing.jsx';
+import { DealToggle, MarginCell, SalePriceInput, blankOrPrice, dealNote, dealProblem, priceText, pricingFor } from '../components/EventPricing.jsx';
+
+// Grid of cards or a table, remembered per browser.
+const VIEW_KEY = 'recipesView';
+const savedView = () => { try { return localStorage.getItem(VIEW_KEY) === 'table' ? 'table' : 'grid'; } catch { return 'grid'; } };
+
+// The table's columns, each sortable: `value` is what it sorts by (a number for `num` columns),
+// `first` the direction a click starts in (largest first for money and counts).
+const RECIPE_COLUMNS = [
+  { key: 'name', label: 'Recipe', first: 1, value: (r) => r.name },
+  { key: 'cost', label: 'Cost / serving', num: true, first: -1, value: (r) => r.costPerServing },
+  { key: 'price', label: 'Price', num: true, first: -1, value: (r) => r.recommendedPrice },
+  { key: 'profit', label: 'Profit / serving', num: true, first: -1, value: (r) => r.profitPerServing },
+  { key: 'margin', label: 'Margin', num: true, first: -1, value: (r) => r.targetMargin },
+  { key: 'servings', label: 'Servings', num: true, first: -1, value: (r) => r.baseServings },
+  { key: 'batch', label: 'Batch profit', num: true, first: -1, value: (r) => r.batchProfit },
+  { key: 'ingredients', label: 'Ingredients', num: true, first: -1, value: (r) => r.ingredientCount },
+  { key: 'updated', label: 'Updated', first: -1, value: (r) => r.updatedAt },
+];
+
+function compareRecipes(a, b, col) {
+  const [x, y] = [col.value(a), col.value(b)];
+  if (col.num) return (toDecimal(x) ?? new Decimal(0)).comparedTo(toDecimal(y) ?? new Decimal(0));
+  return String(x).localeCompare(String(y), undefined, { sensitivity: 'base' });
+}
 
 export default function RecipeGallery() {
   const { data, error, loading } = useApi('/recipes');
+  const [view, setView] = useState(savedView);
+  const pickView = (v) => { setView(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* only for this visit */ } };
+  const [sort, setSort] = useState({ key: 'name', dir: 1 });
+  const toggleSort = (c) => setSort((was) => ({ key: c.key, dir: was.key === c.key ? -was.dir : c.first }));
+  const col = RECIPE_COLUMNS.find((c) => c.key === sort.key);
+  const sorted = (data ?? []).slice().sort((a, b) => sort.dir * compareRecipes(a, b, col) || a.name.localeCompare(b.name));
   const [addTo, setAddTo] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const navigate = useNavigate();
@@ -41,7 +71,13 @@ export default function RecipeGallery() {
           <h1>Recipes</h1>
           <p>Costs use each ingredient’s most recent purchase price.</p>
         </div>
-        <Link className="btn primary" to="/recipes/new"><Icon.plus /> New recipe</Link>
+        <div className="form-actions">
+          <div className="view-toggle" role="group" aria-label="Show recipes as">
+            <button type="button" className="btn small" aria-pressed={view === 'grid'} onClick={() => pickView('grid')}>Grid</button>
+            <button type="button" className="btn small" aria-pressed={view === 'table'} onClick={() => pickView('table')}>Table</button>
+          </div>
+          <Link className="btn primary" to="/recipes/new"><Icon.plus /> New recipe</Link>
+        </div>
       </div>
 
       {error && <Notice kind="error">{error.message}</Notice>}
@@ -54,7 +90,66 @@ export default function RecipeGallery() {
         </div>
       )}
 
-      <div className="gallery">
+      {view === 'table' && !!data?.length && (
+        <div className="panel table-wrap">
+          <table className="grid recipe-table">
+            <thead>
+              <tr>
+                {RECIPE_COLUMNS.map((c) => (
+                  <th key={c.key} className={c.num ? 'num' : undefined} aria-sort={sort.key === c.key ? (sort.dir > 0 ? 'ascending' : 'descending') : 'none'}>
+                    <button type="button" className="sort-btn" onClick={() => toggleSort(c)}>
+                      {c.label}
+                      {sort.key === c.key && (sort.dir > 0 ? <Icon.up /> : <Icon.down />)}
+                    </button>
+                  </th>
+                ))}
+                <th aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r) => (
+                <tr key={r.id}>
+                  <td>
+                    <span className="recipe-cell">
+                      {r.coverImage ? <img src={r.coverImage.thumbUrl} alt="" loading="lazy" /> : <span className="no-cover" aria-hidden="true" />}
+                      <span>
+                        <Link to={`/recipes/${r.id}`} style={{ fontWeight: 650 }}>{r.name}</Link> <TestBadge item={r} />
+                        {(r.priceSet || r.missingPrices > 0) && (
+                          <span className="recipe-cell-badges">
+                            {r.priceSet && <span className="badge" title="Menu price set by hand: it stays when ingredient costs change">Price set</span>}
+                            {r.missingPrices > 0 && <span className="badge warn">{r.missingPrices} unpriced</span>}
+                          </span>
+                        )}
+                      </span>
+                    </span>
+                  </td>
+                  <td className="num">{money(r.costPerServing)}</td>
+                  <td className="num">{money(r.recommendedPrice)}</td>
+                  <td className="num" style={{ color: toDecimal(r.profitPerServing)?.lt(0) ? 'var(--tomato)' : undefined }}>{money(r.profitPerServing)}</td>
+                  <td className="num">{percent(r.targetMargin, 0)}</td>
+                  <td className="num">{r.baseServings}</td>
+                  <td className="num">{money(r.batchProfit)}</td>
+                  <td className="num">{r.ingredientCount}</td>
+                  <td className="nowrap muted">{date(new Date(r.updatedAt).toLocaleDateString('en-CA'))}</td>
+                  <td>
+                    <Menu
+                      label={`Actions for ${r.name}`}
+                      items={[
+                        { label: 'Edit', onSelect: () => navigate(`/recipes/${r.id}`) },
+                        { label: 'Duplicate', onSelect: () => duplicate(r) },
+                        { label: 'Add to event', onSelect: () => setAddTo(r) },
+                        { label: 'Delete', danger: true, onSelect: () => setDeleting(r) },
+                      ]}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {view === 'grid' && <div className="gallery">
         {(data ?? []).map((r) => (
           <article key={r.id} className="panel recipe-card">
             {r.coverImage && (
@@ -83,12 +178,13 @@ export default function RecipeGallery() {
               {r.missingPrices > 0 && <span className="badge warn">{r.missingPrices} unpriced</span>}
             </div>
             <div className="card-meta">
-              <span>{r.ingredientCount} ingredient{r.ingredientCount === 1 ? '' : 's'}{r.laborMinutes ? `, ${qty(r.laborMinutes, 1)} min labor` : ''}{r.imageCount > 1 ? `, ${r.imageCount} photos` : ''}</span>
+              <span>{r.ingredientCount} ingredient{r.ingredientCount === 1 ? '' : 's'}{r.imageCount > 1 ? `, ${r.imageCount} photos` : ''}</span>
               {!r.lastPriceSync && <span>No prices yet</span>}
+              <span className="nowrap">Updated {date(new Date(r.updatedAt).toLocaleDateString('en-CA'))}</span>
             </div>
           </article>
         ))}
-      </div>
+      </div>}
 
       {addTo && <AddToEventModal recipe={addTo} onClose={() => setAddTo(null)} />}
       {deleting && (
@@ -110,7 +206,7 @@ export function AddToEventModal({ recipe, onClose }) {
   const [newName, setNewName] = useState('');
   const [newDate, setNewDate] = useState(todayIso());
   const [servings, setServings] = useState(String(recipe.baseServings));
-  const [pricing, setPricing] = useState({ salePrice: '', discountAmount: '', discountQty: '' });
+  const [pricing, setPricing] = useState({ salePrice: '', dealPrice: '', dealQty: '' });
   const priced = pricingFor(recipe, pricing);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -120,8 +216,8 @@ export function AddToEventModal({ recipe, onClose }) {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!blankOrPrice(pricing.salePrice) || !blankOrPrice(pricing.discountAmount)) return setError('Prices and discounts must be amounts, like 4.50');
-    if (!blankOrCount(pricing.discountQty)) return setError('A discount applies per 1 or more servings');
+    if (!blankOrPrice(pricing.salePrice)) return setError('Prices must be amounts, like 4.50');
+    if (dealProblem(pricing)) return setError(dealProblem(pricing));
     setBusy(true);
     setError(null);
     try {
@@ -133,7 +229,7 @@ export function AddToEventModal({ recipe, onClose }) {
       // Only what was filled in: a recipe already in the event keeps its price and deal otherwise.
       const body = { recipeId: recipe.id, expectedServings: servings };
       if (pricing.salePrice.trim()) body.salePrice = priceText(pricing.salePrice);
-      if (pricing.discountAmount.trim()) Object.assign(body, { discountAmount: priceText(pricing.discountAmount), discountQty: pricing.discountQty.trim() });
+      if (pricing.dealPrice.trim()) Object.assign(body, { dealPrice: priceText(pricing.dealPrice), dealQty: pricing.dealQty.trim() });
       const ev = await api(`/events/${id}/recipes`, { method: 'POST', body });
       notifyDataChanged();
       toast(`Added ${recipe.name} to ${ev.name}`);
@@ -169,8 +265,8 @@ export function AddToEventModal({ recipe, onClose }) {
             <SalePriceInput id="add-sale-price" value={pricing.salePrice} recipePrice={recipe.recommendedPrice} label="Sale price per serving"
               onChange={(salePrice) => setPricing((p) => ({ ...p, salePrice }))} />
           </Field>
-          <Field label="Discount (optional)" hint="For a deal like “buy 2, get $1 off”: $1.00 off per 2.">
-            <DealInput amount={pricing.discountAmount} qty={pricing.discountQty} label="Discount"
+          <Field label="Discount (optional)" hint="For a deal like 3 for $15.">
+            <DealToggle qty={pricing.dealQty} price={pricing.dealPrice} saved={recipe} label="Discount" note={dealNote(pricing, priced)}
               onChange={(patch) => setPricing((p) => ({ ...p, ...patch }))} />
           </Field>
         </div>

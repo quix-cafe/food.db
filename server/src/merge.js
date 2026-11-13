@@ -3,7 +3,7 @@
 // of measure, and its name is remembered as a receipt name. A dry run does the same work in a
 // transaction that is rolled back, to preview what would change.
 
-import { Decimal, calculateRecipe, isLabor, normalizeUnit, unitRatio } from '@kitchen/shared';
+import { Decimal, calculateRecipe, isGenericName, lineAmountInUom, normalizeUnit, unitRatio } from '@kitchen/shared';
 import { tx } from './db.js';
 import { INGREDIENT_COLUMNS, LATEST_PURCHASE } from './sql.js';
 import { loadRecipes } from './routes/recipes.js';
@@ -26,7 +26,6 @@ async function mergeIn(c, sourceId, intoId, factorInput) {
   const load = async (id) => (await c.query(`SELECT ${INGREDIENT_COLUMNS} FROM ingredients i ${LATEST_PURCHASE} WHERE i.id = $1`, [id])).rows[0];
   const [source, into] = [await load(sourceId), await load(intoId)];
   if (!source || !into) throw notFound('Ingredient');
-  if (isLabor(source) || isLabor(into)) throw badRequest('Labor is a rate, not an ingredient, so it can’t be merged');
   const factor = factorInput ? new Decimal(factorInput) : unitRatio(source.uom, into.uom);
   if (!factor) throw badRequest(`How many ${into.uom} is 1 ${source.uom} of ${source.name}? Enter it to convert purchases and recipe amounts.`);
   const f = factor.toString();
@@ -47,9 +46,17 @@ async function mergeIn(c, sourceId, intoId, factorInput) {
     [source.id, into.id, f],
   ).catch(tooSmall('A purchase’s pack size'));
 
-  // Recipe lines: amounts into the kept unit. A recipe that lists both ends with one line.
+  // Recipe lines: amounts into the kept unit. A line measured in a kitchen unit of its own (cups
+  // of rice) keeps it when the kept ingredient can be measured that way. A recipe that lists both
+  // ends with one line, in the kept unit.
+  const kept = { ...into, cupGrams: into.cupGrams ?? source.cupGrams };
+  const inUom = (l) => {
+    const own = l.ingredient_id === source.id ? source : into;
+    const a = lineAmountInUom(l.amount, l.unit, own) ?? new Decimal(l.amount); // unconvertible: as written
+    return l.ingredient_id === source.id ? a.times(factor) : a;
+  };
   const { rows: lines } = await c.query(
-    `SELECT ri.recipe_id, ri.position, ri.ingredient_id, ri.amount, r.name
+    `SELECT ri.recipe_id, ri.position, ri.ingredient_id, ri.amount, ri.unit, r.name
      FROM recipe_ingredients ri JOIN recipes r ON r.id = ri.recipe_id
      WHERE ri.ingredient_id = ANY($1::uuid[]) ORDER BY ri.recipe_id, ri.position`,
     [[source.id, into.id]],
@@ -58,15 +65,16 @@ async function mergeIn(c, sourceId, intoId, factorInput) {
   for (const [recipeId, rows] of Map.groupBy(lines, (l) => l.recipe_id)) {
     const moved = rows.filter((l) => l.ingredient_id === source.id);
     if (!moved.length) continue;
-    const converted = moved.map((l) => new Decimal(l.amount).times(factor).toDecimalPlaces(4));
+    const [first, ...rest] = rows;
+    const keepsUnit = rows.length === 1 && first.unit && first.unit !== into.uom && lineAmountInUom(1, first.unit, kept) !== null;
+    const converted = moved.map((l) => (keepsUnit ? new Decimal(l.amount) : inUom(l).toDecimalPlaces(4)));
     lineChanges.set(recipeId, {
       lines: moved.map((l, i) => ({ from: l.amount, to: converted[i].toFixed(4) })),
       combined: rows.length > 1,
     });
-    const total = rows.reduce((sum, l) => sum.plus(l.ingredient_id === source.id ? converted[moved.indexOf(l)] : l.amount), new Decimal(0));
-    const [first, ...rest] = rows;
-    await c.query('UPDATE recipe_ingredients SET ingredient_id = $3, amount = $4 WHERE recipe_id = $1 AND position = $2',
-      [recipeId, first.position, into.id, total.toFixed(4)]);
+    const total = keepsUnit ? new Decimal(first.amount) : rows.reduce((sum, l) => sum.plus(inUom(l)), new Decimal(0));
+    await c.query('UPDATE recipe_ingredients SET ingredient_id = $3, amount = $4, unit = $5 WHERE recipe_id = $1 AND position = $2',
+      [recipeId, first.position, into.id, total.toFixed(4), keepsUnit ? first.unit : null]);
     for (const l of rest) await c.query('DELETE FROM recipe_ingredients WHERE recipe_id = $1 AND position = $2', [recipeId, l.position]);
   }
 
@@ -96,7 +104,7 @@ async function mergeIn(c, sourceId, intoId, factorInput) {
   await c.query('UPDATE ingredient_aliases SET ingredient_id = $2 WHERE ingredient_id = $1', [source.id, into.id]);
   await c.query('DELETE FROM ingredient_aliases WHERE ingredient_id = $1 AND alias = $2', [into.id, into.name]);
   const aliasesAdded = [];
-  if (source.name !== into.name) {
+  if (source.name !== into.name && !isGenericName(source.name)) {
     await c.query(
       `INSERT INTO ingredient_aliases (ingredient_id, alias) VALUES ($1, $2)
        ON CONFLICT ((lower(alias))) DO UPDATE SET ingredient_id = EXCLUDED.ingredient_id`,
@@ -105,19 +113,19 @@ async function mergeIn(c, sourceId, intoId, factorInput) {
     aliasesAdded.push(source.name);
   }
 
-  // Real data wins over test data, and a missing category is filled in.
-  await c.query('UPDATE ingredients SET is_test = is_test AND $2, category = coalesce(category, $3) WHERE id = $1',
-    [into.id, source.isTest, source.category]);
+  // Real data wins over test data, and a missing category (or weight of a cup) is filled in.
+  await c.query('UPDATE ingredients SET is_test = is_test AND $2, category = coalesce(category, $3), cup_grams = coalesce(cup_grams, $4) WHERE id = $1',
+    [into.id, source.isTest, source.category, source.cupGrams]);
   await c.query('DELETE FROM ingredients WHERE id = $1', [source.id]);
 
-  const kept = await load(into.id);
+  const keptNow = await load(into.id);
   const after = await costs(c, recipeIds);
   return {
-    kept: pick(kept),
+    kept: pick(keptNow),
     merged: pick(source),
     factor: factor.toString(),
     priceBefore: into.latestUnitPrice,
-    priceAfter: kept.latestUnitPrice,
+    priceAfter: keptNow.latestUnitPrice,
     purchasesMoved,
     recipes: before.map((b) => {
       const a = after.find((r) => r.id === b.id);

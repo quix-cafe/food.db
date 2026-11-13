@@ -3,12 +3,14 @@
 //
 // Extractors disagree on structure, so this accepts common variants:
 // - vendor as a string (vendor, merchant, store_name…) or an object ({ store: { name } })
-// - date at the top level or one level down ({ transaction: { date } }), ISO or MM/DD/YY(YY)
+// - date at the top level or one level down ({ transaction: { date } }), ISO or MM/DD/YY(YY);
+//   likewise its time ("7:29pm", "17:03:48"), or a time written after the date
 // - items as a flat list, a list of groups ({ section, entries: [...] }), or a map of
 //   groups ({ sections: { Produce: [...] } }); the group name becomes the category
 // - per line: name/description/item, quantity ("2.21 lb"), weight ("1.46 lb", which wins
 //   over quantity: unit_price is then per lb), unit_price ("0.59/lb"),
-//   quantity_detail ("2 @ $2.99 ea"), and total/price/amount
+//   quantity_detail ("2 @ $2.99 ea"), unit/uom/unit_of_measure ("LB"; a multi-buy's "FOR",
+//   as in "2 @ 4 FOR", is no unit), and total/price/amount
 // - discount lines ({ discount: 1 } or a negative price) reduce the item above them;
 //   label lines ({ label: "PRICE YOU PAY", price }) give the item above its net price;
 //   lines with no amount (savings summaries, coupon info) are ignored
@@ -20,6 +22,7 @@ import { badRequest } from '../validate.js';
 const KEYS = {
   vendor: ['vendor', 'merchant', 'store_name', 'store', 'merchantname', 'supplier'],
   date: ['date', 'purchase_date', 'transaction_date'],
+  time: ['time', 'purchase_time', 'transaction_time'],
   items: ['items', 'line_items', 'lineitems', 'products', 'sections', 'departments', 'entries', 'lines'],
   group: ['section', 'category', 'department', 'group'],
   total: ['total', 'total_amount', 'totalamount', 'grand_total'],
@@ -29,9 +32,9 @@ const KEYS = {
   quantity: ['quantity', 'qty', 'count'],
   weight: ['weight', 'net_weight'],
   quantityDetail: ['quantity_detail', 'qty_detail', 'quantity_text'],
-  unit: ['unit', 'uom', 'unit_of_measurement'],
+  unit: ['unit', 'uom', 'unit_of_measurement', 'unit_of_measure', 'measure', 'sold_by'],
   unitCost: ['unit_price', 'unitprice', 'unit_cost', 'unitcost', 'price_per_unit'],
-  totalCost: ['total', 'line_total', 'linetotal', 'amount', 'price', 'total_cost', 'totalcost'],
+  totalCost: ['total', 'line_total', 'linetotal', 'amount', 'price', 'total_cost', 'totalcost', 'total_amount', 'total_price', 'extended_price'],
   discount: ['discount', 'coupon', 'markdown', 'discount_amount'],
 };
 
@@ -77,6 +80,24 @@ function isoDate(v) {
   return null;
 }
 
+/** "07:29pm", "8:14 PM", "17:03:48", "2026-10-15T19:29" → "19:29"; null when there's no time of day. */
+function clockTime(v) {
+  const m = /(?:^|[\sT])(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?\s*(?:([ap])\.?\s*m\b\.?)?/i.exec(str(v) ?? '');
+  if (!m) return null;
+  let hour = Number(m[1]);
+  const ampm = m[3]?.toLowerCase();
+  if (ampm && (hour < 1 || hour > 12)) return null;
+  if (ampm) hour = (hour % 12) + (ampm === 'p' ? 12 : 0);
+  if (hour > 23 || Number(m[2]) > 59) return null;
+  return `${String(hour).padStart(2, '0')}:${m[2]}`;
+}
+
+/** When a receipt was printed, 'HH:MM' (24-hour), from its time or a time written with its date; null if neither has one. */
+export function receiptTime(raw) {
+  if (!isObject(raw)) return null;
+  return clockTime(pickDeep(raw, 'time')) ?? clockTime(pickDeep(raw, 'date'));
+}
+
 /** Look for a field at the top level, then one level down in nested objects. */
 function pickDeep(raw, field) {
   const top = pick(raw, field);
@@ -89,7 +110,7 @@ function pickDeep(raw, field) {
 }
 
 /** "CLEANING SUPPLIES" → "Cleaning Supplies"; mixed-case names are left alone. */
-const tidyCategory = (s) => (s && s === s.toUpperCase() ? s.toLowerCase().replace(/(^|[\s/&-])(\p{L})/gu, (_, a, b) => a + b.toUpperCase()) : s);
+const tidyCapitals = (s) => (s && s === s.toUpperCase() ? s.toLowerCase().replace(/(^|[\s/&-])(\p{L})/gu, (_, a, b) => a + b.toUpperCase()) : s);
 
 function parseLine(el, category) {
   const name = str(pick(el, 'name'));
@@ -119,6 +140,8 @@ function parseLine(el, category) {
     unit ??= dm[3] ?? null;
   }
 
+  // "2 @ 4 FOR" sells by the item at a multi-buy price: "FOR" isn't a unit.
+  if (unit && /^for$/i.test(unit)) unit = null;
   return { name, category, unit, quantity, unitCost, total: amount(pick(el, 'totalCost')) };
 }
 
@@ -151,9 +174,10 @@ function walkList(list, category, ctx) {
     const line = parseLine(el, category);
     const ownDiscount = positive(pick(el, 'discount'));
 
-    // A discount/coupon line: reduce the item above.
-    const discount = ownDiscount ?? (line.total?.lt(0) ? line.total.neg() : null);
-    if (discount && !(line.total?.gt(0))) {
+    // A discount/coupon line: reduce the item above. Its amount may be only a negative unit price.
+    const negativeUnit = line.total === null ? amount(pick(el, 'unitCost')) : null;
+    const discount = ownDiscount ?? (line.total?.lt(0) ? line.total.neg() : negativeUnit?.lt(0) ? negativeUnit.neg().times(line.quantity ?? 1) : null);
+    if (discount && !(line.total?.gt(0)) && !(line.unitCost?.gt(0) && !ownDiscount)) {
       if (prev) applyDiscount(prev, discount, line.name, ctx);
       else ctx.warnings.push(`A ${fmt(discount)} discount (“${line.name ?? 'unnamed'}”) has no item above it and was not applied.`);
       continue;
@@ -180,7 +204,7 @@ function walkList(list, category, ctx) {
     const quantity = line.quantity && !line.quantity.isZero() ? line.quantity : new Decimal(1);
     const item = {
       name: line.name,
-      category: tidyCategory(line.category),
+      category: tidyCapitals(line.category),
       unit: line.unit,
       quantity,
       unitCost: line.unitCost ?? line.total.div(quantity),
@@ -269,8 +293,9 @@ export function normalizeReceipt(raw) {
   const vendor = str(vendorRaw) ?? str(pick(vendorRaw, 'name'));
 
   return {
-    vendor,
+    vendor: tidyCapitals(vendor), // "H MART" → "H Mart"
     date: isoDate(pickDeep(raw, 'date')),
+    time: receiptTime(raw),
     printedTotal: printed ? printed.toFixed(2) : null,
     totalLabel,
     items: merged.map((it) => ({

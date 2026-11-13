@@ -1,12 +1,20 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
-import { isLabor } from '@kitchen/shared';
+import { estimatedCupGrams, normalizeUnit, unitRatio } from '@kitchen/shared';
 import { useApi } from '../hooks.js';
-import { Decimal, date, money, pack, perUnit, qty, signedPercent, toDecimal, todayIso, unitMoney } from '../format.js';
+import { Decimal, date, money, pack, perUnit, qty, signedPercent, toDecimal, unitMoney } from '../format.js';
 import { CategoryInput, PurchaseFields, UomInput, emptyPurchase } from './forms.jsx';
 import PriceChart from './PriceChart.jsx';
 import { Drawer, Field, Icon, Notice, Spinner, TestBadge, useToast } from './ui.jsx';
+
+const cupText = (v) => (v ? toDecimal(v).toString() : '');
+/** 'weight' or 'volume' for a unit kitchen measures convert, else null (each, box). */
+const measurable = (uom) => {
+  const u = normalizeUnit(uom);
+  if (!u) return null;
+  return unitRatio(u, 'g') ? 'weight' : unitRatio(u, 'tsp') ? 'volume' : null;
+};
 
 /**
  * An ingredient's detail panel: prices, details, where it's used, purchases. Also opened over the
@@ -25,10 +33,10 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
 
   const ing = data?.ingredient;
   useEffect(() => {
-    if (ing) setForm({ name: ing.name, category: ing.category ?? '', uom: ing.uom ?? '' });
-  }, [ing?.id, ing?.name, ing?.category, ing?.uom]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (ing) setForm({ name: ing.name, category: ing.category ?? '', uom: ing.uom ?? '', cupGrams: cupText(ing.cupGrams) });
+  }, [ing?.id, ing?.name, ing?.category, ing?.uom, ing?.cupGrams]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const dirty = form && ing && (form.name !== ing.name || form.category !== (ing.category ?? '') || form.uom !== (ing.uom ?? ''));
+  const dirty = form && ing && (form.name !== ing.name || form.category !== (ing.category ?? '') || form.uom !== (ing.uom ?? '') || form.cupGrams !== cupText(ing.cupGrams));
 
   const run = async (fn, ok) => {
     setSaving(true);
@@ -48,7 +56,7 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
 
   const save = (e) => {
     e.preventDefault();
-    run(() => api(`/ingredients/${id}`, { method: 'PATCH', body: { name: form.name, category: form.category, uom: form.uom } }), 'Ingredient saved');
+    run(() => api(`/ingredients/${id}`, { method: 'PATCH', body: { name: form.name, category: form.category, uom: form.uom, cupGrams: form.cupGrams } }), 'Ingredient saved');
   };
 
   const addPurchase = async (e) => {
@@ -66,7 +74,6 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
   const removeAlias = (a) => run(() => api(`/ingredients/${id}/aliases/${a.id}`, { method: 'DELETE' }), `Forgot “${a.alias}”`).then(reload);
   const removePurchase = (pid) => run(() => api(`/ingredients/${id}/purchases/${pid}`, { method: 'DELETE' }), 'Purchase removed').then(reload);
 
-  const labor = isLabor(ing);
   const purchaseById = new Map((data?.purchases ?? []).map((p) => [p.id, p]));
   const latest = data?.trips[0]; // newest first; a trip is one receipt's lines, averaged
   const hike = latest?.priceHike ? latest : null;
@@ -86,8 +93,7 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
               </Notice>
             );
           })}
-          {labor && <LaborRate ingredient={ing} purchases={data.purchases} run={run} saving={saving} />}
-          {!labor && (<>
+          <>
           <div className="stat-row">
             <div className="stat"><b>{ing.latestUnitPrice ? money(ing.latestUnitPrice) : '—'}</b><span>Latest per {ing.uom ?? 'unit'}{ing.latestPackSize ? ` (${ing.latestLines > 1 ? 'avg ' : ''}${pack(ing.latestPackSize, ing.uom)} for ${unitMoney(ing.latestPackPrice)})` : ''}{ing.latestLines > 1 ? `, averaged over ${ing.latestLines} lines of one receipt` : ''}</span></div>
             {data.trips.length > 1 && (
@@ -129,7 +135,7 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
               </table>
             </div>
           </section>
-          </>)}
+          </>
 
           <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <h3>Details</h3>
@@ -139,6 +145,14 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
               <Field label="Unit of measurement">
                 <UomInput value={form.uom} onChange={(uom) => setForm((f) => ({ ...f, uom }))} required />
               </Field>
+              {measurable(form.uom) && (
+                <Field label="1 cup weighs (g)">
+                  <input className="input num" inputMode="decimal" value={form.cupGrams} aria-label="Grams in one cup"
+                    title={`So recipes can use ${measurable(form.uom) === 'weight' ? 'cups and spoons' : 'ounces and grams'} of it. Blank: an estimate by name where there is one.`}
+                    placeholder={estimatedCupGrams(form.name) ? `about ${estimatedCupGrams(form.name)}` : 'e.g. 185 for rice'}
+                    onChange={(e) => setForm((f) => ({ ...f, cupGrams: e.target.value }))} />
+                </Field>
+              )}
             </div>
             {formError && <Notice kind="error">{formError}</Notice>}
             <div className="form-actions" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
@@ -149,7 +163,7 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
 
           <UsedIn usedIn={data.usedIn} ing={ing} />
 
-          {!labor && (<>
+          <>
           <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3>Purchases</h3>
@@ -174,11 +188,11 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
                       <tr key={p.id} className={inTrip ? 'trip-line' : undefined}>
                         <td className="nowrap">{inTrip ? <span className="muted">{date(p.date)}</span> : date(p.date)}</td>
                         <td><VendorInput purchase={p} ingredientId={id} run={run} /> <TestBadge item={p} />{p.receiptId && !inTrip && <> <Link to={`/purchases/${p.receiptId}`} className="muted" style={{ fontSize: '0.85rem' }}>Receipt</Link></>}</td>
-                        <td className="num">{qty(p.quantity)}</td>
-                        <td className="num nowrap"><PackSizeInput purchase={p} uom={ing.uom} ingredientId={id} run={run} /></td>
-                        <td className="num">{unitMoney(p.unitCost)}</td>
+                        <td className="num nowrap"><PurchaseNumberInput purchase={p} field="quantity" ingredientId={id} run={run} /></td>
+                        <td className="num nowrap"><PurchaseNumberInput purchase={p} field="packSize" uom={ing.uom} ingredientId={id} run={run} /></td>
+                        <td className="num nowrap"><PurchaseNumberInput purchase={p} field="unitCost" ingredientId={id} run={run} /></td>
                         <td className="num nowrap">{perUnit(p.unitPrice, ing.uom)}</td>
-                        <td className="num">{money(p.totalCost)}</td>
+                        <td className="num nowrap"><PurchaseNumberInput purchase={p} field="totalCost" ingredientId={id} run={run} /></td>
                         <td className="num" title={p.previous ? `vs ${perUnit(p.previous.unitPrice, ing.uom)}${p.previous.vendor ? ` at ${p.previous.vendor}` : ''} on ${date(p.previous.date)}` : inTrip ? 'Part of the receipt’s average above' : undefined}>
                           {inTrip ? <span className="muted">in avg</span> : <Change value={p.changePercent} hike={p.priceHike} />}
                         </td>
@@ -236,7 +250,7 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
               <small className="muted">None yet. When you rename a receipt line to {ing.name}, the receipt’s wording is remembered here.</small>
             )}
           </section>
-          </>)}
+          </>
 
           <section className="form-actions" style={{ justifyContent: 'flex-start' }}>
             {confirmDelete ? (
@@ -247,7 +261,7 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
               </>
             ) : (
               <>
-                {!labor && onMerge && (
+                {onMerge && (
                   <button className="btn" onClick={() => onMerge({ first: { ...ing, purchaseCount: data.purchases.length } })}>
                     Merge into another ingredient…
                   </button>
@@ -262,28 +276,39 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
   );
 }
 
+const PURCHASE_FIELDS = {
+  quantity: { label: 'Packs', done: (d) => `Packs changed to ${qty(d)}; the total stays` },
+  packSize: { label: 'Pack size', done: (d, uom) => `Pack size changed to ${pack(d, uom)}` },
+  unitCost: { label: 'Pack price', money: true, done: (d) => `Pack price changed to ${money(d)}` },
+  totalCost: { label: 'Total', money: true, done: (d) => `Total changed to ${money(d)}` },
+};
+
 /**
- * A purchase's pack size, editable in place to fix a mis-entered size (saved on Enter or
- * when leaving the field; Escape undoes). The price paid isn't touched.
+ * One number of a purchase, editable in place to correct it (saved on Enter or when leaving the
+ * field; Escape undoes): packs bought, pack size, pack price or total. The server keeps packs ×
+ * pack price and the total in agreement: new packs keep the total, a new price or total works out
+ * the other.
  */
-function PackSizeInput({ purchase, uom, ingredientId, run }) {
-  const saved = toDecimal(purchase.packSize).toString();
+function PurchaseNumberInput({ purchase, field, uom, ingredientId, run }) {
+  const spec = PURCHASE_FIELDS[field];
+  const stored = toDecimal(purchase[field]);
+  const saved = spec.money && stored.decimalPlaces() <= 2 ? stored.toFixed(2) : stored.toString(); // $1.50, but $0.3317 a lime
   const [value, setValue] = useState(saved);
   useEffect(() => setValue(saved), [saved]);
-  const d = toDecimal(value);
-  const valid = d && d.gt(0);
+  const d = toDecimal(value.replace(/[$,]/g, ''));
+  const valid = d && (field === 'quantity' || field === 'packSize' ? d.gt(0) : d.gte(0));
   const commit = () => {
     if (!valid) return setValue(saved);
     if (d.eq(saved)) return;
-    run(() => api(`/ingredients/${ingredientId}/purchases/${purchase.id}`, { method: 'PATCH', body: { packSize: d.toString() } }),
-      `Pack size changed to ${pack(d, uom)}`);
+    run(() => api(`/ingredients/${ingredientId}/purchases/${purchase.id}`, { method: 'PATCH', body: { [field]: d.toString() } }), spec.done(d, uom));
   };
   return (
-    <span className="pack-size-edit">
-      <input className="input num" inputMode="decimal" value={value} aria-label={`Pack size for the purchase on ${date(purchase.date)}, in ${uom ?? 'units'}`}
+    <span className={`pack-size-edit ${spec.money ? 'money-input' : ''}`}>
+      {spec.money && <span aria-hidden="true">$</span>}
+      <input className="input num" inputMode="decimal" value={value} aria-label={`${spec.label} for the purchase on ${date(purchase.date)}${field === 'packSize' ? `, in ${uom ?? 'units'}` : ''}`}
         aria-invalid={!valid} onChange={(e) => setValue(e.target.value)} onBlur={commit}
         onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') undo(e, value, saved, setValue); }} />
-      {' '}{uom}
+      {field === 'packSize' && <>{' '}{uom}</>}
     </span>
   );
 }
@@ -321,9 +346,9 @@ function UsedIn({ usedIn, ing }) {
       ) : (
         <ul>
           {recipes.map((r) => (
-            <li key={r.id}>
+            <li key={`${r.id}:${r.unit ?? ''}`}>
               <Link to={`/recipes/${r.id}`}>{r.name}</Link> <TestBadge item={r} />
-              <span className="muted">{qty(r.amount)} {ing.uom}</span>
+              <span className="muted">{qty(r.amount)} {r.unit ?? ing.uom}</span>
             </li>
           ))}
           {blends.map((b) => (
@@ -347,53 +372,6 @@ function undo(e, value, saved, setValue) {
   if (value === saved) return;
   e.stopPropagation();
   setValue(saved);
-}
-
-/**
- * Labor is a service, not something bought from a vendor: its price is a rate you set here.
- * Each change is stored as a price record (1 × 1 unit at the new rate), so recipe costs pick
- * up the latest rate the same way they pick up an ingredient's latest purchase.
- */
-function LaborRate({ ingredient, purchases, run, saving }) {
-  const unit = ingredient.uom ?? 'hour';
-  const current = ingredient.latestUnitPrice ? toDecimal(ingredient.latestUnitPrice).toFixed(2) : '';
-  const [rate, setRate] = useState(current);
-  useEffect(() => setRate(current), [current]);
-  const d = toDecimal(rate);
-  const valid = d && d.gte(0);
-  const changed = valid && (!current || !d.eq(current));
-  const save = (e) => {
-    e.preventDefault();
-    run(() => api(`/ingredients/${ingredient.id}/purchases`, {
-      method: 'POST',
-      body: { date: todayIso(), quantity: 1, packSize: 1, unitCost: d.toString() },
-    }), `Rate set to ${perUnit(d, unit)}`);
-  };
-  return (
-    <>
-      <form onSubmit={save} className="panel panel-pad labor-rate" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <h3>Rate</h3>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <Field label={`Price per ${unit}`}>
-            <span className="money-input" style={{ width: 140 }}>
-              <span aria-hidden="true">$</span>
-              <input className="input num" inputMode="decimal" value={rate} aria-invalid={!valid && rate !== ''} onChange={(e) => setRate(e.target.value)} />
-            </span>
-          </Field>
-          <button className="btn primary" disabled={!changed || saving}>Save rate</button>
-        </div>
-        <small className="muted">A service cost, not a purchase: recipes use the current rate × the hours on each line.</small>
-      </form>
-      {purchases.length > 0 && (
-        <section style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <h3>Rate history</h3>
-          <ul className="rate-history">
-            {purchases.map((p) => <li key={p.id}><span>{date(p.date)}</span><b>{perUnit(p.unitPrice, unit)}</b></li>)}
-          </ul>
-        </section>
-      )}
-    </>
-  );
 }
 
 const averageUnitPrice = (purchases) =>

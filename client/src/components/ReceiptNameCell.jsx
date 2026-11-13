@@ -28,7 +28,9 @@ export default function ReceiptNameCell({ row, index, onChange }) {
   const [draft, setDraft] = useState('');
   const settled = useRef(false); // guards against blur firing after Enter/pick/Escape
 
-  const revert = { keep: true, name: '', ingredientId: null };
+  const revert = { keep: true, name: '', ingredientId: null, suggested: false, addNew: false };
+  // A new ingredient on purpose, under the tidier name when there is one (the receipt's wording stays its receipt name).
+  const asNew = { addNew: true, suggested: false, ingredientId: null, ...(row.clean ? { keep: false, name: row.clean } : { keep: true, name: '' }), confirmed: true };
 
   const start = () => {
     settled.current = false;
@@ -50,13 +52,13 @@ export default function ReceiptNameCell({ row, index, onChange }) {
     if (text === row.source) return finish(revert);
     if (row.resolved && same(text, row.resolved.name)) {
       // Recasing the ingredient the receipt already maps to: saving renames it.
-      return finish({ keep: false, name: text, ingredientId: row.resolved.id, ingredientUom: row.resolved.uom, confirmed: true });
+      return finish({ keep: false, name: text, ingredientId: row.resolved.id, ingredientUom: row.resolved.uom, suggested: false, confirmed: true });
     }
-    finish({ keep: false, name: text, ingredientId: null, confirmed: true });
+    finish({ keep: false, name: text, ingredientId: null, suggested: false, addNew: true, confirmed: true });
   };
   const pick = (ing) => {
     if (row.source && row.resolved?.id === ing.id) return finish(revert); // what the receipt already maps to
-    finish({ keep: false, name: ing.name, ingredientId: ing.id, ingredientUom: ing.uom, category: ing.category ?? row.category, confirmed: true });
+    finish({ keep: false, name: ing.name, ingredientId: ing.id, ingredientUom: ing.uom, category: ing.category ?? row.category, suggested: false, confirmed: true });
   };
 
   const renamed = !row.keep;
@@ -85,11 +87,11 @@ export default function ReceiptNameCell({ row, index, onChange }) {
 
       <div className="name-status">
         {target.kind === 'existing'
-          ? <span className="badge good">In database</span>
+          ? <span className={`badge ${row.suggested ? 'new' : 'good'}`} title={row.suggested ? 'Every word of its name is on the receipt. Tick the line to confirm it.' : undefined}>{row.suggested ? 'Suggested match' : 'In database'}</span>
           : target.name && <span className="badge new">New ingredient</span>}
         {row.source && row.source !== target.name && <span className="muted">Receipt: “{row.source}”</span>}
-        {renamed && row.source && (
-          <button type="button" className="link-btn" onClick={() => onChange(revert)}>Undo rename</button>
+        {(renamed || row.addNew) && row.source && (
+          <button type="button" className="link-btn" onClick={() => onChange(revert)}>{row.suggested ? 'Not this' : row.addNew && !renamed ? 'Undo' : 'Undo rename'}</button>
         )}
       </div>
 
@@ -105,15 +107,17 @@ export default function ReceiptNameCell({ row, index, onChange }) {
           ))}
         </div>
       )}
-      {!renamed && !row.resolved && !row.choices?.length && !editing && (row.candidates ?? (row.suggestion ? [row.suggestion] : [])).length > 0 && (
+      {!renamed && !row.addNew && !row.resolved && !row.choices?.length && !editing && (row.candidates ?? (row.suggestion ? [row.suggestion] : [])).length > 0 && (
         <div className="name-status">
           <span className="muted">Might be:</span>
           {(row.candidates ?? [row.suggestion]).map((c) => (
             <button key={c.id} type="button" className="link-btn" title={c.words?.length ? `Shares “${c.words.join('”, “')}” with the receipt` : 'Spelled like the receipt'}
-              onClick={() => onChange({ keep: false, name: c.name, ingredientId: c.id, ingredientUom: c.uom, category: c.category ?? row.category, confirmed: true })}>
+              onClick={() => onChange({ keep: false, name: c.name, ingredientId: c.id, ingredientUom: c.uom, category: c.category ?? row.category, suggested: false, confirmed: true })}>
               {c.name}
             </button>
           ))}
+          <span className="muted">or</span>
+          <button type="button" className="link-btn set-new" onClick={() => onChange(asNew)}>Add as new{row.clean ? ` (${row.clean})` : ''}</button>
         </div>
       )}
       {row.note && <div className="name-status muted">{row.note}</div>}

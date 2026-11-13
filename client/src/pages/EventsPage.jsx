@@ -61,7 +61,7 @@ export default function EventsPage() {
                 <Link to={`/events/${e.id}`} className="event-row">
                   <DateBlock iso={e.date} />
                   <div>
-                    <h3>{e.name} <TestBadge item={e} /></h3>
+                    <h3>{e.name} <TestBadge item={e} />{e.kind !== 'market' && <span className="badge">{e.kind === 'supper_club' ? 'Supper Club' : 'Personal Cheffing'}</span>}</h3>
                     <span className="muted">{new Date(e.date + 'T00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</span>
                   </div>
                   <span className="muted">

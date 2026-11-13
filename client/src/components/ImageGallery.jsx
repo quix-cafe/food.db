@@ -6,10 +6,27 @@ const ACCEPT = 'image/jpeg,image/png,image/webp,image/gif';
 /**
  * Thumbnail grid with add/remove/cover controls and a full-size viewer.
  * images: [{ id, url, originalName }] — the first one is the cover when `onMakeCover` is given.
+ * `onRotate(image, 'left' | 'right')`, where given, offers turning a photo a quarter turn (a receipt
+ * photographed sideways), on its thumbnail and in the viewer.
  */
-export default function ImageGallery({ images, onAdd, onRemove, onMakeCover, busy = false, label = 'photo', emptyText }) {
+export default function ImageGallery({ images, onAdd, onRemove, onMakeCover, onRotate, busy = false, label = 'photo', emptyText }) {
   const [viewing, setViewing] = useState(null);
   const [over, setOver] = useState(false);
+  // The photo being turned: { id, from }, its thumbnail's URL before. Held until the turned
+  // thumbnail has loaded, so the photo stays covered (and can't be turned again) until it shows.
+  const [turning, setTurning] = useState(null);
+  const turned = (img) => {
+    if (turning?.id === img.id && (img.thumbUrl ?? img.url) !== turning.from) setTurning(null);
+  };
+
+  const rotate = onRotate && (async (img, direction) => {
+    setTurning({ id: img.id, from: img.thumbUrl ?? img.url });
+    try {
+      await onRotate(img, direction);
+    } catch {
+      setTurning(null);
+    }
+  });
 
   const add = (fileList) => {
     const files = [...fileList].filter((f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|heic)$/i.test(f.name));
@@ -25,13 +42,15 @@ export default function ImageGallery({ images, onAdd, onRemove, onMakeCover, bus
     >
       {images.map((img, i) => (
         <figure key={img.id} className="thumb">
-          <button type="button" className="thumb-img" onClick={() => setViewing(i)} aria-label={`View ${label} ${i + 1}${img.originalName ? ` (${img.originalName})` : ''}`}>
-            <img src={img.thumbUrl ?? img.url} alt="" loading="lazy" />
+          <button type="button" className="thumb-img" onClick={() => setViewing(i)} disabled={turning?.id === img.id} aria-label={`View ${label} ${i + 1}${img.originalName ? ` (${img.originalName})` : ''}`}>
+            <img src={img.thumbUrl ?? img.url} alt="" loading="lazy" onLoad={() => turned(img)} onError={() => turned(img)} />
+            {turning?.id === img.id && <span className="turning-cover" role="status"><Spinner /> Rotating…</span>}
           </button>
           {onMakeCover && i === 0 && images.length > 1 && <span className="badge cover-badge">Cover</span>}
-          {(onRemove || (onMakeCover && i > 0)) && (
+          {(onRemove || onRotate || (onMakeCover && i > 0)) && (
             <figcaption>
               {onMakeCover && i > 0 && <button type="button" className="link-btn" onClick={() => onMakeCover(img)}>Make cover</button>}
+              {rotate && <RotateButtons label={`${label} ${i + 1}`} disabled={!!turning} onRotate={(direction) => rotate(img, direction)} />}
               {onRemove && (
                 <button type="button" className="icon-btn" aria-label={`Remove ${label} ${i + 1}`} onClick={() => onRemove(img)}><Icon.trash /></button>
               )}
@@ -48,13 +67,23 @@ export default function ImageGallery({ images, onAdd, onRemove, onMakeCover, bus
       )}
       {!images.length && !onAdd && emptyText && <p className="muted">{emptyText}</p>}
       {viewing !== null && images[viewing] && (
-        <Lightbox images={images} index={viewing} onIndex={setViewing} onClose={() => setViewing(null)} />
+        <Lightbox images={images} index={viewing} onIndex={setViewing} onClose={() => setViewing(null)}
+          onRotate={rotate && ((direction) => rotate(images[viewing], direction))} turning={turning?.id === images[viewing].id} />
       )}
     </div>
   );
 }
 
-export function Lightbox({ images, index, onIndex, onClose }) {
+function RotateButtons({ label, disabled, onRotate }) {
+  return (
+    <span className="rotate-btns">
+      <button type="button" className="icon-btn" aria-label={`Rotate ${label} left`} title="Rotate left" disabled={disabled} onClick={() => onRotate('left')}><Icon.rotateLeft /></button>
+      <button type="button" className="icon-btn" aria-label={`Rotate ${label} right`} title="Rotate right" disabled={disabled} onClick={() => onRotate('right')}><Icon.rotateRight /></button>
+    </span>
+  );
+}
+
+function Lightbox({ images, index, onIndex, onClose, onRotate, turning }) {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') onClose();
@@ -68,11 +97,20 @@ export function Lightbox({ images, index, onIndex, onClose }) {
   const img = images[index];
   return (
     <div className="lightbox" role="dialog" aria-modal="true" aria-label={`Image ${index + 1} of ${images.length}`} onClick={onClose}>
-      <img src={img.url} alt={img.originalName ?? ''} onClick={(e) => e.stopPropagation()} />
+      <div className="lightbox-photo" onClick={(e) => e.stopPropagation()}>
+        <img src={img.url} alt={img.originalName ?? ''} />
+        {turning && <span className="turning-cover" role="status"><Spinner /> Rotating…</span>}
+      </div>
       <div className="lightbox-bar" onClick={(e) => e.stopPropagation()}>
         {images.length > 1 && <button type="button" className="btn small" onClick={() => onIndex((index - 1 + images.length) % images.length)}>Previous</button>}
         <span>{index + 1} / {images.length}{img.originalName ? `, ${img.originalName}` : ''}</span>
         {images.length > 1 && <button type="button" className="btn small" onClick={() => onIndex((index + 1) % images.length)}>Next</button>}
+        {onRotate && (
+          <>
+            <button type="button" className="btn small" disabled={turning} onClick={() => onRotate('left')}><Icon.rotateLeft /> Rotate left</button>
+            <button type="button" className="btn small" disabled={turning} onClick={() => onRotate('right')}><Icon.rotateRight /> Rotate right</button>
+          </>
+        )}
         <button type="button" className="btn small" onClick={onClose} autoFocus>Close</button>
       </div>
     </div>

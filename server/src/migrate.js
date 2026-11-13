@@ -5,32 +5,18 @@ import { embedded } from './embedded.js';
 
 const dir = fileURLToPath(new URL('../migrations/', import.meta.url));
 
-/**
- * Migrations since combined into 001_schema.sql. A database (or backup) that applied them has
- * everything they added, so their records are dropped rather than refused.
- */
-export const COMBINED = ['002_sauce_serving_oz.sql', '003_recipe_target_price.sql'];
-
 /** Apply any migrations/*.sql files not yet recorded, in filename order. */
 export async function migrate({ log = console.log } = {}) {
   await pool.query('CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-  const { rows } = await pool.query('SELECT name FROM schema_migrations');
-  const applied = new Set(rows.map((r) => r.name));
-  for (const name of COMBINED.filter((n) => applied.has(n))) {
-    await pool.query('DELETE FROM schema_migrations WHERE name = $1', [name]);
-    applied.delete(name);
-  }
   const files = embedded?.migrations ?? (await readdir(dir)).filter((f) => f.endsWith('.sql')).map((name) => ({ name }));
   files.sort((a, b) => a.name.localeCompare(b.name));
-  // A database made by a version whose migrations were since combined can't be brought up to date.
-  const unknown = [...applied].filter((n) => !files.some((f) => f.name === n));
-  if (unknown.length) {
-    throw new Error(`This database was made by an older version of food.db (it lists ${unknown.join(', ')}) and can’t be upgraded. Start with an empty database.`);
-  }
+  const { rows } = await pool.query('SELECT name FROM schema_migrations');
+  const applied = new Set(rows.map((r) => r.name));
   for (const { name: file, sql: bundled } of files) {
     if (applied.has(file)) continue;
     const sql = bundled ?? await readFile(dir + file, 'utf8');
     await tx(async (c) => {
+      await c.query("SELECT set_config('app.actor', 'Migration', true)");
       await c.query(sql);
       await c.query('INSERT INTO schema_migrations (name) VALUES ($1)', [file]);
     });

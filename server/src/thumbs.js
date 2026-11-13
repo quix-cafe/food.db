@@ -15,11 +15,11 @@ import { thumbDir, thumbName, uploadDir } from './images.js';
 export const Jimp = createJimp({ formats: [jpeg, png, gif], plugins: [resize] });
 
 /** Longest side of a thumbnail, in pixels: a recipe card's cover at 2× density. */
-export const THUMB_SIZE = 640;
+const THUMB_SIZE = 640;
 const THUMBABLE = new Set(['image/jpeg', 'image/png', 'image/gif']);
 
 /** Shrink an image file's bytes to a JPEG of at most THUMB_SIZE on its longest side. */
-export async function makeThumb(buffer) {
+async function makeThumb(buffer) {
   const image = await Jimp.fromBuffer(buffer); // applies the EXIF orientation
   const { width, height } = image.bitmap;
   if (Math.max(width, height) > THUMB_SIZE) {

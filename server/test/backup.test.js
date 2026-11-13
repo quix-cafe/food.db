@@ -89,7 +89,7 @@ test('backup → change everything → restore brings it all back', { skip }, as
   const summary = (await api('GET', '/backup/summary')).data;
   assert.deepEqual(summary.counts, {
     ingredients: 1, ingredient_aliases: 1, ingredient_pair_dismissals: 0, receipts: 1, ingredient_purchases: 2, receipt_lines: 2, spice_blends: 0, spice_blend_items: 0,
-    recipes: 1, recipe_ingredients: 1, events: 1, event_recipes: 1, event_amounts: 0, event_blends: 0, event_sales: 0, event_sale_items: 0, images: 2,
+    recipes: 1, recipe_ingredients: 1, events: 1, event_recipes: 1, event_amounts: 0, event_packs: 0, event_blends: 0, event_sales: 0, event_sale_items: 0, images: 2,
   });
 
   const stampsSql = 'SELECT id, created_at::text AS t FROM ingredient_purchases ORDER BY id';
@@ -123,6 +123,9 @@ test('backup → change everything → restore brings it all back', { skip }, as
   const restored = await api('POST', '/backup/restore', { token: inspected.data.token });
   assert.equal(restored.status, 200);
   assert.match(restored.data.snapshot, /^before-restore-.*\.tar\.gz$/);
+  // In the record as one line, not a row for everything restored.
+  const { saves } = (await api('GET', '/audit/changes')).data;
+  assert.deepEqual([saves[0].changes.length, saves[0].changes[0].action, saves[0].changes[0].label], [1, 'restore', 'Backup']);
 
   assert.deepEqual((await api('GET', '/ingredients')).data, original.ingredients);
   assert.deepEqual((await pool.query(stampsSql)).rows, stamps); // microseconds survive
@@ -153,24 +156,25 @@ test('bad uploads and newer-version backups are refused without changes', { skip
   const future = await repack(original.archive, (d) => ({ ...d, migrations: [...d.migrations, '999_future.sql'] }));
   const refused = await inspect(future);
   assert.equal(refused.status, 409);
-  assert.match(refused.data.error, /can’t restore/);
+  assert.match(refused.data.error, /newer version/);
 
   assert.equal((await api('GET', '/backup/snapshots/..%2F..%2Fetc%2Fpasswd')).status, 404);
   assert.deepEqual((await api('GET', '/backup/summary')).data.counts, before);
 });
 
-test('a backup listing a migration since combined into the schema restores', { skip }, async () => {
-  const withCombined = await repack(original.archive, (d) => ({ ...d, migrations: [...d.migrations, '002_sauce_serving_oz.sql'] }));
-  const res = await inspect(withCombined);
+test('a backup from an older schema restores: what it lacks takes its default', { skip }, async () => {
+  const older = await repack(original.archive, (d) => {
+    const { event_blends: _gone, ...tables } = d.tables; // a table it didn't have yet
+    tables.events = tables.events.map(({ version: _new, ...e }) => e); // and a column
+    return { ...d, migrations: [], tables };
+  });
+  const res = await inspect(older);
   assert.equal(res.status, 200);
-  assert.equal(res.data.olderVersion, false);
-});
-
-test('backups from before the migrations were combined are refused', { skip }, async () => {
-  const before = (await api('GET', '/backup/summary')).data.counts;
-  const old = await repack(original.archive, (d) => ({ ...d, migrations: ['001_schema.sql', '011_test_data.sql', '022_event_sauce_servings.sql'] }));
-  const refused = await inspect(old);
-  assert.equal(refused.status, 409);
-  assert.match(refused.data.error, /011_test_data\.sql/);
-  assert.deepEqual((await api('GET', '/backup/summary')).data.counts, before);
+  assert.equal(res.data.olderVersion, true);
+  assert.equal(res.data.counts.event_blends, 0);
+  assert.equal((await api('POST', '/backup/restore', { token: res.data.token })).status, 200);
+  const [event] = (await api('GET', '/events')).data;
+  assert.equal(event.name, 'Gala');
+  assert.equal(event.version, 1);
+  assert.equal((await api('GET', '/backup/summary')).data.counts.event_blends, 0);
 });

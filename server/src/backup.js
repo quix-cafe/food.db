@@ -3,8 +3,9 @@
 //   backup.json        { app, format, createdAt, migrations, counts, tables: { name: rows } }
 //   uploads/<file>     each image referenced by the `images` table
 //
-// Restores accept backups whose migrations this build has (missing columns take their
-// defaults); any other backup is refused.
+// Restores accept backups whose migrations this build has, so a backup made by an earlier
+// version restores into a later one (missing columns and tables take their defaults); a backup
+// from a newer version is refused.
 
 import { randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -16,7 +17,6 @@ import zlib from 'node:zlib';
 import tarStream from 'tar-stream';
 import pg from 'pg';
 import { pool, tx } from './db.js';
-import { COMBINED } from './migrate.js';
 import { repoRoot, thumbDir, uploadDir } from './images.js';
 import { HttpError } from './validate.js';
 
@@ -24,9 +24,9 @@ const APP = 'food.db';
 const FORMAT = 1;
 
 /** Insert order respects foreign keys; TRUNCATE takes them all at once. */
-export const TABLES = [
+const TABLES = [
   'ingredients', 'ingredient_aliases', 'ingredient_pair_dismissals', 'receipts', 'ingredient_purchases', 'receipt_lines',
-  'spice_blends', 'spice_blend_items', 'recipes', 'recipe_ingredients', 'events', 'event_recipes', 'event_amounts', 'event_blends',
+  'spice_blends', 'spice_blend_items', 'recipes', 'recipe_ingredients', 'events', 'event_recipes', 'event_amounts', 'event_packs', 'event_blends',
   'event_sales', 'event_sale_items', 'images',
 ];
 
@@ -34,7 +34,7 @@ const IMAGE_FILE = /^[A-Za-z0-9-]+\.(jpg|png|webp|gif)$/;
 const SNAPSHOT_FILE = /^before-(restore|clearing-test-data|compressing-photos)-[0-9TZ-]+\.tar\.gz$/;
 const KEEP_SNAPSHOTS = 10;
 
-export const backupDir = () => path.resolve(repoRoot, process.env.BACKUP_DIR ?? 'data/backups');
+const backupDir = () => path.resolve(repoRoot, process.env.BACKUP_DIR ?? 'data/backups');
 
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-').replace(/-\d{3}Z$/, 'Z');
 export const backupFilename = () => `food.db-backup-${stamp()}.tar.gz`;
@@ -159,20 +159,20 @@ async function validate(data, files) {
     throw new HttpError(400, 'That archive isn’t a food.db backup.');
   }
   if (data.format !== FORMAT) throw new HttpError(400, `Backup format ${data.format} isn’t supported by this version.`);
-  // Restore fills in anything a backup from an older schema lacks (missing columns take their defaults).
-  const migrations = data.migrations.filter((m) => !COMBINED.includes(m)); // already in 001_schema.sql
-  const known = new Set(await currentMigrations());
-  const unknown = migrations.filter((m) => !known.has(m));
+  // Restore fills in anything a backup from an older schema lacks.
+  const current = await currentMigrations();
+  const unknown = data.migrations.filter((m) => !current.includes(m));
   if (unknown.length) {
-    throw new HttpError(409, `This backup was made by a version of food.db that this one can’t restore (it lists ${unknown.join(', ')}). Restore it with the matching version.`);
+    throw new HttpError(409, `This backup was made by a newer version of food.db than this one (it lists ${unknown.join(', ')}). Restore it with that version or a later one.`);
   }
 
   const warnings = [];
   for (const t of TABLES) {
     if (data.tables[t] !== undefined && !Array.isArray(data.tables[t])) throw new HttpError(400, `Backup table ${t} is malformed.`);
   }
+  data.tables = Object.fromEntries(TABLES.map((t) => [t, data.tables[t] ?? []])); // a table it predates: empty
   // Image rows without their file would be broken links; leave them out.
-  const images = data.tables.images ?? [];
+  const images = data.tables.images;
   const usable = images.filter((img) => IMAGE_FILE.test(img.filename ?? '') && files.has(img.filename));
   if (usable.length < images.length) {
     const n = images.length - usable.length;
@@ -181,8 +181,8 @@ async function validate(data, files) {
   }
   return {
     createdAt: data.createdAt,
-    counts: Object.fromEntries(TABLES.map((t) => [t, data.tables[t]?.length ?? 0])),
-    olderVersion: migrations.length < known.size,
+    counts: Object.fromEntries(TABLES.map((t) => [t, data.tables[t].length])),
+    olderVersion: current.some((m) => !data.migrations.includes(m)),
     warnings,
   };
 }
@@ -268,7 +268,7 @@ export async function restoreBackup(token) {
     await mkdir(dest, { recursive: true });
     const existing = new Set(await readdir(dest));
     const copied = [];
-    for (const img of data.tables.images ?? []) {
+    for (const img of data.tables.images) {
       if (existing.has(img.filename)) continue; // same UUID name = same file
       await copyFile(path.join(stage.dir, 'uploads', img.filename), path.join(dest, img.filename));
       copied.push(img.filename);
@@ -281,9 +281,16 @@ export async function restoreBackup(token) {
           [TABLES],
         );
         const columns = Map.groupBy(rows, (r) => r.table_name);
+        // One line in the record, rather than every row of the backup.
+        await c.query("SELECT set_config('app.audit', 'off', true)");
+        await c.query(
+          `INSERT INTO audit_log (actor, table_name, action, new_row)
+           VALUES (coalesce(nullif(current_setting('app.actor', true), ''), 'Direct database change'), 'backup', 'restore', $1::jsonb)`,
+          [JSON.stringify({ made: data.createdAt })],
+        );
         await c.query(`TRUNCATE ${TABLES.join(', ')} CASCADE`);
         for (const t of TABLES) {
-          const list = data.tables[t] ?? [];
+          const list = data.tables[t];
           if (!list.length) continue;
           // Only columns the backup has; anything newer than the backup takes its default.
           const present = new Set(list.flatMap((r) => Object.keys(r)));
@@ -301,7 +308,7 @@ export async function restoreBackup(token) {
       throw err;
     }
 
-    const keep = new Set((data.tables.images ?? []).map((i) => i.filename));
+    const keep = new Set(data.tables.images.map((i) => i.filename));
     for (const f of await readdir(dest)) if (!keep.has(f) && f !== 'thumbs') await rm(path.join(dest, f), { force: true });
     for (const f of await readdir(thumbDir()).catch(() => [])) {
       if (!keep.has(f.replace(/\.jpg$/, ''))) await rm(path.join(thumbDir(), f), { force: true });
@@ -309,7 +316,7 @@ export async function restoreBackup(token) {
 
     return {
       snapshot,
-      counts: Object.fromEntries(TABLES.map((t) => [t, data.tables[t]?.length ?? 0])),
+      counts: Object.fromEntries(TABLES.map((t) => [t, data.tables[t].length])),
     };
   } finally {
     await rm(stage.dir, { recursive: true, force: true });

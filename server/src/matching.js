@@ -4,9 +4,10 @@
 //
 // A generic receipt name ("Grocery" for every line at some stores) can't be trusted as an
 // alias: it is only suggested, never applied, once one receipt saved it as two or more
-// different ingredients, or when it is on several lines of the receipt being imported.
+// different ingredients, or when it is on several lines of the receipt being imported. One that
+// says nothing at all ("GROCERY", "MEAT": isGenericName) is never saved or applied as an alias.
 
-import { isLabor, wordMatches } from '@kitchen/shared';
+import { isGenericName, wordMatches } from '@kitchen/shared';
 
 /** SQL: true when the receipt name in SQL expression `name` was saved as different ingredients on one receipt. */
 export const ambiguousName = (name) => `EXISTS (
@@ -15,10 +16,28 @@ export const ambiguousName = (name) => `EXISTS (
    GROUP BY rl.receipt_id HAVING count(DISTINCT p.ingredient_id) > 1)`;
 
 /**
+ * How a store is already written, so one store isn't listed twice in different capitals ("H MART",
+ * "H Mart"): an existing spelling equal to `name` ignoring case and spacing, preferring one not in
+ * all capitals, then the most used; else `name` itself, spaces tidied.
+ */
+export async function vendorSpelling(client, name) {
+  const tidy = name?.trim().replace(/\s+/g, ' ');
+  if (!tidy) return name ?? null;
+  const { rows } = await client.query(
+    `SELECT vendor FROM (SELECT vendor FROM receipts UNION ALL SELECT vendor FROM ingredient_purchases) v
+      WHERE lower(regexp_replace(trim(vendor), '\\s+', ' ', 'g')) = lower($1)
+      GROUP BY vendor ORDER BY vendor = upper(vendor), count(*) DESC, vendor LIMIT 1`,
+    [tidy],
+  );
+  return rows[0]?.vendor ?? tidy;
+}
+
+/**
  * Ingredient a receipt name resolves to without asking: a saved alias, else an exact name.
  * `aliases: false` skips aliases (the name is on several lines of the receipt being saved).
  */
 export async function resolveName(client, name, { aliases = true } = {}) {
+  if (isGenericName(name)) aliases = false;
   const { rows } = await client.query(
     `SELECT i.id, i.name, i.category, i.uom, 'alias' AS via, 0 AS rank
        FROM ingredient_aliases a JOIN ingredients i ON i.id = a.ingredient_id
@@ -58,14 +77,14 @@ async function pastChoices(client, name) {
  * receipt) or 'history' (one receipt saved it as several ingredients).
  */
 export async function matchItems(client, items) {
-  let everything = null; // every ingredient but labor, with its receipt names; loaded on first need
+  let everything = null; // every ingredient, with its receipt names; loaded on first need
   const ingredients = async () => {
     everything ??= (await client.query(
       `SELECT i.id, i.name, i.category, i.uom,
               coalesce(json_agg(a.alias) FILTER (WHERE a.alias IS NOT NULL), '[]') AS aliases
          FROM ingredients i LEFT JOIN ingredient_aliases a ON a.ingredient_id = i.id
         GROUP BY i.id`,
-    )).rows.filter((i) => !isLabor(i));
+    )).rows;
     return everything;
   };
   const lines = new Map();
@@ -92,7 +111,7 @@ export async function matchItems(client, items) {
        WHERE similarity(name, $1) > 0.3 ORDER BY similarity(name, $1) DESC LIMIT 1`,
       [item.name],
     );
-    if (rows[0] && !isLabor(rows[0]) && !candidates.some((c) => c.id === rows[0].id)) candidates.push({ ...rows[0], words: [] });
+    if (rows[0] && !candidates.some((c) => c.id === rows[0].id)) candidates.push({ ...rows[0], words: [] });
     item.candidates = candidates.length ? candidates.slice(0, 5) : null;
     item.suggestion = candidates[0] ? { id: candidates[0].id, name: candidates[0].name, category: candidates[0].category, uom: candidates[0].uom } : null;
   }

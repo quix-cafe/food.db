@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
-import { anticipateEvent, orderTimingSummary, paymentFee } from '@kitchen/shared';
+import { OPEN_ORDER_STATUSES, anticipateEvent, orderTimingSummary, paymentFee } from '@kitchen/shared';
 import { api, notifyDataChanged } from '../api.js';
-import { useApi, useLeaveGuard, useTick } from '../hooks.js';
+import { useApi, useLeaveGuard, useTick, useWhileVisible } from '../hooks.js';
 import { date, duration, money, toDecimal, todayIso } from '../format.js';
 import { OrderTiming } from '../components/OrderTiming.jsx';
-import { CustomerNameField, ORDER_STATUS_LABEL, ORDER_VIEWS, PAYMENT_METHODS, OrderStatus, dealLabel, orderItemTile, ordersInView, paymentLabel, saleMenu, tile, time, useQueuePolling, useSaleDraft } from '../components/Sales.jsx';
+import { CustomerNameField, ORDER_STATUS_LABEL, PAYMENT_METHODS, OrderStatus, dealLabel, orderItemTile, paymentLabel, saleMenu, tile, time, useSaleDraft } from '../components/Sales.jsx';
 import { Icon, LeaveModal, Notice, Spinner, useToast } from '../components/ui.jsx';
 
 // An event picked by hand holds for the day, so leaving the page doesn't switch it back, but one
@@ -23,15 +23,18 @@ function savePick(id, day) {
   try { localStorage.setItem(PICK_KEY, JSON.stringify({ id, day })); } catch { /* holds until the page closes */ }
 }
 
-/** The name on an order: tap to add or change it. Enter or leaving the field saves, Escape cancels. */
-function OrderName({ order, onSave }) {
+/**
+ * Something on an order that can be changed at any time (its name, its note): tap to add or change
+ * it. Enter or leaving the field saves, Escape cancels.
+ */
+function OrderField({ value, field, label, placeholder, className, max, onSave }) {
   const [editing, setEditing] = useState(null);
   const skip = useRef(false);
   if (editing === null) {
     return (
-      <button type="button" className={`order-name ${order.customerName ? '' : 'none'}`} aria-label={order.customerName ? `Change the name ${order.customerName}` : 'Add a name'}
-        onClick={() => { skip.current = false; setEditing(order.customerName ?? ''); }}>
-        {order.customerName ?? 'Add name'}
+      <button type="button" className={`${className} ${value ? '' : 'none'}`} aria-label={value ? `Change the ${label} ${value}` : `Add a ${label}`}
+        onClick={() => { skip.current = false; setEditing(value ?? ''); }}>
+        {value ?? placeholder}
       </button>
     );
   }
@@ -39,15 +42,35 @@ function OrderName({ order, onSave }) {
     if (skip.current) return;
     skip.current = true;
     setEditing(null);
-    if (editing.trim() !== (order.customerName ?? '')) onSave({ customerName: editing });
+    if (editing.trim() !== (value ?? '')) onSave({ [field]: editing });
   };
   return (
-    <input className="input customer-name" autoFocus value={editing} maxLength={120} autoComplete="off" aria-label="Name for the order"
+    <input className="input customer-name" autoFocus value={editing} maxLength={max} autoComplete="off" aria-label={`${label} for the order`}
       onChange={(e) => setEditing(e.target.value)} onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === 'Enter') commit();
         if (e.key === 'Escape') { skip.current = true; setEditing(null); }
       }} />
+  );
+}
+
+const OrderName = ({ order, onSave }) => (
+  <OrderField value={order.customerName} field="customerName" label="name" placeholder="Add name" className="order-name" max={120} onSave={onSave} />
+);
+const OrderNote = ({ order, onSave }) => (
+  <OrderField value={order.note} field="note" label="note" placeholder="Add note" className="order-note-btn" max={500} onSave={onSave} />
+);
+
+/** A note for the kitchen on one line of the ticket ("no onions"): a link until there is one. */
+function LineNote({ item, draft }) {
+  const [open, setOpen] = useState(false);
+  if (!open && !item.note) {
+    return <button type="button" className="link-btn pos-line-note-add" disabled={draft.busy} onClick={() => setOpen(true)}>+ Note</button>;
+  }
+  return (
+    <input className="input pos-line-note" value={item.note} maxLength={300} autoComplete="off" autoFocus={open && !item.note} placeholder="Note for the kitchen"
+      aria-label={`Note for ${item.r.name}`} onChange={(e) => draft.setLineNote(item.r.key, e.target.value)}
+      onBlur={() => { if (!item.note.trim()) setOpen(false); }} />
   );
 }
 
@@ -110,35 +133,47 @@ function CloseButton({ event }) {
   return <Link className="btn pos-close" to={event ? `/events/${event.id}` : '/events'}><Icon.close /> Exit</Link>;
 }
 
-/** Tap a tile to add one to the ticket. An item keeps its color on every screen, so hands learn the menu. */
-function MenuTiles({ menu, draft }) {
+/**
+ * Tap a tile to add one to the ticket. An item with a deal is split: the large part adds one, the
+ * smaller part a deal's worth. An item keeps its color on every screen, so hands learn the menu.
+ */
+function MenuTiles({ menu, draft, prepaid }) {
   return (
     <div className="pos-tiles">
       {menu.map((r) => {
         const qty = draft.line[r.key]?.qty ?? 0;
         const t = draft.tally.get(r.key);
         return (
-          <button key={r.key} type="button" className={`pos-tile ${qty ? 'in-line' : ''}`} style={tile(r)} disabled={draft.busy}
-            aria-label={`Add ${r.name}, ${money(r.salePrice)}${qty ? `, ${qty} on the ticket` : ''}`} onClick={() => draft.change(r, 1)}>
-            <b>{r.name}</b>
-            <span>{money(r.salePrice)}</span>
-            {r.discountAmount && <span className="deal-tag">{dealLabel(r)}</span>}
-            <small>{t ? `${t.sold} sold` : 'None yet'}</small>
-            {qty > 0 && <i className="pos-qty">{qty}</i>}
-          </button>
+          <div key={r.key} className={`pos-tile-group ${r.dealQty ? 'has-deal' : ''} ${qty ? 'in-line' : ''}`}>
+            <button type="button" className="pos-tile" style={tile(r)} disabled={draft.busy}
+              aria-label={`Add ${r.name}${prepaid ? '' : `, ${money(r.salePrice)}`}${qty ? `, ${qty} on the ticket` : ''}`} onClick={() => draft.change(r, 1)}>
+              <b>{r.name}</b>
+              {!prepaid && <span>{money(r.salePrice)}</span>}
+              <small>{prepaid ? (t ? `${t.sold + t.givenAway} ordered` : 'None yet') : (t ? `${t.sold} sold` : 'None yet')}</small>
+              {qty > 0 && <i className="pos-qty">{qty}</i>}
+            </button>
+            {r.dealQty && (
+              <button type="button" className="pos-add-deal" disabled={draft.busy} aria-label={`Add ${r.dealQty} ${r.name}, ${dealLabel(r)}`} onClick={() => draft.change(r, r.dealQty)}>
+                <b>+{r.dealQty}</b>
+                <small>{money(r.dealPrice)}</small>
+              </button>
+            )}
+          </div>
         );
       })}
     </div>
   );
 }
 
-function Ticket({ draft }) {
+function Ticket({ draft, prepaid }) {
   const { items, count, total, discount, busy } = draft;
   return (
     <section className="pos-ticket" aria-label="Current order">
       <div className="pos-lines">
         {!count && <p className="muted">Tap an item to start an order.</p>}
-        {items.map(({ r, qty, priced }) => (
+        {items.map((item) => {
+          const { r, qty, priced } = item;
+          return (
           <div key={r.key} className="pos-line tiled" style={tile(r)}>
             <div className="stepper">
               <button type="button" className="btn" disabled={busy} onClick={() => draft.change(r, -1)} aria-label={`One fewer ${r.name}`}>−</button>
@@ -146,41 +181,48 @@ function Ticket({ draft }) {
               <button type="button" className="btn" disabled={busy} onClick={() => draft.change(r, 1)} aria-label={`One more ${r.name}`}>+</button>
             </div>
             <span className="pos-line-name">{r.name}</span>
-            <b>{money(priced.amount)}</b>
-            {draft.canDeal(r, qty) && (
-              <label className="deal-toggle">
-                <input type="checkbox" checked={!!draft.line[r.key]?.deal} onChange={() => draft.toggleDeal(r)} />
-                Deal used: {dealLabel(r)}
-              </label>
-            )}
+            {!prepaid && <b>{money(priced.amount)}</b>}
+            {priced.deals > 0 && <span className="deal-tag pos-line-deal">{priced.deals > 1 ? `${priced.deals} × ` : ''}{dealLabel(r)}</span>}
+            <LineNote item={item} draft={draft} />
           </div>
-        ))}
+          );
+        })}
       </div>
       <div className="pos-total">
         <span>{count} item{count === 1 ? '' : 's'}{discount.gt(0) ? `, deal −${money(discount)}` : ''}</span>
-        <b>{money(total)}</b>
+        {!prepaid && <b>{money(total)}</b>}
       </div>
       <CustomerNameField draft={draft} />
+      <input className="input order-note-input" value={draft.note} maxLength={500} autoComplete="off" placeholder="Order note (optional)"
+        aria-label="Note for the order" onChange={(e) => draft.setNote(e.target.value)} />
       {draft.error && <Notice kind="error">{draft.error}</Notice>}
-      <div className="pos-pay">
-        {PAYMENT_METHODS.map((m) => {
-          const fee = paymentFee(m.value, total);
-          return (
-            <button key={m.value} type="button" className="btn primary pay-button" disabled={!count || busy} onClick={() => draft.record(m.value)}>
-              {m.label}
-              {count > 0 && toDecimal(fee).gt(0) && <small>Charge {money(total.plus(fee))}</small>}
-            </button>
-          );
-        })}
-        <button type="button" className="btn" disabled={!count || busy} onClick={() => draft.record('free')}>Given away</button>
-        <button type="button" className="btn ghost" disabled={!count || busy} onClick={draft.clear}>Clear</button>
-      </div>
+      {prepaid ? (
+        // Paid for up front: one button sends it to the kitchen, free.
+        <div className="pos-pay">
+          <button type="button" className="btn primary pay-button pos-order" disabled={!count || busy} onClick={() => draft.record('free')}>Order</button>
+          <button type="button" className="btn ghost" disabled={!count || busy} onClick={draft.clear}>Clear</button>
+        </div>
+      ) : (
+        <div className="pos-pay">
+          {PAYMENT_METHODS.map((m) => {
+            const fee = paymentFee(m.value, total);
+            return (
+              <button key={m.value} type="button" className="btn primary pay-button" disabled={!count || busy} onClick={() => draft.record(m.value)}>
+                {m.label}
+                {count > 0 && toDecimal(fee).gt(0) && <small>Charge {money(total.plus(fee))}</small>}
+              </button>
+            );
+          })}
+          <button type="button" className="btn" disabled={!count || busy} onClick={() => draft.record('free')}>Given away</button>
+          <button type="button" className="btn ghost" disabled={!count || busy} onClick={draft.clear}>Clear</button>
+        </div>
+      )}
     </section>
   );
 }
 
 /** A kitchen ticket on the board: its next step is the big button. */
-function BoardCard({ order, onChange, menu }) {
+function BoardCard({ order, onChange, menu, prepaid }) {
   const [busy, setBusy] = useState(false);
   const save = async (body) => {
     setBusy(true);
@@ -191,8 +233,7 @@ function BoardCard({ order, onChange, menu }) {
     <button type="button" className={`btn ${cls}`} disabled={busy} onClick={() => save({ status })}
       aria-label={`${label} ${order.customerName ?? `the ${time(order.createdAt)} order`}`}>{label}</button>
   );
-  const open = order.status === 'placed' || order.status === 'in_progress';
-  const done = !open;
+  const done = order.status !== 'in_progress';
   return (
     <li className={`pos-card ${order.status}`}>
       <div className="pos-card-head">
@@ -200,29 +241,40 @@ function BoardCard({ order, onChange, menu }) {
         <small>{time(order.createdAt)}</small>
       </div>
       <ul className="order-items">
-        {order.items.map((i, n) => <li key={n} className="tiled" style={orderItemTile(menu, i)}><b>{i.quantity}</b> {i.name}{i.deals > 0 && <span className="deal-tag">deal</span>}</li>)}
+        {order.items.map((i, n) => (
+          <li key={n} className="tiled" style={orderItemTile(menu, i)}>
+            <b>{i.quantity}</b> {i.name}{i.deals > 0 && <span className="deal-tag">deal</span>}
+            {i.note && <div className="order-note">{i.note}</div>}
+          </li>
+        ))}
       </ul>
-      <small className="muted">{paymentLabel(order.paymentMethod)}{order.paymentMethod !== 'free' && ` ${money(toDecimal(order.total).plus(order.fee))}`}</small>
+      <OrderNote order={order} onSave={save} />
+      {!(prepaid && order.paymentMethod === 'free') && <small className="muted">{paymentLabel(order.paymentMethod)}{order.paymentMethod !== 'free' && ` ${money(toDecimal(order.total).plus(order.fee))}`}</small>}
       {done && order.status === 'cancelled' && <OrderStatus status="cancelled" />}
       <OrderTiming order={order} />
       <div className="pos-card-actions">
-        {order.status === 'placed' && <>{act('in_progress', 'Start', 'primary big')}{act('completed', 'Complete')}{act('cancelled', 'Cancel', 'ghost')}</>}
-        {order.status === 'in_progress' && <>{act('completed', 'Complete', 'primary big')}{act('placed', 'Not started')}{act('cancelled', 'Cancel', 'ghost')}</>}
-        {done && act('placed', 'Reopen')}
+        {!done && <>{act('completed', 'Complete', 'primary big')}{act('cancelled', 'Cancel', 'ghost')}</>}
+        {done && act('in_progress', 'Reopen')}
       </div>
     </li>
   );
 }
 
-function BoardColumn({ title, orders, onChange, empty, menu }) {
+function BoardColumn({ title, orders, onChange, empty, menu, prepaid }) {
   return (
     <section className="pos-column" aria-label={title}>
       <h2>{title} <span>{orders.length}</span></h2>
       {orders.length
-        ? <ul>{orders.map((o) => <BoardCard key={o.id} order={o} onChange={onChange} menu={menu} />)}</ul>
+        ? <ul>{orders.map((o) => <BoardCard key={o.id} order={o} onChange={onChange} menu={menu} prepaid={prepaid} />)}</ul>
         : <p className="muted">{empty}</p>}
     </section>
   );
+}
+
+/** How many orders are at a stage; with any, a pill that opens the Orders tab where the screen has tabs. */
+function StagePill({ stage, label, count, onOpen }) {
+  if (!count) return <span><b>{count}</b> {label}</span>;
+  return <button type="button" className={`pos-stage ${stage}`} onClick={onOpen}><b>{count}</b> {label}</button>;
 }
 
 function PosDesk({ event }) {
@@ -233,47 +285,50 @@ function PosDesk({ event }) {
   const { change, error } = useOrderChange(event.id, report);
   const [pane, setPane] = useState('sell');
   const { blocker } = useLeaveGuard(draft.count > 0);
-  useQueuePolling(report.reload);
+  useWhileVisible(report.reload, 10000); // keeps several screens in step
 
   if (report.error && !report.data) return <div className="pos-pad"><Notice kind="error">{report.error.message}</Notice></div>;
   if (summary.error && !summary.data) return <div className="pos-pad"><Notice kind="error">{summary.error.message}</Notice></div>;
   if (!report.data || !summary.data) return <div className="pos-pad"><Spinner /></div>;
 
   const { sales, totals } = report.data;
-  const open = ordersInView(sales, 'open');
-  const done = sales.filter((s) => ORDER_VIEWS[1].statuses.includes(s.status) || ORDER_VIEWS[2].statuses.includes(s.status))
-    .sort((a, b) => new Date(b.statusChangedAt) - new Date(a.statusChangedAt));
+  // The queue is first come, first served; finished orders show the latest first.
+  const isOpen = (s) => OPEN_ORDER_STATUSES.includes(s.status);
+  const open = sales.filter(isOpen).reverse();
+  const done = sales.filter((s) => !isOpen(s)).sort((a, b) => new Date(b.statusChangedAt) - new Date(a.statusChangedAt));
   const averages = orderTimingSummary(sales);
+  // A personal chef job or supper club is paid for up front: orders only, no prices or payment.
+  const prepaid = summary.data.kind !== 'market';
 
   return (
     <>
       <LeaveModal blocker={blocker}>This order hasn't been placed yet. Closing the POS discards it.</LeaveModal>
       <div className="pos-stats">
-        <span className={totals.byStatus.placed ? 'pos-stage placed' : ''}><b>{totals.byStatus.placed}</b> placed</span>
-        <span className={totals.byStatus.in_progress ? 'pos-stage in_progress' : ''}><b>{totals.byStatus.in_progress}</b> in progress</span>
+        <StagePill stage="in_progress" label="in progress" count={totals.byStatus.in_progress} onOpen={() => setPane('board')} />
         <span><b>{totals.sales}</b> order{totals.sales === 1 ? '' : 's'}</span>
-        <span><b>{money(totals.revenue)}</b> taken</span>
+        {!prepaid && <span><b>{money(totals.revenue)}</b> taken</span>}
         {averages.count > 0 && <span>Average total <b>{duration(averages.total)}</b></span>}
       </div>
       <div className="tabs pos-panes" role="tablist" aria-label="Order screen">
         <button role="tab" className="tab" aria-selected={pane === 'sell'} onClick={() => setPane('sell')}>New order{draft.count ? ` (${draft.count})` : ''}</button>
-        <button role="tab" className={`tab ${open.length ? 'has-orders' : ''}`} aria-selected={pane === 'board'} onClick={() => setPane('board')}>Orders ({open.length})</button>
+        <button role="tab" className="tab" aria-selected={pane === 'board'} onClick={() => setPane('board')}>
+          <span className={open.length ? 'pos-open-orders' : undefined}>Orders ({open.length})</span>
+        </button>
       </div>
       <div className="pos-desk">
         <div className="pos-sell" data-shown={pane === 'sell'}>
           <div className="pos-menu">
             {menu.length
-              ? <MenuTiles menu={menu} draft={draft} />
+              ? <MenuTiles menu={menu} draft={draft} prepaid={prepaid} />
               : <p className="muted">Nothing on the menu yet. <Link to={`/events/${event.id}`}>Add recipes to this event</Link> first.</p>}
           </div>
-          <Ticket draft={draft} />
+          <Ticket draft={draft} prepaid={prepaid} />
         </div>
         <div className="pos-board" data-shown={pane === 'board'}>
           {error && <Notice kind="error">{error}</Notice>}
           <div className="pos-columns">
-            <BoardColumn title="Placed" orders={open.filter((o) => o.status === 'placed')} onChange={change} menu={menu} empty="No orders waiting." />
-            <BoardColumn title="In progress" orders={open.filter((o) => o.status === 'in_progress')} onChange={change} menu={menu} empty="Nothing being made." />
-            <BoardColumn title="Done" orders={done} onChange={change} menu={menu} empty="Nothing finished yet." />
+            <BoardColumn title="In progress" orders={open} onChange={change} menu={menu} prepaid={prepaid} empty="Nothing being made." />
+            <BoardColumn title="Done" orders={done} onChange={change} menu={menu} prepaid={prepaid} empty="Nothing finished yet." />
           </div>
         </div>
       </div>

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
-import { api, notifyDataChanged } from '../api.js';
+import { api, notifyDataChanged, onDataChanged } from '../api.js';
 import { useApi, useOpenPos, useWhileVisible } from '../hooks.js';
-import { SAUCE_CONTAINERS, amountLabel, eventServing, parseAmount, sauceContainer } from '@kitchen/shared';
-import { money, qty, toDecimal } from '../format.js';
+import { DEFAULT_MARGIN, HOAMSY_FEE_PERCENT, SAUCE_CONTAINERS, amountLabel, eventServing, parseAmount, sauceContainer } from '@kitchen/shared';
+import { dateTime, money, qty, toDecimal } from '../format.js';
 import { Field, Icon, Modal, Notice, Spinner, Tabs, TestBadge, useToast } from '../components/ui.jsx';
 import { SalesTable } from '../components/Sales.jsx';
-import { DealToggle, MarginCell, SalePriceInput, blankOrCount, blankOrPrice, isInt, priceText, pricingFor } from '../components/EventPricing.jsx';
+import { DealToggle, MarginCell, SalePriceInput, blankOrPrice, dealNote, dealProblem, isInt, priceText, pricingFor } from '../components/EventPricing.jsx';
 import { Financials, Results, ShoppingList } from '../components/EventTabs.jsx';
 import { recipeColors } from '../palette.js';
 import { DuplicateEventModal } from './EventsPage.jsx';
@@ -16,7 +16,14 @@ const blankOrInt = (v) => v.trim() === '' || isInt(v);
 const isCount = (v) => isInt(v) && Number(v) > 0;
 /** A sauce's container cost and default price, or null while it can't be worked out. */
 const containerOf = (b, container) => { try { return sauceContainer(b, container); } catch { return null; } };
-const noPricing = () => ({ salePrice: '', discountAmount: '', discountQty: '', servingSize: '' });
+const noPricing = () => ({ salePrice: '', dealPrice: '', dealQty: '', servingSize: '' });
+/** How an event makes its money (EVENT_KINDS): each recipe sold by the serving, or one rate for the lot. */
+const EVENT_TYPES = [
+  ['market', 'Market', 'Each recipe sold by the serving at its own price'],
+  ['personal_chef', 'Personal Cheffing', 'A flat rate, plus the groceries at cost'],
+  ['supper_club', 'Supper Club', 'Tickets for a plate of everything; Hoamsy takes its fee first'],
+];
+const blankOrPercent = (v) => v.trim() === '' || ((toDecimal(v.replace('%', ''))?.gte(0) && toDecimal(v.replace('%', '')).lt(100)) ?? false);
 /** Blank (the recipe's own size), or an amount above 0; fractions are fine. */
 const blankOrSize = (v) => v.trim() === '' || (parseAmount(v)?.gt(0) ?? false);
 
@@ -55,8 +62,8 @@ function formOf(ev) {
     servings: Object.fromEntries(ev.recipes.map((r) => [r.recipeId, String(r.expectedServings)])),
     prices: Object.fromEntries(ev.recipes.map((r) => [r.recipeId, {
       salePrice: optional(r.salePrice),
-      discountAmount: optional(r.discountAmount),
-      discountQty: r.discountQty == null ? '' : String(r.discountQty),
+      dealPrice: optional(r.dealPrice),
+      dealQty: r.dealQty == null ? '' : String(r.dealQty),
       servingSize: r.servingSize == null ? '' : toDecimal(r.servingSize).toString(),
     }])),
     actualGuests: optional(ev.actualGuests),
@@ -64,12 +71,56 @@ function formOf(ev) {
     actualCost: optional(ev.actualCost),
     notes: ev.notes ?? '',
     vendorFee: optional(ev.vendorFee),
+    kind: ev.kind,
+    flatPrice: optional(ev.flatPrice),
+    hoamsyPercent: ev.hoamsyPercent == null ? '' : toDecimal(ev.hoamsyPercent).toString(),
     sauces: Object.fromEntries(ev.sauces.map((b) => [b.blendId, {
       servings: String(b.servings),
       container: b.container,
       salePrice: optional(b.salePrice),
     }])),
   };
+}
+
+/** The plate price or flat rate that sells the food at DEFAULT_MARGIN gross and covers labor and fees at cost, offered under its box. */
+function TargetHint({ s, form, setForm, saved }) {
+  const target = saved && s?.kind === form.kind ? s.flat?.suggestedPrice : null;
+  if (!target) return null;
+  const supper = form.kind === 'supper_club';
+  const typed = toDecimal(priceText(form.flatPrice));
+  if (typed?.eq(target)) return <>{DEFAULT_MARGIN}% on food</>;
+  return (
+    <span className="nowrap" title={`The ${supper ? 'plate price' : 'rate'} that sells the food at a ${DEFAULT_MARGIN}% gross margin, as recipe prices are set, and covers labor and the vendor fee at cost${supper ? ', after Hoamsy’s cut' : ''}`}>
+      {DEFAULT_MARGIN}% on food: {money(target)}{' '}
+      <button type="button" className="link-btn" onClick={() => setForm((f) => ({ ...f, flatPrice: target }))}>Use</button>
+    </span>
+  );
+}
+
+/** The plan's bottom line, under the fields that move it; dimmed while a change is still saving. */
+function BarFigures({ s, pending }) {
+  const loss = toDecimal(s.profit).lt(0);
+  const figures = [
+    s.kind === 'supper_club' && ['Tickets', money(s.flat.gross), `${s.flat.tickets} × ${money(s.flat.flatPrice)}`],
+    s.kind === 'supper_club' && ['Hoamsy fee', `−${money(s.hoamsyFee)}`, `${s.flat.hoamsyPercent}% off the top`],
+    ['Revenue', money(s.revenue), s.kind === 'personal_chef' ? `${money(s.flat.groceries)} groceries` : null],
+    ['Cost', money(s.totalCost), toDecimal(s.labor.cost).gt(0) ? `${money(s.labor.cost)} labor` : null],
+    !toDecimal(s.vendorFee).isZero() && ['Vendor fee', `−${money(s.vendorFee)}`, null],
+    ['Profit', money(s.profit), null, loss ? 'loss' : 'profit'],
+    ['Gross margin', s.grossMarginPercent == null ? '—' : `${s.grossMarginPercent}%`, 'on food'],
+    ['Net margin', s.marginPercent == null ? '—' : `${s.marginPercent}%`, 'after everything', loss ? 'loss' : ''],
+  ].filter(Boolean);
+  return (
+    <dl className={`bar-figures ${pending ? 'pending' : ''}`} aria-live="polite" title={pending ? 'Updating once the change saves' : undefined}>
+      {figures.map(([label, value, note, tone]) => (
+        <div key={label} className={tone ?? ''}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+          {note && <small>{note}</small>}
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 // Each event gets its own page state, so edits waiting to save can't go out under the next event's id.
@@ -88,8 +139,9 @@ function EventPlanner({ id }) {
   // The phone's jump menu under the event's details: open a tab and scroll down to it, quickly. (`always: false`: only
   // when the tab bar is above the screen, as when picking a tab from far down a long one.)
   const jumpTo = (t, { always = true } = {}) => {
-    setTab(t);
     const el = tabsRef.current;
+    if (el && t !== tab) setHold(el.offsetHeight);
+    setTab(t);
     if (!el) return;
     const from = window.scrollY;
     // Land just below the bar that stays stuck to the top: the menu bar on a phone, the search bar on a wider screen.
@@ -98,6 +150,29 @@ function EventPlanner({ id }) {
     if (!always && to >= from) return;
     quickScroll(to);
   };
+  // A tab switch keeps the tab area as tall as it was, so a short or still-loading tab can't shrink the page and
+  // pull the scroll position away from the tab bar. The hold shrinks as scrolling up stops needing it, then goes.
+  const [hold, setHold] = useState(null);
+  useEffect(() => {
+    if (hold == null) return;
+    const fit = () => {
+      const el = tabsRef.current;
+      if (!el) return;
+      const top = el.getBoundingClientRect().top;
+      const below = document.documentElement.scrollHeight - (el.getBoundingClientRect().bottom + window.scrollY);
+      const need = Math.ceil(window.innerHeight - top - below);
+      const content = (el.lastElementChild?.getBoundingClientRect().bottom ?? top) - top;
+      if (need <= content) setHold(null);
+      else if (need < hold) setHold(need);
+    };
+    fit();
+    window.addEventListener('scroll', fit, { passive: true });
+    window.addEventListener('resize', fit);
+    return () => {
+      window.removeEventListener('scroll', fit);
+      window.removeEventListener('resize', fit);
+    };
+  }, [hold]);
   const [deleting, setDeleting] = useState(false);
   const [copying, setCopying] = useState(false);
   const { data: recipes } = useApi('/recipes');
@@ -118,6 +193,9 @@ function EventPlanner({ id }) {
   // The event version this form was edited from; a save names it, and the server refuses one that's out of date.
   const version = useRef(null);
   const saves = useRef({ last: Promise.resolve(), running: 0 });
+  const [lastEdit, setLastEdit] = useState(null);
+  const [lastOrder, setLastOrder] = useState(null);
+  const [changedBy, setChangedBy] = useState(null); // who the save that was refused lost out to
   const latestForm = useRef(form);
   latestForm.current = form;
   const adopt = (ev) => {
@@ -125,6 +203,9 @@ function EventPlanner({ id }) {
     version.current = ev.version;
     lastSaved.current = JSON.stringify(f);
     setForm(f);
+    setLastEdit(ev.lastEditedBy);
+    setLastOrder(ev.lastOrderBy);
+    setChangedBy(null);
     setStatus('saved');
     setSaveError(null);
   };
@@ -141,11 +222,17 @@ function EventPlanner({ id }) {
     return () => { stale = true; };
   }, [id]);
 
+  // An order placed on the POS over this page says so as soon as it's in.
+  useEffect(() => onDataChanged(() => {
+    api(`/events/${id}`).then((ev) => setLastOrder(ev.lastOrderBy), () => {});
+  }), [id]);
+
   // Saved somewhere else: with nothing unsaved here, take the new plan, so this window's copy doesn't go old.
   // With edits on the way, leave it to their save, which the server refuses and the conflict notice explains.
   useWhileVisible(async () => {
     if (!latestForm.current) return;
     const ev = await api(`/events/${id}`).catch(() => null);
+    if (ev) setLastOrder(ev.lastOrderBy); // orders come in without the plan changing
     if (!ev || ev.version <= version.current || saves.current.running) return;
     if (JSON.stringify(latestForm.current) !== lastSaved.current) return;
     adopt(ev);
@@ -159,17 +246,19 @@ function EventPlanner({ id }) {
     const snapshot = JSON.stringify(form);
     if (snapshot === lastSaved.current) return;
     const allPrices = [...Object.values(form.prices), ...Object.values(form.sauces).map((x) => ({ ...noPricing(), salePrice: x.salePrice }))];
+    const dealIssue = allPrices.map(dealProblem).find(Boolean);
     const problem = !form.name.trim() ? 'Give the event a name' :
       !form.date ? 'Pick a date' :
       form.guestCount !== '' && !isInt(form.guestCount) ? 'Guests must be a whole number' :
       !blankOrPrice(form.vendorFee) ? 'Vendor fee must be an amount' :
+      !blankOrPrice(form.flatPrice) ? `${form.kind === 'supper_club' ? 'Plate price' : 'Flat rate'} must be an amount` :
+      !blankOrPercent(form.hoamsyPercent) ? 'The Hoamsy fee must be a percent from 0 to under 100' :
       Object.values(form.servings).some((s) => !isInt(s)) ? 'Servings must be whole numbers' :
       Object.values(form.sauces).some((x) => x.count !== undefined && !isCount(x.count)) ? 'Sauce containers must be whole numbers, 1 or more' :
       Object.values(form.sauces).some((x) => !isCount(x.servings)) ? 'Sauce servings must be whole numbers, 1 or more' :
       allPrices.some((p) => !blankOrSize(p.servingSize)) ? 'Size per serving must be an amount above 0' :
       allPrices.some((p) => !blankOrPrice(p.salePrice)) ? 'Sale prices must be amounts' :
-      allPrices.some((p) => !blankOrPrice(p.discountAmount)) ? 'Discounts must be amounts' :
-      allPrices.some((p) => !blankOrCount(p.discountQty)) ? 'A discount applies per 1 or more servings' :
+      dealIssue ? dealIssue :
       !blankOrInt(form.actualGuests) ? 'Actual guests must be a whole number' :
       !blankOrPrice(form.actualRevenue) ? 'Actual revenue must be an amount' :
       !blankOrPrice(form.actualCost) ? 'Actual spend must be an amount' : null;
@@ -192,9 +281,12 @@ function EventPlanner({ id }) {
             date: form.date,
             guestCount: form.guestCount,
             vendorFee: priceText(form.vendorFee),
+            kind: form.kind,
+            flatPrice: priceText(form.flatPrice),
+            hoamsyPercent: form.hoamsyPercent.replace('%', '').trim(),
             recipes: Object.entries(form.servings).map(([recipeId, expectedServings]) => {
               const p = form.prices[recipeId] ?? noPricing();
-              return { recipeId, expectedServings, salePrice: priceText(p.salePrice), discountAmount: priceText(p.discountAmount), discountQty: p.discountQty.trim(), servingSize: p.servingSize.trim() && parseAmount(p.servingSize).toString() };
+              return { recipeId, expectedServings, salePrice: priceText(p.salePrice), dealPrice: priceText(p.dealPrice), dealQty: p.dealQty.trim(), servingSize: p.servingSize.trim() && parseAmount(p.servingSize).toString() };
             }),
             sauces: Object.entries(form.sauces).map(([blendId, x]) => ({
               blendId, servings: x.servings.trim(), container: x.container, salePrice: priceText(x.salePrice),
@@ -207,13 +299,17 @@ function EventPlanner({ id }) {
       }));
       saves.current.last = save;
       try {
-        version.current = (await save).version;
+        const saved = await save;
+        version.current = saved.version;
+        setLastEdit(saved.lastEditedBy);
+        setLastOrder(saved.lastOrderBy);
         lastSaved.current = snapshot;
         setStatus('saved');
         notifyDataChanged();
       } catch (err) {
         setStatus(err.status === 409 ? 'conflict' : 'error');
         setSaveError(err.message);
+        if (err.status === 409) api(`/events/${id}`).then((ev) => setChangedBy(ev.lastEditedBy), () => {}); // the notice reads fine without it
       } finally {
         saves.current.running -= 1;
       }
@@ -255,6 +351,13 @@ function EventPlanner({ id }) {
   const setPrice = (rid, patch) => setForm((f) => ({ ...f, prices: { ...f.prices, [rid]: { ...(f.prices[rid] ?? noPricing()), ...patch } } }));
   const applyGuests = () => setForm((f) => ({ ...f, servings: Object.fromEntries(Object.keys(f.servings).map((k) => [k, f.guestCount])) }));
 
+  // Make an event's price the recipe's or sauce's own, for every event that doesn't set one.
+  const saveOwnPrice = async (path, body, name, price) => {
+    await api(path, { method: 'PUT', body });
+    notifyDataChanged();
+    toast(`${name} now sells for ${money(price)}`);
+  };
+
   const loadLatest = async () => {
     try {
       adopt(await api(`/events/${id}`));
@@ -295,6 +398,19 @@ function EventPlanner({ id }) {
   const hiddenCount = unchosen.length + unchosenSauces.length;
   // What's chosen, whether saved yet or not; the same colors as the POS screen.
   const colors = recipeColors([...Object.keys(form.servings), ...Object.keys(form.sauces).map((bid) => `blend:${bid}`)]);
+  // A personal chef job or supper club has no prices per recipe: each takes a share of the rate, from the summary.
+  const flat = form.kind !== 'market';
+  const supper = form.kind === 'supper_club';
+  const summed = new Map([...(s?.recipes ?? []).map((r) => [r.recipeId, r]), ...(s?.sauces ?? []).map((b) => [`blend:${b.blendId}`, b])]);
+  const revenueCell = (key, on) => {
+    const row = on && summed.get(key);
+    return row?.netPrice != null ? <span title={`${row.share}% of the food cost, so ${row.share}% of the ${supper ? 'ticket money after Hoamsy’s cut' : 'rate and groceries'}: ${money(row.revenue)}`}>{money(row.netPrice)}</span> : <span className="muted">—</span>;
+  };
+  const flatMargin = (key, on) => {
+    const row = on && summed.get(key);
+    return row?.marginPerServing != null ? <MarginCell pricing={row} /> : <span className="muted">—</span>;
+  };
+  const columns = flat ? 7 : 8;
   const statusText = { saved: 'All changes saved', pending: 'Unsaved changes', saving: 'Saving…', invalid: saveError, error: saveError, conflict: 'Not saved' }[status];
 
   return (
@@ -318,7 +434,7 @@ function EventPlanner({ id }) {
         <div className="notice error plan-conflict" role="alert">
           <Icon.alert />
           <div>
-            <b>This event was changed somewhere else, so your edits here aren't saved.</b> This window was holding an older copy of the plan.
+            <b>{changedBy && !changedBy.you ? `${changedBy.actor} changed this event` : changedBy?.you ? `This event was changed from your network (${changedBy.actor}), maybe in another window` : 'This event was changed somewhere else'}, so your edits here aren't saved.</b> This window was holding an older copy of the plan.
             <div className="plan-conflict-actions">
               <button className="btn small primary" onClick={loadLatest}>Load the saved plan</button>
               <button className="btn small" onClick={keepMine}>Replace it with this window's plan</button>
@@ -327,18 +443,50 @@ function EventPlanner({ id }) {
         </div>
       )}
 
-      <section className="panel panel-pad">
-        <div className="form-grid">
-          <Field label="Event name" className="span-2"><input className="input" value={form.name} onChange={set('name')} /></Field>
-          <Field label="Date"><input className="input" type="date" value={form.date} onChange={set('date')} /></Field>
-          <Field label="Guests"><input className="input num" inputMode="numeric" value={form.guestCount} onChange={set('guestCount')} /></Field>
-          <Field label="Vendor fee">
+      <section className="panel event-bar">
+        <div className="event-bar-fields">
+          <div className="event-bar-rows">
+          <div className="event-bar-row">
+          <Field label="Event name" className="f-name"><input className="input" value={form.name} onChange={set('name')} /></Field>
+          <Field label="Date" className="f-date"><input className="input" type="date" value={form.date} onChange={set('date')} /></Field>
+          <Field label="Event type" className="f-type">
+            <select className="select" value={form.kind} onChange={set('kind')} title={EVENT_TYPES.find(([k]) => k === form.kind)?.[2]}>
+              {EVENT_TYPES.map(([k, label, hint]) => <option key={k} value={k} title={hint}>{label}</option>)}
+            </select>
+          </Field>
+          </div>
+          <div className="event-bar-row">
+          <Field label={supper ? 'Tickets' : 'Guests'} className="f-num">
+            <input className="input num" inputMode="numeric" value={form.guestCount} onChange={set('guestCount')} aria-invalid={form.guestCount !== '' && !isInt(form.guestCount)} />
+          </Field>
+          {flat && (
+            <Field label={supper ? 'Plate price' : 'Flat rate'} className="f-money" hint={<TargetHint s={s} form={form} setForm={setForm} saved={status === 'saved'} />}>
+              <span className="money-input vendor-fee">
+                <span aria-hidden="true">$</span>
+                <input className="input num" inputMode="decimal" value={form.flatPrice} onChange={set('flatPrice')} placeholder="0.00" aria-invalid={!blankOrPrice(form.flatPrice)}
+                  title={supper ? 'One ticket: a plate of everything on the menu' : 'For the whole job; the groceries are billed on top, at cost'} />
+              </span>
+            </Field>
+          )}
+          {supper && (
+            <Field label="Hoamsy fee" className="f-pct">
+              <span className="unit-input">
+                <input className="input num" inputMode="decimal" value={form.hoamsyPercent} onChange={set('hoamsyPercent')} placeholder={String(HOAMSY_FEE_PERCENT)}
+                  aria-label="Hoamsy fee, percent of each ticket" aria-invalid={!blankOrPercent(form.hoamsyPercent)} title="Taken off every ticket before anything else" />
+                <span aria-hidden="true">%</span>
+              </span>
+            </Field>
+          )}
+          <Field label="Vendor fee" className="f-money">
             <span className="money-input vendor-fee">
               <span aria-hidden="true">$</span>
               <input className="input num" inputMode="decimal" value={form.vendorFee} onChange={set('vendorFee')} placeholder="0.00" aria-invalid={!blankOrPrice(form.vendorFee)} />
             </span>
           </Field>
+          </div>
+          </div>
         </div>
+        {s && (s.recipes.length > 0 || s.sauces.length > 0) && <BarFigures s={s} pending={status !== 'saved'} />}
       </section>
 
       <nav className="jump-menu show-sm" aria-label="Jump to">
@@ -351,7 +499,7 @@ function EventPlanner({ id }) {
         <div className="panel-head">
           <h2>Recipes <span className="muted" style={{ fontWeight: 500 }}>({selectedCount} selected{sauceCount ? `, ${sauceCount} sauce${sauceCount === 1 ? '' : 's'}` : ''})</span></h2>
           <button className="btn small hide-sm" disabled={!isInt(form.guestCount) || !selectedCount} onClick={applyGuests}>
-            Set all servings to {isInt(form.guestCount) ? form.guestCount : 'guest count'}
+            Set all servings to {isInt(form.guestCount) ? form.guestCount : supper ? 'tickets' : 'guest count'}
           </button>
         </div>
         {recipes && !recipes.length ? (
@@ -363,12 +511,17 @@ function EventPlanner({ id }) {
                 <tr>
                   <th style={{ width: 40 }}><span className="visually-hidden">Include</span></th>
                   <th>Recipe</th>
-                  <th className="num c-makes" title="What one batch of the recipe makes, in servings of the size set here">Recipe yield</th>
                   <th title="What one serving is at this event, like 3 tacos. Blank: the recipe’s own size. Cost and price follow it.">Size / serving</th>
                   <th className="num">Cost / serving</th>
-                  <th className="num" title="Per serving at this event. Starts at the recipe’s target price; change it here for this event only.">Sale price</th>
-                  <th title="Optional deal, e.g. buy 2, get $1 off: $1.00 off per 2 servings">Discount</th>
-                  <th className="num" title="Sale price minus any discount, minus the cost per serving">Margin / serving</th>
+                  {flat ? (
+                    <th className="num" title={`Each item’s revenue per serving: its share of the ${supper ? 'ticket money after Hoamsy’s cut' : 'rate and groceries'}, by its share of the food cost. Updates once the plan saves.`}>Revenue / serving</th>
+                  ) : (
+                    <>
+                      <th className="num" title="Per serving at this event. Starts at the recipe’s target price; change it here for this event only.">Sale price</th>
+                      <th title="Optional deal, like 3 for $15. Ticking it fills in the last one entered for the recipe">Discount</th>
+                    </>
+                  )}
+                  <th className="num" title={flat ? `Its revenue less its food, per serving: labor and the vendor fee are paid back at cost first, so this is a margin on food` : 'Sale price minus any discount, minus the cost per serving'}>Margin / serving</th>
                   <th className="num">Servings for this event</th>
                 </tr>
               </thead>
@@ -382,7 +535,6 @@ function EventPlanner({ id }) {
                     <tr key={r.id} className={on ? '' : 'off'} style={on ? { '--tile': colors.get(r.id) } : undefined}>
                       <td className="c-check"><input type="checkbox" checked={on} onChange={() => toggle(r)} aria-label={`Include ${r.name}`} style={{ width: 18, height: 18, accentColor: 'var(--basil)' }} /></td>
                       <td className="c-name"><Link to={`/recipes/${r.id}`} style={{ color: 'inherit', fontWeight: 600 }}>{r.name}</Link></td>
-                      <td className="num c-makes" data-label="Recipe yield">{qty(toDecimal(r.baseServings).div(served.ratio), 1)}</td>
                       <td className="c-size" data-label="Size / serving">
                         {on ? (
                           <span className="serving-size">
@@ -393,17 +545,22 @@ function EventPlanner({ id }) {
                         ) : amountLabel(served.recipeSize, served.unit)}
                       </td>
                       <td className="num c-cost" data-label="Cost">{money(served.costPerServing)}</td>
-                      <td className="num c-price" data-label="Price">
-                        {on
-                          ? <SalePriceInput value={p.salePrice} recipePrice={served.recommendedPrice} label={`Sale price per serving of ${r.name}`} onChange={(v) => setPrice(r.id, { salePrice: v })} />
-                          : money(served.recommendedPrice)}
-                      </td>
-                      <td className="c-deal" data-label="Deal">
-                        {on
-                          ? <DealToggle amount={p.discountAmount} qty={p.discountQty} label={r.name} onChange={(patch) => setPrice(r.id, patch)} />
-                          : '—'}
-                      </td>
-                      <td className="num nowrap c-margin" data-label="Margin"><MarginCell pricing={pricingFor(served, on ? p : undefined)} /></td>
+                      {flat ? <td className="num c-price" data-label="Revenue / serving">{revenueCell(r.id, on)}</td> : (
+                        <>
+                          <td className="num c-price" data-label="Price">
+                            {on
+                              ? <SalePriceInput value={p.salePrice} recipePrice={served.recommendedPrice} label={`Sale price per serving of ${r.name}`} onChange={(v) => setPrice(r.id, { salePrice: v })}
+                                  onSetRecipePrice={toDecimal(served.ratio).eq(1) ? (price) => saveOwnPrice(`/recipes/${r.id}/price`, { targetPrice: price }, r.name, price) : undefined} />
+                              : money(served.recommendedPrice)}
+                          </td>
+                          <td className="c-deal" data-label="Discount">
+                            {on
+                              ? <DealToggle qty={p.dealQty} price={p.dealPrice} saved={r} label={r.name} note={dealNote(p, pricingFor(served, p))} onChange={(patch) => setPrice(r.id, patch)} />
+                              : '—'}
+                          </td>
+                        </>
+                      )}
+                      <td className="num nowrap c-margin" data-label="Margin">{flat ? flatMargin(r.id, on) : <MarginCell pricing={pricingFor(served, on ? p : undefined)} />}</td>
                       <td className="num c-serv" data-label="Servings">
                         {on ? (
                           <input className="input num" style={{ width: 76 }} inputMode="numeric" value={form.servings[r.id]}
@@ -415,7 +572,7 @@ function EventPlanner({ id }) {
                   );
                 })}
                 {shownSauces.length > 0 && (
-                  <tr className="group-row"><td colSpan={9}>Sauces <span className="muted">· sold by the serving, made in whole containers</span></td></tr>
+                  <tr className="group-row"><td colSpan={columns}>Sauces <span className="muted">· {flat ? 'made in whole containers' : 'sold by the serving, made in whole containers'}</span></td></tr>
                 )}
                 {shownSauces.map((b) => {
                   const on = b.id in form.sauces;
@@ -427,35 +584,35 @@ function EventPlanner({ id }) {
                     <tr key={b.id} className={`sauce-row ${on ? '' : 'off'}`} style={on ? { '--tile': colors.get(`blend:${b.id}`) } : undefined}>
                       <td className="c-check"><input type="checkbox" checked={on} onChange={() => toggleSauce(b)} aria-label={`Include ${b.name}`} style={{ width: 18, height: 18, accentColor: 'var(--basil)' }} /></td>
                       <td className="c-name"><Link to={`/spice-lab/${b.id}`} style={{ color: 'inherit', fontWeight: 600 }}>{b.name}</Link> <span className="badge">Sauce</span></td>
-                      <td className="num c-makes" data-label="Containers">
-                        {on ? (
-                          <span className="sauce-make">
-                            <input className="input num" inputMode="numeric" value={count} aria-label={`Containers of ${b.name}`} aria-invalid={!isCount(count)}
-                              onChange={(e) => setSauceMake(b, { count: e.target.value })} />
-                            <span aria-hidden="true">×</span>
-                            <select className="select" value={x.container} aria-label={`Container for ${b.name}`} onChange={(e) => setSauceMake(b, { container: e.target.value, count })}>
-                              {Object.keys(SAUCE_CONTAINERS).map((k) => <option key={k} value={k}>{k}</option>)}
-                            </select>
-                          </span>
-                        ) : b.container}
-                        {c && <div className="sauce-holds"><small className="muted"><span>{c.containerOz} oz,</span> <span>{qty(c.servingsPerContainer, 1)} servings each</span></small></div>}
-                      </td>
                       <td className="muted c-size c-none">{c ? `${qty(c.servingOz, 2)} oz` : '—'}</td>
                       <td className="num c-cost" data-label="Cost">{c?.costPerServing ? money(c.costPerServing) : '—'}</td>
-                      <td className="num c-price" data-label="Price">
-                        {on
-                          ? <SalePriceInput value={x.salePrice} recipePrice={c?.recommendedPrice} label={`Sale price per serving of ${b.name}`} onChange={(v) => setSauce(b.id, { salePrice: v })} />
-                          : c?.recommendedPrice ? money(c.recommendedPrice) : '—'}
-                      </td>
-                      <td className="muted c-deal c-none">—</td>
-                      <td className="num nowrap c-margin" data-label="Margin"><MarginCell pricing={costed ? pricingFor(costed, on ? { salePrice: x.salePrice } : undefined) : null} /></td>
-                      <td className="num c-serv" data-label="Servings">
+                      {flat ? <td className="num c-price" data-label="Revenue / serving">{revenueCell(`blend:${b.id}`, on)}</td> : (
+                        <>
+                          <td className="num c-price" data-label="Price">
+                            {on
+                              ? <SalePriceInput value={x.salePrice} recipePrice={c?.recommendedPrice} label={`Sale price per serving of ${b.name}`} onChange={(v) => setSauce(b.id, { salePrice: v })}
+                                  onSetRecipePrice={(price) => saveOwnPrice(`/blends/${b.id}/price`, { salePrice: price }, b.name, price)} />
+                              : c?.recommendedPrice ? money(c.recommendedPrice) : '—'}
+                          </td>
+                          <td className="muted c-deal c-none">—</td>
+                        </>
+                      )}
+                      <td className="num nowrap c-margin" data-label="Margin">{flat ? flatMargin(`blend:${b.id}`, on) : <MarginCell pricing={costed ? pricingFor(costed, on ? { salePrice: x.salePrice } : undefined) : null} />}</td>
+                      <td className="num c-serv" data-label="Containers">
                         {on ? (
                           <>
-                            <b className="sauce-servings" title="Containers × the servings one holds">{x.servings}</b>
-                            <div><small className="muted nowrap">from {count || '?'} × {x.container}</small></div>
+                            <span className="sauce-make">
+                              <input className="input num" inputMode="numeric" value={count} aria-label={`Containers of ${b.name}`} aria-invalid={!isCount(count)}
+                                onChange={(e) => setSauceMake(b, { count: e.target.value })} />
+                              <span aria-hidden="true">×</span>
+                              <select className="select" value={x.container} aria-label={`Container for ${b.name}`} onChange={(e) => setSauceMake(b, { container: e.target.value, count })}>
+                                {Object.keys(SAUCE_CONTAINERS).map((k) => <option key={k} value={k}>{k}</option>)}
+                              </select>
+                            </span>
+                            <div><b className="sauce-servings" title="Containers × the servings one holds">{x.servings} servings</b></div>
                           </>
-                        ) : '—'}
+                        ) : b.container}
+                        {c && <div className="sauce-holds"><small className="muted"><span>{c.containerOz} oz,</span> <span>{qty(c.servingsPerContainer, 1)} servings each</span></small></div>}
                       </td>
                     </tr>
                   );
@@ -472,7 +629,7 @@ function EventPlanner({ id }) {
         )}
       </section>
 
-      <section ref={tabsRef} className="event-tabs-area">
+      <section ref={tabsRef} className="event-tabs-area" style={hold == null ? undefined : { minHeight: hold }}>
         <Tabs className="segmented-sm" value={tab} onChange={(t) => jumpTo(t, { always: false })} tabs={[
           { value: 'financials', label: 'Financials' },
           { value: 'shopping', label: 'Shopping list', short: 'Shopping' },
@@ -497,6 +654,12 @@ function EventPlanner({ id }) {
           <button className="btn small danger" onClick={() => setDeleting(true)}><Icon.trash /> Delete event</button>
         </span>
       </div>
+      {((status === 'saved' && lastEdit) || lastOrder) && (
+        <p className="last-edits">
+          {status === 'saved' && lastEdit && <span>Last edited by {lastEdit.actor}, {dateTime(lastEdit.at)}</span>}
+          {lastOrder && <span>Last order entered by {lastOrder.actor}, {dateTime(lastOrder.at)}</span>}
+        </p>
+      )}
       {copying && <DuplicateEventModal event={{ id, name: form.name || 'Untitled event', date: form.date }} onClose={() => setCopying(false)} />}
 
       {deleting && (

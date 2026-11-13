@@ -132,15 +132,29 @@ test('recipe costing uses latest price and scales statelessly', { skip }, async 
   const gallery = await api('GET', '/recipes');
   assert.equal(gallery.data.length, 2);
   assert.ok(gallery.data[0].lastPriceSync);
-  assert.deepEqual([gallery.data[0].ingredientCount, gallery.data[0].laborMinutes], [2, null]);
+  assert.equal(gallery.data[0].ingredientCount, 2);
 
-  // The gallery lists labor as minutes, apart from the ingredient count.
-  const labor = (await api('POST', '/ingredients', { name: 'Labor', category: 'Labor', uom: 'hr', purchase: { quantity: 1, packSize: 1, totalCost: 20 } })).data;
-  const timed = (await api('POST', '/recipes', { name: 'Timed', baseServings: 1, lines: [{ ingredientId: ids.flour, amount: 1 }, { ingredientId: labor.id, amount: '0.75' }] })).data;
-  const card = (await api('GET', '/recipes')).data.find((r) => r.id === timed.id);
-  assert.deepEqual([card.ingredientCount, card.laborMinutes], [1, '45']);
-  await api('DELETE', `/recipes/${timed.id}`);
-  await api('DELETE', `/ingredients/${labor.id}`);
+  // Labor isn't an ingredient: an event has its own hours × rate, in its cost but not its shopping list.
+  const ev = (await api('POST', '/events', { name: 'Labor night', date: '2026-11-21' })).data;
+  assert.deepEqual([ev.laborHours, ev.laborRate], ['0.00', null]);
+  const labor = (body) => api('PUT', `/events/${ev.id}/labor`, body);
+  let s = (await labor({ rate: '20' })).data;
+  assert.deepEqual([s.labor, s.totalCost], [{ hours: '0', rate: '20.00', cost: '0.00' }, '0.0000']);
+  s = (await labor({ hours: '3' })).data;
+  assert.deepEqual([s.labor, s.totalCost, s.profit, s.shoppingList], [{ hours: '3', rate: '20.00', cost: '60.00' }, '60.0000', '-60.00', []]);
+  assert.equal((await labor({ hours: '' })).status, 400);
+  assert.equal((await labor({ rate: '-1' })).status, 400);
+  assert.equal((await labor({})).status, 400);
+  // The plan's save leaves labor alone; a copy keeps it; a new event starts at the newest rate.
+  await api('PUT', `/events/${ev.id}`, { name: 'Labor night', date: '2026-11-21', version: (await api('GET', `/events/${ev.id}`)).data.version });
+  assert.equal((await api('GET', `/events/${ev.id}/summary`)).data.labor.cost, '60.00');
+  const copy = (await api('POST', `/events/${ev.id}/duplicate`)).data;
+  assert.deepEqual([copy.laborHours, copy.laborRate], ['3.00', '20.00']);
+  const next = (await api('POST', '/events', { name: 'Labor later', date: '2026-11-22' })).data;
+  assert.deepEqual([next.laborHours, next.laborRate], ['0.00', '20.00']);
+  s = (await labor({ rate: '' })).data;
+  assert.deepEqual(s.labor, { hours: '3', rate: null, cost: '0.00' });
+  for (const id of [ev.id, copy.id, next.id]) await api('DELETE', `/events/${id}`);
 });
 
 test('ingredients used by a recipe cannot be deleted', { skip }, async () => {
@@ -178,7 +192,7 @@ test('a serving size set for one event carries through costing, orders and copie
   assert.equal(s.shoppingList.find((l) => l.ingredientId === ids.flour).amount, '60.0000'); // 30 tacos × 2 lb
 
   // An order is charged per serving, and names what it was.
-  const sold = await api('POST', `/events/${ev.id}/sales`, { paymentMethod: 'cash', status: 'placed', items: [{ recipeId: taco.id, quantity: 2 }] });
+  const sold = await api('POST', `/events/${ev.id}/sales`, { paymentMethod: 'cash', status: 'in_progress', items: [{ recipeId: taco.id, quantity: 2 }] });
   assert.deepEqual([sold.data.sales[0].items[0].name, sold.data.sales[0].total], ['Taco (3 tacos)', '28.00']);
   assert.equal(sold.data.totals.byRecipe[0].sold, 2);
 
@@ -203,8 +217,8 @@ test('a sale price and a deal can be set per event', { skip }, async () => {
   const summary = async () => (await api('GET', `/events/${ev.id}/summary`)).data;
 
   // Added from the gallery with a $4 price and "buy 2, get $1 off".
-  const added = await api('POST', `/events/${ev.id}/recipes`, { recipeId: ids.pasta, expectedServings: 8, salePrice: '4', discountAmount: '1', discountQty: '2' });
-  assert.deepEqual(added.data.recipes.map((r) => [r.salePrice, r.discountAmount, r.discountQty]), [['4.00', '1.00', 2]]);
+  const added = await api('POST', `/events/${ev.id}/recipes`, { recipeId: ids.pasta, expectedServings: 8, salePrice: '4', dealPrice: '7', dealQty: '2' });
+  assert.deepEqual(added.data.recipes.map((r) => [r.salePrice, r.dealPrice, r.dealQty]), [['4.00', '7.00', 2]]);
   let r = (await summary()).recipes[0];
   assert.deepEqual([r.recommendedPrice, r.salePrice, r.discount, r.revenue, r.profit, r.marginPerServing], ['3.33', '4.00', '4.00', '28.00', '20.00', '2.5000']);
 
@@ -212,17 +226,17 @@ test('a sale price and a deal can be set per event', { skip }, async () => {
   await saveEvent(ev.id, { name: ev.name, date: ev.date, recipes: [{ recipeId: ids.pasta, expectedServings: 10 }] });
   await api('POST', `/events/${ev.id}/recipes`, { recipeId: ids.pasta, expectedServings: 8 });
   r = (await summary()).recipes[0];
-  assert.deepEqual([r.salePrice, r.discountAmount, r.discountQty], ['4.00', '1.00', 2]);
+  assert.deepEqual([r.salePrice, r.dealPrice, r.dealQty], ['4.00', '7.00', 2]);
 
-  // A per-serving discount; then blanks go back to the recipe's price and no deal.
-  await saveEvent(ev.id, { name: ev.name, date: ev.date, recipes: [{ recipeId: ids.pasta, expectedServings: 8, salePrice: '4.5', discountAmount: '0.25', discountQty: '' }] });
+  // Another deal; then blanks go back to the recipe's price and no deal.
+  await saveEvent(ev.id, { name: ev.name, date: ev.date, recipes: [{ recipeId: ids.pasta, expectedServings: 8, salePrice: '4.5', dealPrice: '8', dealQty: '2' }] });
   r = (await summary()).recipes[0];
-  assert.deepEqual([r.salePrice, r.discountQty, r.revenue], ['4.50', 1, '34.00']);
-  await saveEvent(ev.id, { name: ev.name, date: ev.date, recipes: [{ recipeId: ids.pasta, expectedServings: 8, salePrice: '', discountAmount: '', discountQty: '' }] });
+  assert.deepEqual([r.salePrice, r.dealQty, r.revenue], ['4.50', 2, '32.00']);
+  await saveEvent(ev.id, { name: ev.name, date: ev.date, recipes: [{ recipeId: ids.pasta, expectedServings: 8, salePrice: '', dealPrice: '', dealQty: '' }] });
   r = (await summary()).recipes[0];
-  assert.deepEqual([r.salePrice, r.priceSet, r.discountAmount, r.revenue], ['3.33', false, null, '26.64']);
+  assert.deepEqual([r.salePrice, r.priceSet, r.dealPrice, r.revenue], ['3.33', false, null, '26.64']);
 
-  for (const bad of [{ salePrice: '-1' }, { discountAmount: '1', discountQty: '0' }, { discountAmount: 'lots' }]) {
+  for (const bad of [{ salePrice: '-1' }, { dealPrice: '7', dealQty: '1' }, { dealPrice: 'lots', dealQty: '2' }, { dealPrice: '7' }, { dealQty: '2' }, { dealPrice: '0', dealQty: '2' }]) {
     assert.equal((await api('POST', `/events/${ev.id}/recipes`, { recipeId: ids.pasta, expectedServings: 8, ...bad })).status, 400);
   }
   await api('DELETE', `/events/${ev.id}`);
@@ -259,11 +273,14 @@ test('orders: a name and a status through the queue, and cancelled ones count to
   r = await place({ customerName: 'Ana' }); // named, still handed over on the spot
   assert.deepEqual([r.data.sales[0].customerName, r.data.sales[0].status], ['Ana', 'completed']);
   assert.equal((await api('DELETE', `/events/${ev.id}/sales/${r.data.sales[0].id}`)).status, 204);
-  r = await place({ customerName: '  Sam ', status: 'placed' });
+  // Placed on the POS: straight to the kitchen, with notes on the order and its lines.
+  r = await place({ customerName: '  Sam ', status: 'in_progress', note: ' Nut allergy ', items: [{ recipeId: ids.pasta, quantity: 2, note: 'no cheese' }] });
   const order = r.data.sales[0];
-  assert.deepEqual([order.customerName, order.status, order.total], ['Sam', 'placed', '8.00']);
-  assert.deepEqual(r.data.totals.byStatus, { placed: 1, in_progress: 0, completed: 1, cancelled: 0 });
+  assert.deepEqual([order.customerName, order.status, order.total, order.note, order.items[0].note], ['Sam', 'in_progress', '8.00', 'Nut allergy', 'no cheese']);
+  assert.ok(order.inProgressAt);
+  assert.deepEqual(r.data.totals.byStatus, { in_progress: 1, completed: 1, cancelled: 0 });
   assert.equal((await place({ status: 'lost' })).status, 400);
+  assert.equal((await place({ status: 'placed' })).status, 400);
 
   // Its status moves any way, and only a real change restamps it.
   r = await patch(order.id, { status: 'in_progress' });
@@ -272,9 +289,14 @@ test('orders: a name and a status through the queue, and cancelled ones count to
   r = await patch(order.id, { customerName: 'Sam B' });
   const renamed = r.data.sales.find((s) => s.id === order.id);
   assert.deepEqual([renamed.status, renamed.customerName, renamed.statusChangedAt], ['in_progress', 'Sam B', started.statusChangedAt]);
+  // The note changes on its own, and blank clears it.
+  r = await patch(order.id, { note: 'Extra napkins' });
+  assert.deepEqual([r.data.sales.find((s) => s.id === order.id).note, r.data.sales.find((s) => s.id === order.id).customerName], ['Extra napkins', 'Sam B']);
+  assert.equal((await patch(order.id, { note: '' })).data.sales.find((s) => s.id === order.id).note, null);
   assert.equal((await patch(order.id, { customerName: '' })).data.sales.find((s) => s.id === order.id).customerName, null);
   assert.equal((await patch(order.id, { status: 'lost' })).status, 400);
-  assert.equal((await patch('00000000-0000-0000-0000-000000000000', { status: 'placed' })).status, 404);
+  assert.equal((await patch(order.id, { status: 'placed' })).status, 400);
+  assert.equal((await patch('00000000-0000-0000-0000-000000000000', { status: 'completed' })).status, 404);
 
   // Timing: each stage is stamped once, stepping back clears what hasn't happened yet.
   const timed = async (body) => (await patch(order.id, body)).data.sales.find((s) => s.id === order.id);
@@ -290,14 +312,8 @@ test('orders: a name and a status through the queue, and cancelled ones count to
   assert.equal(o.completedAt, finishedAt);
   o = await timed({ status: 'cancelled' });
   assert.equal(o.completedAt, finishedAt);
-  o = await timed({ status: 'in_progress' });
+  o = await timed({ status: 'in_progress' }); // reopened: keeps its start
   assert.deepEqual([o.inProgressAt, o.completedAt], [startedAt, null]);
-  o = await timed({ status: 'placed' });
-  assert.deepEqual([o.inProgressAt, o.completedAt], [null, null]);
-  o = await timed({ status: 'completed' }); // never started
-  assert.equal(o.inProgressAt, null);
-  assert.ok(o.completedAt);
-  await timed({ status: 'in_progress' });
   // Handed over on the spot, or placed already started.
   const spot = (await place({ customerName: 'Spot' })).data.sales[0];
   assert.deepEqual([spot.inProgressAt, spot.completedAt], [null, null]);
@@ -317,25 +333,63 @@ test('orders: a name and a status through the queue, and cancelled ones count to
   assert.deepEqual([r.data.totals.sales, r.data.totals.sold, r.data.totals.revenue, r.data.totals.byMethod.cash.amount, r.data.totals.byRecipe[0].sold], [1, 2, '8.00', '8.00', 2]);
   assert.equal(r.data.totals.byStatus.cancelled, 1);
   assert.equal((await listed()).openOrders, 0);
-  r = await patch(order.id, { status: 'placed' });
+  r = await patch(order.id, { status: 'in_progress' });
   assert.deepEqual([r.data.totals.sales, r.data.totals.revenue], [2, '16.00']);
   await api('DELETE', `/events/${ev.id}`);
 });
 
+test('supper clubs and personal chef jobs: recipes take a share of the rate, and the POS only places free orders', { skip }, async () => {
+  const ev = (await api('POST', '/events', { name: 'Supper', date: '2026-11-05', guestCount: 12 })).data;
+  assert.deepEqual([ev.kind, ev.flatPrice], ['market', null]);
+  await api('POST', `/events/${ev.id}/recipes`, { recipeId: ids.pasta, expectedServings: 12, salePrice: '9' });
+  const save = async (body) => api('PUT', `/events/${ev.id}`, { name: 'Supper', date: '2026-11-05', guestCount: 12, version: (await api('GET', `/events/${ev.id}`)).data.version, ...body });
+  assert.equal((await save({ kind: 'potluck' })).status, 400);
+  assert.equal((await save({ kind: 'supper_club', flatPrice: '50' })).status, 200);
+  const s = (await api('GET', `/events/${ev.id}/summary`)).data;
+  // Hoamsy's 25% comes off the $600 of tickets first.
+  assert.deepEqual([s.kind, s.flat.gross, s.hoamsyFee, s.revenue, s.recipes[0].share, s.recipes[0].revenue, s.recipes[0].salePrice], ['supper_club', '600.00', '150.00', '450.00', '100.0', '450.00', null]);
+  assert.ok(Number(s.flat.suggestedPrice) > 0);
+  assert.equal((await save({ hoamsyPercent: '100' })).status, 400);
+  const own = (await (await save({ hoamsyPercent: '20' })).data);
+  assert.equal(own.hoamsyPercent, '20.00');
+  assert.deepEqual([(await api('GET', `/events/${ev.id}/summary`)).data.hoamsyFee], ['120.00']);
+  // A save that leaves the type out keeps it.
+  assert.equal((await save({})).data.kind, 'supper_club');
+
+  // Paid for up front: the POS only places orders, every dish free; no payment, no ticket item.
+  const sell = (items, paymentMethod = 'free') => api('POST', `/events/${ev.id}/sales`, { paymentMethod, items });
+  assert.equal((await sell([{ recipeId: ids.pasta, quantity: 1 }], 'cash')).status, 400);
+  assert.equal((await sell([{ flat: true, quantity: 1 }])).status, 400);
+  const plate = (await sell([{ recipeId: ids.pasta, quantity: 3 }])).data.sales[0].items[0];
+  assert.deepEqual([plate.quantity, plate.unitPrice, plate.amount], [3, '0.00', '0.00']);
+
+  // A personal chef job: the rate plus groceries, sold as one service. A copy keeps the type and rate.
+  assert.equal((await save({ kind: 'personal_chef', flatPrice: '250' })).status, 200);
+  const chef = (await api('GET', `/events/${ev.id}/summary`)).data;
+  assert.equal(chef.revenue, (250 + Number(chef.flat.groceries)).toFixed(2));
+  assert.equal((await sell([{ recipeId: ids.pasta, quantity: 1 }])).data.sales[0].items[0].amount, '0.00');
+  const copy = (await api('POST', `/events/${ev.id}/duplicate`)).data;
+  assert.deepEqual([copy.kind, copy.flatPrice], ['personal_chef', '250.00']);
+  // Back to a market, recipes sell one by one again at their own price.
+  assert.equal((await save({ kind: 'market' })).status, 200);
+  assert.equal((await sell([{ recipeId: ids.pasta, quantity: 1 }], 'cash')).data.sales[0].items[0].unitPrice, '9.00');
+  for (const id of [ev.id, copy.id]) await api('DELETE', `/events/${id}`);
+});
+
 test('sales recorded during an event: lines, deals, giveaways, totals and undo', { skip }, async () => {
   const ev = (await api('POST', '/events', { name: 'Night market', date: '2026-11-03' })).data;
-  await api('POST', `/events/${ev.id}/recipes`, { recipeId: ids.pasta, expectedServings: 20, salePrice: '4', discountAmount: '1', discountQty: '2' });
+  await api('POST', `/events/${ev.id}/recipes`, { recipeId: ids.pasta, expectedServings: 20, salePrice: '4', dealPrice: '7', dealQty: '2' });
   const sell = (paymentMethod, items) => api('POST', `/events/${ev.id}/sales`, { paymentMethod, items });
 
   assert.deepEqual((await api('GET', `/events/${ev.id}/sales`)).data.totals.sold, 0);
-  // 3 on the deal (one deal applies), paid by card.
-  let r = await sell('card', [{ recipeId: ids.pasta, quantity: 3, dealUsed: true }]);
+  // 3 of a 2-for deal: it applies by itself, once. Paid by card.
+  let r = await sell('card', [{ recipeId: ids.pasta, quantity: 3 }]);
   assert.equal(r.status, 201);
   assert.deepEqual(r.data.sales[0].items.map((i) => [i.name, i.quantity, i.unitPrice, i.deals, i.discount, i.amount]), [['Pasta', 3, '4.00', 1, '1.00', '11.00']]);
   assert.equal(r.data.sales[0].total, '11.00');
   // 1 for cash, 2 given away (no charge, no deal).
   await sell('cash', [{ recipeId: ids.pasta, quantity: 1 }]);
-  r = await sell('free', [{ recipeId: ids.pasta, quantity: 2, dealUsed: true }]);
+  r = await sell('free', [{ recipeId: ids.pasta, quantity: 2 }]);
   const t = r.data.totals;
   assert.deepEqual([t.sales, t.sold, t.givenAway, t.deals, t.discounts, t.revenue], [3, 4, 2, 1, '1.00', '15.00']);
   assert.deepEqual([t.byMethod.card, t.byMethod.cash, t.byMethod.free, t.byMethod.venmo], [
@@ -350,8 +404,8 @@ test('sales recorded during an event: lines, deals, giveaways, totals and undo',
   assert.deepEqual(r.data.sales.map((s) => s.total), ['5.00', '0.00', '4.00', '11.00']);
   // Venmo's fee goes on top: charge (5 + 0.10) ÷ 0.981 = $5.20 (up to the cent), so 1.9% + $0.10 of it leaves $5.
   assert.deepEqual([r.data.sales[0].fee, r.data.totals.fees, r.data.totals.charged, r.data.totals.byMethod.venmo.fees], ['0.20', '0.20', '20.20', '0.20']);
-  const app = await sell('cashapp', [{ recipeId: ids.pasta, quantity: 2 }]); // (10 + 0.15) ÷ 0.974 = $10.43
-  assert.equal(app.data.sales[0].fee, '0.43');
+  const app = await sell('cashapp', [{ recipeId: ids.pasta, quantity: 2 }]); // on the deal: (7 + 0.15) ÷ 0.974 = $7.35
+  assert.equal(app.data.sales[0].fee, '0.35');
   await api('DELETE', `/events/${ev.id}/sales/${app.data.sales[0].id}`);
 
   // Undo the newest; refusals.
@@ -361,7 +415,6 @@ test('sales recorded during an event: lines, deals, giveaways, totals and undo',
     ['bitcoin', [{ recipeId: ids.pasta, quantity: 1 }], /how it was paid/],
     ['cash', [], /at least one item/],
     ['cash', [{ recipeId: ids.pasta, quantity: 0 }], /quantity/],
-    ['cash', [{ recipeId: ids.pasta, quantity: 1, dealUsed: true }], /needs 2 or more/],
     ['cash', [{ recipeId: ids.eggs, quantity: 1 }], /menu/],
   ]) {
     const bad = await sell(method, items);
@@ -393,6 +446,25 @@ test('a needed amount set on the shopping list replaces the scaled total', { ski
   for (const e of [copy.data, plain]) await api('DELETE', `/events/${e.id}`);
   assert.equal((await api('DELETE', `/events/${ev.id}/amounts/${ids.eggs}`)).status, 204);
   assert.equal((await api('GET', `/events/${ev.id}/summary`)).data.totalCost, before.totalCost);
+});
+
+test('packs to buy set on the shopping list change what the trip costs, not the food', { skip }, async () => {
+  const ev = (await api('GET', '/events')).data.find((e) => e.name === 'Gala');
+  const before = (await api('GET', `/events/${ev.id}/summary`)).data;
+  const eggsOf = (s) => s.shoppingList.find((l) => l.name === 'Eggs');
+  const set = await api('PUT', `/events/${ev.id}/packs/${ids.eggs}`, { packs: 0 }); // all in stock
+  assert.equal(set.status, 200);
+  const eggs = eggsOf(set.data);
+  assert.deepEqual([eggs.packsToBuy, eggs.calculatedPacks, eggs.packsSet], ['0', eggsOf(before).packsToBuy, true]);
+  assert.equal(Number(set.data.purchaseCost), Number(before.purchaseCost) - Number(eggsOf(before).purchaseCost));
+  assert.equal(set.data.totalCost, before.totalCost);
+  assert.equal((await api('PUT', `/events/${ev.id}/packs/${ids.eggs}`, { packs: -1 })).status, 400);
+  // A copy keeps it; clearing goes back to whole packs.
+  const copy = (await api('POST', `/events/${ev.id}/duplicate`, {})).data;
+  assert.equal(eggsOf((await api('GET', `/events/${copy.id}/summary`)).data).packsToBuy, '0');
+  await api('DELETE', `/events/${copy.id}`);
+  const cleared = (await api('DELETE', `/events/${ev.id}/packs/${ids.eggs}`)).data;
+  assert.deepEqual([eggsOf(cleared).packsToBuy, cleared.purchaseCost], [eggsOf(before).packsToBuy, before.purchaseCost]);
 });
 
 test('validation errors are 400s with readable messages', { skip }, async () => {
@@ -491,6 +563,12 @@ test('price movement compares against the previous purchase from any store', { s
   assert.equal((await api('PATCH', `/ingredients/${ids.flour}/purchases/${mart.id}`, { vendor: 'x'.repeat(121) })).status, 400);
   assert.equal((await api('PATCH', `/ingredients/${ids.flour}/purchases/${mart.id}`, {})).status, 400);
   await api('PATCH', `/ingredients/${ids.flour}/purchases/${mart.id}`, { vendor: 'Mart' });
+  // A store already saved keeps its spelling whatever the capitals or spacing.
+  assert.equal((await api('PATCH', `/ingredients/${ids.flour}/purchases/${mart.id}`, { vendor: 'DEPOT' })).data.vendor, 'Depot');
+  const again = await api('POST', '/ingredients/purchase', { vendor: ' depot ', items: [{ ingredientId: ids.flour, date: '2026-01-01', quantity: 1, packSize: 50, unitCost: '25' }] });
+  assert.equal(again.data.purchases[0].vendor, 'Depot');
+  await api('DELETE', `/ingredients/${ids.flour}/purchases/${again.data.purchases[0].id}`);
+  await api('PATCH', `/ingredients/${ids.flour}/purchases/${mart.id}`, { vendor: 'Mart' });
 
   // Pack sizes are in the ingredient's unit; another unit is refused.
   const wrong = await api('POST', '/ingredients/purchase', { items: [{ ingredientId: ids.flour, uom: 'kg', quantity: 1, packSize: 10, unitCost: 9 }] });
@@ -543,6 +621,47 @@ test('recipe amounts can exceed a pack and margins keep 6 decimals', { skip }, a
   assert.equal(r.data.lines[0].amount, '120.0000');
   assert.equal(r.data.targetMargin, '70.833333');
   assert.equal((await api('POST', '/recipes', { name: 'Neg', baseServings: 1, lines: [{ ingredientId: ids.flour, amount: '-1' }] })).status, 400);
+});
+
+test('a recipe line can measure in cups what is bought by the lb', { skip }, async () => {
+  const rice = (await api('POST', '/ingredients', {
+    name: 'Cup test rice', uom: 'lb', purchase: { date: '2026-05-01', vendor: 'Depot', quantity: 1, packSize: 25, unitCost: '20' },
+  })).data;
+  const chicken = (await api('POST', '/ingredients', {
+    name: 'Cup test chicken', uom: 'lb', purchase: { date: '2026-05-01', vendor: 'Depot', quantity: 1, packSize: 1, unitCost: '5' },
+  })).data;
+  const body = { name: 'Rice bowl', baseServings: 4, lines: [{ ingredientId: rice.id, amount: '2', unit: 'Cups' }] };
+  const r = (await api('POST', '/recipes', body)).data;
+  assert.deepEqual([r.lines[0].unit, r.lines[0].amount, r.costing.lines[0].baseCost], ['cup', '2.0000', '0.6526']);
+  // Its own unit is stored as none; a unit that can't be converted is refused.
+  const own = (await api('PUT', `/recipes/${r.id}`, { ...body, lines: [{ ingredientId: rice.id, amount: '1', unit: 'lb' }] })).data;
+  assert.equal(own.lines[0].unit, null);
+  const refused = await api('PUT', `/recipes/${r.id}`, { ...body, lines: [{ ingredientId: chicken.id, amount: '1', unit: 'cup' }] });
+  assert.equal(refused.status, 400);
+  // Once a cup of it has a weight, it can.
+  await api('PATCH', `/ingredients/${chicken.id}`, { cupGrams: '140' });
+  const ok = (await api('PUT', `/recipes/${r.id}`, { ...body, lines: [{ ingredientId: rice.id, amount: '2', unit: 'cup' }, { ingredientId: chicken.id, amount: '1', unit: 'cup' }] })).data;
+  assert.equal(ok.costing.lines[1].baseCost, '1.5432'); // 140 g at $5 / lb
+
+  // The event shopping list buys rice by the lb; the copy keeps the unit; the drawer says cups.
+  const ev = (await api('POST', '/events', { name: 'Cup test', date: '2026-11-20' })).data;
+  await api('POST', `/events/${ev.id}/recipes`, { recipeId: r.id, expectedServings: 8 });
+  const list = (await api('GET', `/events/${ev.id}/summary`)).data.shoppingList;
+  assert.deepEqual([list.find((l) => l.ingredientId === rice.id).amount, list.find((l) => l.ingredientId === rice.id).uom], ['1.6314', 'lb']);
+  const copy = (await api('POST', `/recipes/${r.id}/duplicate`)).data;
+  assert.equal(copy.lines[0].unit, 'cup');
+  const used = (await api('GET', `/ingredients/${rice.id}/history`)).data.usedIn.recipes;
+  assert.deepEqual(used.map((u) => [u.amount, u.unit]), [['2.0000', 'cup'], ['2.0000', 'cup']]);
+
+  // Merged into another lb rice, the line stays in cups.
+  const other = (await api('POST', '/ingredients', { name: 'Cup test rice 2', uom: 'lb' })).data;
+  assert.equal((await api('POST', `/ingredients/${rice.id}/merge`, { intoId: other.id })).status, 200);
+  const merged = (await api('GET', `/recipes/${copy.id}`)).data;
+  assert.deepEqual([merged.lines[0].ingredientId, merged.lines[0].unit, merged.lines[0].amount], [other.id, 'cup', '2.0000']);
+
+  await api('DELETE', `/events/${ev.id}`);
+  for (const id of [r.id, copy.id]) await api('DELETE', `/recipes/${id}`);
+  for (const id of [chicken.id, other.id]) await api('DELETE', `/ingredients/${id}`);
 });
 
 test('a menu price set by hand stays when costs change; the margin moves instead', { skip }, async () => {
@@ -659,6 +778,17 @@ test('sauces: a container batch in oz, bunches, and items in the ingredient’s 
   const put = await api('PUT', `/blends/${sauce.data.id}`, { ...sauce.data, kind: 'spice', container: '1/2 qt', servingOz: '0.5', items: sauce.data.items });
   assert.equal(put.status, 200);
   assert.deepEqual([put.data.kind, put.data.batchSize, put.data.servings], ['sauce', '16.0000', 32]);
+  // A spice blend can become a sauce, with a container, unless a recipe measures it in grams.
+  const rub = (await api('POST', '/blends', { name: 'Taco rub', items: [] })).data;
+  const rubbed = (await api('POST', '/recipes', { name: 'Rubbed', baseServings: 1, lines: [{ blendId: rub.id, amount: 5 }] })).data;
+  const toSauce = () => api('PUT', `/blends/${rub.id}`, { name: 'Taco sauce', kind: 'sauce', container: '1 qt', servingOz: '1', items: [] });
+  const refused = await toSauce();
+  assert.equal(refused.status, 409);
+  assert.match(refused.data.error, /Rubbed/);
+  await api('DELETE', `/recipes/${rubbed.id}`);
+  const madeSauce = await toSauce();
+  assert.deepEqual([madeSauce.status, madeSauce.data.kind, madeSauce.data.container, madeSauce.data.servings], [200, 'sauce', '1 qt', 32]);
+  await api('DELETE', `/blends/${rub.id}`);
 
   const recipe = await api('POST', '/recipes', { name: 'Sauced', baseServings: 1, lines: [{ blendId: sauce.data.id, amount: 4 }] });
   const line = recipe.data.costing.lines[0];
@@ -734,11 +864,6 @@ test('test mode marks new data, and clearing it keeps whatever real data uses', 
   const paella = (await api('POST', '/recipes', { name: 'Paella', baseServings: 4, lines: [{ ingredientId: saffron.id, amount: 1 }] })).data;
   assert.equal(paella.isTest, false);
 
-  // Labor is never test data, even when added and re-rated in test mode.
-  const labor = (await api('POST', '/ingredients', { name: 'Labor', category: 'Labor', uom: 'hr', purchase: purchase(1, '20') }, test)).data;
-  assert.equal(labor.isTest, false);
-  assert.equal((await api('POST', `/ingredients/${labor.id}/purchases`, { ...purchase(1, '25'), date: '2026-07-01' }, test)).status, 201);
-
   const preview = (await api('GET', '/test-data')).data;
   assert.deepEqual(preview.deleted, { events: 1, recipes: 1, blends: 0, ingredients: 1, purchases: 1, receipts: 0 });
   assert.deepEqual(preview.kept.ingredients, ['Test saffron']);
@@ -753,22 +878,188 @@ test('test mode marks new data, and clearing it keeps whatever real data uses', 
   assert.equal((await api('GET', `/ingredients/${rice.id}`)).data.latestUnitPrice, '1.0000'); // back to the real price
   assert.equal((await api('GET', `/recipes/${paella.id}`)).status, 200);
   assert.equal((await api('GET', `/ingredients/${saffron.id}`)).data.isTest, true);
-  assert.equal((await api('GET', `/ingredients/${labor.id}`)).data.latestUnitPrice, '25.0000');
 });
 
-test('a database listing migrations this version doesn’t have is refused', { skip }, async () => {
-  const { migrate } = await import('../src/migrate.js');
-  await pool.query("INSERT INTO schema_migrations (name) VALUES ('011_test_data.sql')");
-  await assert.rejects(migrate({ log: () => {} }), /older version of food\.db \(it lists 011_test_data\.sql\)/);
-  await pool.query("DELETE FROM schema_migrations WHERE name = '011_test_data.sql'");
+test('an event price can become the recipe or sauce’s own', { skip }, async () => {
+  const taco = (await api('POST', '/recipes', { name: 'Priced taco', baseServings: 10, targetMargin: 70, lines: [{ ingredientId: ids.flour, amount: 10 }] })).data;
+  const cost = Number(taco.costing.costPerServing);
+  const res = await api('PUT', `/recipes/${taco.id}/price`, { targetPrice: '6' });
+  assert.equal(res.status, 204);
+  const saved = (await api('GET', `/recipes/${taco.id}`)).data;
+  assert.equal(saved.targetPrice, '6.00');
+  assert.equal(saved.costing.recommendedPrice, '6.00');
+  assert.equal(saved.costing.priceSet, true);
+  assert.ok(Math.abs(Number(saved.targetMargin) - (1 - cost / 6) * 100) < 0.001);
+  assert.ok(new Date(saved.updatedAt) >= new Date(taco.updatedAt));
+  // Everything else about it stays.
+  assert.deepEqual([saved.name, saved.baseServings, saved.lines.length], [taco.name, taco.baseServings, taco.lines.length]);
+
+  // Like typing it in the recipe: not below cost, not without a cost, not nothing.
+  const below = await api('PUT', `/recipes/${taco.id}/price`, { targetPrice: String(cost / 2) });
+  assert.equal(below.status, 400);
+  assert.match(below.data.error, /below the cost/);
+  for (const bad of [{ targetPrice: '0' }, { targetPrice: 'lots' }, {}]) assert.equal((await api('PUT', `/recipes/${taco.id}/price`, bad)).status, 400);
+  assert.equal((await api('GET', `/recipes/${taco.id}`)).data.targetPrice, '6.00');
+  assert.equal((await api('PUT', '/recipes/00000000-0000-0000-0000-000000000000/price', { targetPrice: '6' })).status, 404);
+
+  // An event with no price of its own follows it.
+  const ev = (await api('POST', '/events', { name: 'Follows', date: '2031-03-01', recipes: [{ recipeId: taco.id, expectedServings: 4 }] })).data;
+  await api('PUT', `/recipes/${taco.id}/price`, { targetPrice: '7' });
+  assert.equal((await api('GET', `/events/${ev.id}/summary`)).data.recipes[0].salePrice, '7.00');
+
+  const sauce = (await api('POST', '/blends', { name: 'Priced sauce', kind: 'sauce', container: '1 qt', servingOz: '2', items: [{ name: 'Water', amount: '32', unit: 'oz' }] })).data;
+  assert.equal((await api('PUT', `/blends/${sauce.id}/price`, { salePrice: '1.5' })).status, 204);
+  assert.equal((await api('GET', `/blends/${sauce.id}`)).data.salePrice, '1.50');
+  const blend = (await api('POST', '/blends', { name: 'Priced blend', items: [{ name: 'Salt', amount: '1', unit: 'tsp' }] })).data;
+  assert.equal((await api('PUT', `/blends/${blend.id}/price`, { salePrice: '1' })).status, 404); // only a sauce has one
 });
 
-test('a migration since combined into the schema is dropped, not refused', { skip }, async () => {
-  const { migrate } = await import('../src/migrate.js');
-  await pool.query("INSERT INTO schema_migrations (name) VALUES ('002_sauce_serving_oz.sql'), ('003_recipe_target_price.sql')");
-  await migrate({ log: () => {} });
-  const { rows } = await pool.query('SELECT name FROM schema_migrations ORDER BY name');
-  assert.deepEqual(rows.map((r) => r.name), ['001_schema.sql', '002_event_orders.sql', '003_order_timing.sql', '004_sauce_sale_price.sql', '005_event_serving_size.sql', '006_event_version.sql']);
+test('changes are recorded by character: each address gets one, and every change is listed', { skip }, async () => {
+  const from = (ip) => ({ 'x-forwarded-for': ip });
+  const actors = async () => (await api('GET', '/audit/actors')).data;
+  const before = await actors();
+  assert.ok(before.some((a) => a.name === 'Claude' && a.ip === null));
+
+  // Reading makes nobody a character.
+  await api('GET', '/recipes', undefined, from('203.0.113.1'));
+  assert.ok(!(await actors()).some((a) => a.ip === '203.0.113.1'));
+
+  const made = (await api('POST', '/ingredients', { name: 'Audit salt', uom: 'lb' }, from('203.0.113.1'))).data;
+  await api('PATCH', `/ingredients/${made.id}`, { name: 'Audit sea salt' }, from('203.0.113.1'));
+  await api('POST', '/ingredients', { name: 'Audit pepper', uom: 'lb' }, from('203.0.113.2'));
+  const list = await actors();
+  const one = list.find((a) => a.ip === '203.0.113.1');
+  const two = list.find((a) => a.ip === '203.0.113.2');
+  assert.ok(one && two && one.name !== two.name);
+  assert.ok(one.changes >= 2);
+
+  // The proxy's own entry counts, not one the client added before it.
+  await api('POST', '/ingredients', { name: 'Audit spoof', uom: 'lb' }, from('203.0.113.1, 203.0.113.2'));
+  assert.ok(!(await actors()).some((a) => a.ip?.includes(',')));
+
+  const log = async () => (await api('GET', '/audit/changes')).data.saves;
+  const added = (await log()).find((s) => s.changes.some((c) => c.name === 'Audit pepper'));
+  assert.equal(added.actor, two.name);
+  const renamed = (await log()).find((s) => s.changes.some((c) => c.fields.some((f) => f.to === 'Audit sea salt')));
+  assert.equal(renamed.actor, one.name);
+  assert.deepEqual(renamed.changes[0].fields.find((f) => f.field === 'name'), { field: 'name', from: 'Audit salt', to: 'Audit sea salt' });
+
+  // A refused request leaves no trace, and neither does saving a plan unchanged.
+  const count = async () => Number((await pool.query('SELECT count(*) AS n FROM audit_log')).rows[0].n);
+  const was = await count();
+  assert.equal((await api('POST', '/ingredients', { name: '' }, from('203.0.113.1'))).status, 400);
+  assert.equal(await count(), was);
+  const taco = (await api('POST', '/recipes', { name: 'Audit taco', baseServings: 4, lines: [{ ingredientId: ids.flour, amount: 1 }] })).data;
+  const ev = (await api('POST', '/events', { name: 'Audited', date: '2031-04-01', recipes: [{ recipeId: taco.id, expectedServings: 4, salePrice: '5' }] }, from('203.0.113.1'))).data;
+  await saveEvent(ev.id, { name: 'Audited', date: '2031-04-01', recipes: [{ recipeId: taco.id, expectedServings: 4, salePrice: '5' }] });
+  assert.ok(!(await log()).some((s) => s.changes.length && s.changes.every((c) => c.label === 'Event recipe' && c.action !== 'insert' && !c.fields.length)));
+  // Changing one recipe is one change, by name, though the save replaces the rows.
+  await saveEvent(ev.id, { name: 'Audited', date: '2031-04-01', recipes: [{ recipeId: taco.id, expectedServings: 9, salePrice: '5' }] });
+  const [latest] = await log();
+  assert.deepEqual(latest.changes.map((c) => [c.action, c.label, c.name]), [['update', 'Event recipe', 'Audit taco']]);
+  assert.deepEqual(latest.changes[0].fields, [{ field: 'expected servings', from: 4, to: 9 }]);
+
+  // The event page says who last edited the plan, and whether that was this same address.
+  const page = async (headers) => (await api('GET', `/events/${ev.id}`, undefined, headers)).data.lastEditedBy;
+  const version = (await api('GET', `/events/${ev.id}`)).data.version;
+  const edited = await api('PUT', `/events/${ev.id}`, { version, name: 'Audited', date: '2031-04-01', notes: 'Edited' }, from('203.0.113.2'));
+  assert.equal(edited.data.lastEditedBy.actor, two.name);
+  assert.deepEqual([(await page(from('203.0.113.2'))).you, (await page(from('203.0.113.1'))).you], [true, false]);
+  await api('PUT', `/events/${ev.id}/amounts/${ids.flour}`, { amount: 3 }, from('203.0.113.1'));
+  assert.equal((await page()).actor, one.name);
+  // A new order says who entered it, apart from who edited the plan, which is who a refused save lost out to.
+  assert.equal((await api('GET', `/events/${ev.id}`)).data.lastOrderBy, null);
+  await api('POST', `/events/${ev.id}/sales`, { paymentMethod: 'cash', items: [{ recipeId: taco.id, quantity: 1 }] }, from('203.0.113.2'));
+  const withOrder = (await api('GET', `/events/${ev.id}`)).data;
+  assert.equal(withOrder.lastOrderBy.actor, two.name);
+  assert.equal(withOrder.lastEditedBy.actor, one.name);
+
+  // Only what was deleted: a save replacing rows isn't, and deleting says who did it.
+  const doomed = (await api('POST', '/recipes', { name: 'Audit doomed', baseServings: 1, lines: [{ ingredientId: ids.flour, amount: 1 }] })).data;
+  await api('DELETE', `/recipes/${doomed.id}`, undefined, from('203.0.113.2'));
+  const removed = (await api('GET', '/audit/changes?only=deleted')).data.saves;
+  const gone = removed.find((s) => s.changes.some((c) => c.name === 'Audit doomed' && c.label === 'Recipe'));
+  assert.equal(gone.actor, two.name);
+  assert.ok(removed.every((s) => s.changes.every((c) => c.action === 'delete')));
+  // A row that's gone is still named, not shown as an id.
+  assert.equal(gone.changes.find((c) => c.label === 'Recipe line').fields.find((f) => f.field === 'recipe id').from, 'Audit doomed');
+  assert.ok(!removed.some((s) => s.changes.some((c) => c.label === 'Event recipe' && c.name === 'Audit taco')));
+
+  // Orders say who did what to them, only when asked.
+  const sale = (await api('POST', `/events/${ev.id}/sales`, { paymentMethod: 'cash', customerName: 'Ana', items: [{ recipeId: taco.id, quantity: 1 }], status: 'in_progress' }, from('203.0.113.1'))).data.sales[0];
+  await api('PATCH', `/events/${ev.id}/sales/${sale.id}`, { status: 'cancelled' }, from('203.0.113.2'));
+  assert.equal((await api('GET', `/events/${ev.id}/sales`)).data.history, undefined);
+  const { history } = (await api('GET', `/events/${ev.id}/sales?history=1`)).data;
+  assert.deepEqual(history[sale.id].map((h) => [h.what, h.actor]), [['Entered', one.name], ['Cancelled', two.name]]);
+
+  // Outside the app: its own label, or Claude when it says so.
+  await pool.query("UPDATE ingredients SET category = 'Direct' WHERE id = $1", [made.id]);
+  assert.equal((await log())[0].actor, 'Direct database change');
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query("SELECT set_config('app.actor', 'Claude', true)");
+    await c.query("UPDATE ingredients SET category = 'Manual' WHERE id = $1", [made.id]);
+    await c.query('COMMIT');
+  } finally {
+    c.release();
+  }
+  assert.equal((await log())[0].actor, 'Claude');
+  assert.equal((await actors()).find((a) => a.name === 'Claude').changes, 1);
+
+  // A character goes with a home network: rotating IPv6 addresses and devices on one LAN share it.
+  await api('POST', '/ingredients', { name: 'Audit net a', uom: 'lb' }, from('2600:4040:7aba:5f00:8938:49ac:ae92:a3fb'));
+  await api('POST', '/ingredients', { name: 'Audit net b', uom: 'lb' }, from('2600:4040:7aba:5f00:84b6:c2ba:bdc4:9c34'));
+  await api('POST', '/ingredients', { name: 'Audit net c', uom: 'lb' }, from('2600:4040:7aba:5f01::9'));
+  const nets = (await actors()).filter((a) => a.ip?.startsWith('2600:4040:7aba'));
+  assert.deepEqual(nets.map((a) => a.ip).sort(), ['2600:4040:7aba:5f00::/64', '2600:4040:7aba:5f01::/64']);
+  assert.equal(nets.find((a) => a.ip.includes('5f00')).changes, 2);
+  const { isLocalProxy, networkOf } = await import('../src/audit.js');
+  for (const [ip, network] of [
+    ['2600:4040:7aba:5f00:8938:49ac:ae92:a3fb', '2600:4040:7aba:5f00::/64'], ['2600:40:0:5::1', '2600:40:0:5::/64'], ['2600:40::1', '2600:40:0:0::/64'],
+    ['2600:0040:0000:0005:1:2:3:4', '2600:40:0:5::/64'], ['192.168.1.20', '192.168.1.0/24'], ['::ffff:192.168.1.7', '192.168.1.0/24'], ['10.1.2.3', '10.1.2.0/24'],
+    // A public IPv4 is already a network; Tailscale's say which device, not where.
+    ['203.0.113.1', '203.0.113.1'], ['100.125.65.89', '100.125.65.89'], ['fd7a:115c:a1e0::abcd', 'fd7a:115c:a1e0::abcd'], ['172.18.0.1', '172.18.0.1'], ['::1', '::1'],
+  ]) assert.equal(networkOf(ip), network, ip);
+  for (const addr of ['127.0.0.1', '::1', '::ffff:172.18.0.1', '172.31.0.1']) assert.ok(isLocalProxy(addr), addr);
+  for (const addr of ['192.168.1.20', '100.125.65.89', '203.0.113.1', '172.32.0.1', '8.8.8.8']) assert.ok(!isLocalProxy(addr), addr);
+});
+
+test('a deal entered for a recipe is remembered for its next event', { skip }, async () => {
+  const taco = (await api('POST', '/recipes', { name: 'Deal taco', baseServings: 10, lines: [{ ingredientId: ids.flour, amount: 1 }] })).data;
+  assert.deepEqual([taco.dealQty, taco.dealPrice], [null, null]);
+  const memory = async () => { const r = (await api('GET', `/recipes/${taco.id}`)).data; return [r.dealQty, r.dealPrice]; };
+  const event = async (name) => (await api('POST', '/events', { name, date: '2031-02-01', recipes: [{ recipeId: taco.id, expectedServings: 9 }] })).data;
+  const save = (ev, recipe) => saveEvent(ev.id, { name: ev.name, date: ev.date, recipes: [{ recipeId: taco.id, expectedServings: 9, ...recipe }] });
+
+  const first = await event('First');
+  await save(first, { dealQty: '3', dealPrice: '15' });
+  assert.deepEqual(await memory(), [3, '15.00']);
+  const second = await event('Second');
+  assert.equal((await api('GET', `/events/${second.id}`)).data.recipes[0].dealQty, null); // offered on ticking, not applied
+  // Another event's deal replaces it, and resaving the first event's plan doesn't bring that one back.
+  await save(second, { dealQty: '2', dealPrice: '11' });
+  assert.deepEqual(await memory(), [2, '11.00']);
+  await save(first, { dealQty: '3', dealPrice: '15' });
+  assert.deepEqual(await memory(), [2, '11.00']);
+  // Removing a deal from an event leaves it remembered; so does a copy of the recipe.
+  await save(second, { dealQty: '', dealPrice: '' });
+  assert.deepEqual(await memory(), [2, '11.00']);
+  const copy = (await api('POST', `/recipes/${taco.id}/duplicate`)).data;
+  assert.deepEqual([copy.dealQty, copy.dealPrice], [2, '11.00']);
+  // Unticked before the autosave ran: said outright, whether or not the event ever saved it.
+  assert.equal((await api('PUT', `/recipes/${taco.id}/deal`, { dealQty: '3', dealPrice: '15' })).status, 204);
+  assert.deepEqual(await memory(), [3, '15.00']);
+  for (const bad of [{ dealQty: '1', dealPrice: '5' }, { dealQty: '3', dealPrice: '0' }, { dealQty: '3' }, { dealPrice: '5' }]) {
+    assert.equal((await api('PUT', `/recipes/${taco.id}/deal`, bad)).status, 400);
+  }
+  assert.deepEqual(await memory(), [3, '15.00']);
+  await api('PUT', `/recipes/${taco.id}/deal`, { dealQty: '2', dealPrice: '11' });
+  // Test mode remembers too: a deal set there is just as much the latest one entered.
+  await api('POST', `/events/${second.id}/recipes`, { recipeId: taco.id, expectedServings: 9, dealQty: '3', dealPrice: '14' }, { 'x-test-data': '1' });
+  assert.deepEqual(await memory(), [3, '14.00']);
+  await api('PUT', `/recipes/${taco.id}/deal`, { dealQty: '4', dealPrice: '18' }, { 'x-test-data': '1' });
+  assert.deepEqual(await memory(), [4, '18.00']);
 });
 
 test('event versions: a save from an old copy of the plan is refused and changes nothing', { skip }, async () => {
@@ -805,14 +1096,14 @@ test('event versions: a save from an old copy of the plan is refused and changes
   assert.equal((await api('PUT', '/events/00000000-0000-0000-0000-000000000000', { ...base, version: 1 })).status, 404);
 });
 
-test('dashboard: upcoming events in date order, figures leave out test data and cancelled orders', { skip }, async () => {
+test('dashboard: upcoming events in date order, test ones too; figures leave out test data and cancelled orders', { skip }, async () => {
   const today = '2031-06-15';
   const get = async (headers) => (await api('GET', `/dashboard?today=${today}`, undefined, headers)).data;
   const before = await get();
   const r = (await api('POST', '/recipes', { name: 'Dash taco', baseServings: 10, lines: [{ ingredientId: ids.flour, amount: 1 }] })).data;
   const event = (name, on, headers) => api('POST', '/events', { name, date: on, recipes: [{ recipeId: r.id, expectedServings: 8 }] }, headers);
-  const later = (await event('Later', '2031-07-01')).data;
-  const soon = (await event('Today', today)).data;
+  await event('Later', '2031-07-01');
+  await event('Today', today);
   const past = (await event('Last week', '2031-06-08')).data;
   await event('Old', '2031-01-01');
   await event('Pretend', '2031-06-16', { 'x-test-data': '1' });
@@ -825,10 +1116,11 @@ test('dashboard: upcoming events in date order, figures leave out test data and 
   await api('POST', '/ingredients/purchase', { items: [{ name: 'Dash pepper', uom: 'lb', date: '2031-01-10', quantity: 1, packSize: 1, unitCost: '9' }] });
 
   const d = await get();
-  assert.deepEqual(d.upcomingEvents.map((e) => e.id).slice(0, 2), [soon.id, later.id]);
+  assert.deepEqual(d.upcomingEvents.map((e) => e.name).slice(0, 3), ['Today', 'Pretend', 'Later']);
+  assert.equal(d.upcomingEvents[1].isTest, true);
   assert.equal(d.upcomingEvents[0].recipeCount, 1);
   assert.equal(d.upcomingEvents[0].totalServings, 8);
-  assert.equal(d.upcoming, before.upcoming + 2);
+  assert.equal(d.upcoming, before.upcoming + 3);
   assert.equal(d.events, before.events + 4);
   assert.equal(d.recipes, before.recipes + 1);
   assert.ok(Number(d.averageMargin) > 0);
@@ -839,11 +1131,47 @@ test('dashboard: upcoming events in date order, figures leave out test data and 
   assert.equal(Number(d.sales.revenue), Number(before.sales.revenue) + lineAmount);
   assert.equal(Number(d.spend.spent), Number(before.spend.spent) + 6); // the January purchase is too old
   assert.equal(d.spend.trips, before.spend.trips + 1);
-  assert.equal(d.ingredients, before.ingredients + 2);
+  assert.equal('ingredients' in d, false);
+
+  // By day: the purchase with no receipt stays off the line, and an entered actual revenue beats recorded sales.
+  const fd = new FormData();
+  fd.append('vendor', 'Depot');
+  fd.append('date', '2031-06-11');
+  const receipt = await (await fetch(`${base}/receipts`, { method: 'POST', body: fd })).json();
+  await api('POST', '/ingredients/purchase', { receiptId: receipt.id, items: [{ ingredientId: ids.flour, date: '2031-06-11', quantity: 2, packSize: 50, unitCost: '10' }] });
+  const entered = (await event('Entered', '2031-05-01')).data;
+  await saveEvent(entered.id, { name: 'Entered', date: '2031-05-01', actualRevenue: '123.45' });
+  await api('POST', `/events/${entered.id}/sales`, { paymentMethod: 'cash', status: 'completed', items: [{ recipeId: r.id, quantity: 1 }] });
+  const free = await api('POST', `/events/${past.id}/sales`, { paymentMethod: 'free', status: 'completed', items: [{ recipeId: r.id, quantity: 50 }] });
+  assert.equal(free.status, 201);
+  const after = await get();
+  const day = (on) => after.days.find((x) => x.date === on);
+  assert.deepEqual(day('2031-06-11'), { date: '2031-06-11', purchases: '20.00', revenue: null });
+  assert.deepEqual(day('2031-06-08'), { date: '2031-06-08', purchases: null, revenue: Number(lineAmount).toFixed(2) });
+  assert.deepEqual(day('2031-05-01'), { date: '2031-05-01', purchases: null, revenue: '123.45' });
+  assert.equal(day('2031-06-10'), undefined); // no receipt
+  assert.equal(day('2031-07-01'), undefined); // nothing yet
+  assert.deepEqual(after.days.map((x) => x.date), after.days.map((x) => x.date).slice().sort());
+  // Sold, not given away or cancelled: 2 at the past event and 1 at the other.
+  assert.equal(after.topItems.find((x) => x.recipeId === r.id).sold, 3);
+  assert.deepEqual(after.topItems.map((x) => x.sold), after.topItems.map((x) => x.sold).slice().sort((a, b) => b - a));
+
+  // "3 tacos for $14" counts 3 tacos a sale; a deal already counts each serving; a later change of size rewrites nothing.
+  const taco = (await api('POST', '/recipes', { name: 'Dash pack taco', baseServings: 30, totalYield: 30, yieldUnit: 'tacos', lines: [{ ingredientId: ids.flour, amount: 1 }] })).data;
+  const packs = (await api('POST', '/events', { name: 'Packs', date: '2031-06-09', recipes: [{ recipeId: taco.id, expectedServings: 10, salePrice: '14', servingSize: '3' }] })).data;
+  await api('POST', `/events/${packs.id}/sales`, { paymentMethod: 'cash', status: 'completed', items: [{ recipeId: taco.id, quantity: 2 }] });
+  const soldOf = async () => (await get()).topItems.find((x) => x.recipeId === taco.id)?.sold;
+  assert.equal(await soldOf(), 6);
+  await saveEvent(packs.id, { name: 'Packs', date: '2031-06-09', recipes: [{ recipeId: taco.id, expectedServings: 10, salePrice: '6', servingSize: '', dealQty: '3', dealPrice: '15' }] });
+  assert.equal(await soldOf(), 6);
+  await api('POST', `/events/${packs.id}/sales`, { paymentMethod: 'cash', status: 'completed', items: [{ recipeId: taco.id, quantity: 3 }] });
+  assert.equal(await soldOf(), 9);
+  // The orders themselves still count what was rung up.
+  assert.equal((await api('GET', `/events/${packs.id}/sales`)).data.totals.sold, 5);
 
   // In test mode, test data counts too.
   const inTest = await get({ 'x-test-data': '1' });
-  assert.equal(inTest.upcoming, d.upcoming + 1);
+  assert.equal(inTest.upcoming, d.upcoming);
   assert.equal(inTest.upcomingEvents.find((e) => e.name === 'Pretend').isTest, true);
 
   assert.equal((await api('GET', '/dashboard?today=nope')).status, 400);
@@ -925,8 +1253,6 @@ test('duplicate suggestions, "not the same", and merging with a conversion', { s
   assert.match(noFactor.data.error, /How many lb is 1 box of Sugar/);
   assert.equal((await merge({ factor: 0 })).status, 400);
   assert.equal((await api('POST', `/ingredients/${kept.id}/merge`, { intoId: kept.id })).status, 400);
-  const labor = (await api('GET', '/ingredients?q=Labor')).data.find((i) => i.name === 'Labor');
-  assert.match((await api('POST', `/ingredients/${kept.id}/merge`, { intoId: labor.id })).data.error, /Labor/);
 
   // 1 box = 1.5 lb. The preview changes nothing.
   const preview = await merge({ factor: '1.5', dryRun: true });
@@ -1011,9 +1337,8 @@ test('a generic receipt name is only suggested, never matched automatically', { 
   assert.deepEqual(created.data.createdIngredients.map((c) => c.name), ['Grocery']);
   await api('DELETE', `/ingredients/${created.data.createdIngredients[0].id}`);
 
-  // The drawer marks it (the alias now points at the last choice).
-  const aliases = (await api('GET', `/ingredients/${chickpea}/history`)).data.aliases;
-  assert.deepEqual(aliases.map((a) => [a.alias, a.ambiguous]), [['Grocery', true]]);
+  // "Grocery" says nothing about what was bought, so it was never kept as a receipt name for either.
+  for (const id of [leg, chickpea]) assert.deepEqual((await api('GET', `/ingredients/${id}/history`)).data.aliases, []);
 
   // An ordinary receipt name still matches by itself, unless it's on several lines of the new receipt.
   await api('POST', '/ingredients/purchase', { items: [{ ingredientId: leg, alias: 'CHK LEG', quantity: 1, totalCost: 4 }] });
@@ -1024,6 +1349,53 @@ test('a generic receipt name is only suggested, never matched automatically', { 
   // Identical lines are combined into one first, so they still match.
   const same = (await api('POST', '/ingredients/import-receipt', { items: [{ name: 'CHK LEG', price: 4 }, { name: 'CHK LEG', price: 4 }] })).data.items;
   assert.deepEqual(same.map((i) => i.match?.name), ['Chicken leg']);
+});
+
+test('receipt cleanup: unit spelling, generic receipt names, a receipt imported twice, correcting a purchase', { skip }, async () => {
+  // Units are stored one way, so "Lb" and "lb" can't be two units.
+  const made = (await api('POST', '/ingredients/purchase', { items: [{ name: 'Cleanup onion', uom: 'Lbs', quantity: '2.66', unitCost: '1.99', totalCost: '5.29' }] })).data;
+  const onion = made.purchases[0].ingredientId;
+  assert.equal(made.purchases[0].uom, 'lb');
+  assert.equal((await api('PATCH', `/ingredients/${onion}`, { uom: 'LB' })).data.uom, 'lb');
+  assert.equal((await api('POST', '/ingredients/purchase', { items: [{ ingredientId: onion, uom: 'pound', quantity: 1, totalCost: 2 }] })).status, 201);
+
+  // Packs × pack price has to agree with the total: a count typed over a weight is refused.
+  const bad = await api('POST', '/ingredients/purchase', { items: [{ ingredientId: onion, quantity: 5, unitCost: '4.99', totalCost: '1.05' }] });
+  assert.equal(bad.status, 400);
+  assert.match(bad.data.error, /5 × \$4\.99 is \$24\.95, but the total is \$1\.05/);
+
+  // Correcting a saved purchase: new packs keep the total; a new pack price works out the total; both must agree.
+  const id = made.purchases[0].id;
+  const fix = (body) => api('PATCH', `/ingredients/${onion}/purchases/${id}`, body);
+  let p = (await fix({ quantity: '2' })).data;
+  assert.deepEqual([p.quantity, p.unitCost, p.totalCost], ['2.0000', '2.6450', '5.2900']);
+  p = (await fix({ quantity: '2.66', unitCost: '1.99' })).data;
+  assert.deepEqual([p.quantity, p.unitCost, p.totalCost], ['2.6600', '1.9900', '5.2934']);
+  assert.equal((await fix({ unitCost: '1.99', totalCost: '9' })).status, 400);
+
+  // A generic receipt name is never kept, and one kept before this rule doesn't resolve.
+  const saved = (await api('POST', '/ingredients/purchase', { items: [{ ingredientId: onion, alias: 'MEAT', quantity: 1, totalCost: 2 }] })).data;
+  assert.deepEqual(saved.aliasesSaved, []);
+  await pool.query("INSERT INTO ingredient_aliases (ingredient_id, alias) VALUES ($1, 'PRODUCE')", [onion]);
+  assert.equal((await api('POST', '/ingredients/import-receipt', { items: [{ name: 'PRODUCE', price: 3 }] })).data.items[0].match, null);
+
+  // The same store, day and lines again: the import says so.
+  const source = { vendor: 'Twice Market', date: '2031-02-03', items: [{ name: 'CILANTRO MEX', price: 1.25 }, { name: 'LIMES', price: 2 }] };
+  assert.deepEqual((await api('POST', '/ingredients/import-receipt', source)).data.alreadyImported, []);
+  const fd = new FormData();
+  fd.append('vendor', 'Twice Market');
+  fd.append('date', '2031-02-03');
+  fd.append('source', JSON.stringify(source));
+  const first = (await api('POST', '/receipts', fd)).data;
+  const again = (await api('POST', '/ingredients/import-receipt', source)).data;
+  assert.deepEqual(again.alreadyImported.map((r) => [r.id, r.vendor, r.date]), [[first.id, 'Twice Market', '2031-02-03']]);
+  const other = (await api('POST', '/ingredients/import-receipt', { ...source, items: [{ name: 'BREAD', price: 3 }] })).data;
+  assert.deepEqual(other.alreadyImported, []);
+
+  // A strong suggestion is marked: every word of the ingredient's name is on the receipt.
+  const cilantro = (await api('POST', '/ingredients/purchase', { items: [{ name: 'Cleanup cilantro', uom: 'bunch', quantity: 1, totalCost: 1 }] })).data.purchases[0].ingredientId;
+  const line = (await api('POST', '/ingredients/import-receipt', { items: [{ name: 'CLEANUP CILANTRO MEX', price: 1.25 }] })).data.items[0];
+  assert.deepEqual([line.candidates[0].id, line.candidates[0].strong], [cilantro, true]);
 });
 
 test('several lines of one ingredient on one receipt are one averaged price, not a price change', { skip }, async () => {

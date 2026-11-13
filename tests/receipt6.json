@@ -1,0 +1,148 @@
+{
+  "store": {
+    "name": "SUPREMO FOOD MARKET",
+    "address": "1100 Main St"
+  },
+  "transaction": {
+    "date": "2026-11-04",
+    "time": "10:41:07",
+    "register": 3
+  },
+  "sections": {
+    "Tortilleria": [
+      {
+        "item": "MISSION WHITE CORN TORTILLAS 30CT",
+        "quantity": 1,
+        "unit_price": 3.29,
+        "price": 3.29
+      },
+      {
+        "item": "TORTILLAS FLOUR 10CT",
+        "quantity": 1,
+        "unit_price": 2.99,
+        "price": 2.99
+      },
+      {
+        "item": "TORTILLA DE MAIZ 80CT",
+        "quantity": 1,
+        "unit_price": 4.99,
+        "price": 4.99
+      },
+      {
+        "item": "GUERRERO WHITE CORN",
+        "quantity": 1,
+        "unit_price": 3.49,
+        "price": 3.49
+      }
+    ],
+    "Produce": [
+      {
+        "item": "CILANTRO",
+        "quantity": 3,
+        "unit_price": 0.5,
+        "price": 1.5
+      },
+      {
+        "item": "LIMES",
+        "quantity": 10,
+        "unit_price": 0.25,
+        "price": 2.5
+      },
+      {
+        "item": "LIMON PERSA",
+        "quantity": 6,
+        "unit_price": 0.33,
+        "price": 1.98
+      },
+      {
+        "item": "TOMATO ROMA",
+        "weight": "1.84 lb",
+        "unit_price": 1.45,
+        "price": 2.67
+      },
+      {
+        "item": "TOMATILLO",
+        "weight": "1.12 lb",
+        "unit_price": 1.6,
+        "price": 1.79
+      },
+      {
+        "item": "ONION WHITE JUMBO",
+        "weight": "2.31 lb",
+        "unit_price": 0.89,
+        "price": 2.04
+      },
+      {
+        "item": "JALAPENO",
+        "weight": "0.45 lb",
+        "unit_price": 1.59,
+        "price": 0.71
+      },
+      {
+        "item": "AVOCADO HASS",
+        "quantity": 4,
+        "unit_price": 0.99,
+        "price": 3.96
+      }
+    ],
+    "Dairy": [
+      {
+        "item": "QUESO COTIJA",
+        "quantity": 1,
+        "unit_price": 4.99,
+        "price": 4.99
+      },
+      {
+        "item": "CREMA MEXICANA",
+        "quantity": 1,
+        "unit_price": 3.79,
+        "price": 3.79
+      }
+    ],
+    "Meat": [
+      {
+        "item": "CHICKEN LEG QTR 10LB",
+        "quantity": 1,
+        "unit_price": 9.9,
+        "price": 9.9
+      },
+      {
+        "item": "CHICKEN BREAST BNLS",
+        "weight": "2.32 lb",
+        "unit_price": 4.75,
+        "price": 11.02
+      },
+      {
+        "item": "CARNE MOLIDA",
+        "weight": "2.04 lb",
+        "unit_price": 4.5,
+        "price": 9.18
+      },
+      {
+        "item": "MEAT",
+        "quantity": 1,
+        "unit_price": 12.0,
+        "price": 12.0
+      }
+    ],
+    "Grocery": [
+      {
+        "item": "SUGAR 4LB",
+        "quantity": 1,
+        "unit_price": 3.69,
+        "price": 3.69
+      },
+      {
+        "item": "TOMATO SAUCE 8OZ",
+        "quantity": 3,
+        "unit_price": 0.59,
+        "price": 1.77
+      }
+    ]
+  },
+  "totals": {
+    "subtotal": 88.25,
+    "tax": 0,
+    "total": 88.25
+  }
+}

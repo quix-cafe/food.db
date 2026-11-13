@@ -100,13 +100,19 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   const id = uuid(req.params.id, 'id');
-  // A blend stays a blend and a sauce a sauce: recipes measure them in g and oz.
+  // A sauce stays a sauce, but a spice blend can become one ({ kind: 'sauce' } with its container),
+  // unless a recipe uses it: recipes measure a blend in g and a sauce in oz.
   const { rows: [current] } = await query('SELECT kind FROM spice_blends WHERE id = $1', [id]);
   if (!current) throw notFound('Spice blend');
-  const f = blendFields({ ...req.body, kind: current.kind });
+  const kind = current.kind === 'spice' && req.body?.kind === 'sauce' ? 'sauce' : current.kind;
+  if (kind !== current.kind) {
+    const { rows: used } = await query('SELECT DISTINCT r.name FROM recipe_ingredients ri JOIN recipes r ON r.id = ri.recipe_id WHERE ri.blend_id = $1 ORDER BY r.name', [id]);
+    if (used.length) throw new HttpError(409, `It can’t become a sauce while ${used.map((r) => r.name).join(', ')} use${used.length === 1 ? 's' : ''} it as a spice blend. Take it out of ${used.length === 1 ? 'that recipe' : 'those recipes'} first.`);
+  }
+  const f = blendFields({ ...req.body, kind });
   try {
     await tx(async (c) => {
-      const { rowCount } = await c.query('UPDATE spice_blends SET name=$2, container=$3, notes=$4, servings=$5, serving_oz=$6, sale_price=$7, updated_at=now() WHERE id=$1', [id, f.name, f.container, f.notes, f.servings, f.servingOz, f.salePrice]);
+      const { rowCount } = await c.query('UPDATE spice_blends SET name=$2, container=$3, notes=$4, servings=$5, serving_oz=$6, sale_price=$7, kind=$8, updated_at=now() WHERE id=$1', [id, f.name, f.container, f.notes, f.servings, f.servingOz, f.salePrice, f.kind]);
       if (!rowCount) throw notFound('Spice blend');
       await writeItems(c, id, f.items);
     });
@@ -125,6 +131,15 @@ router.delete('/:id', async (req, res) => {
     if (fkViolation(err)) throw new HttpError(409, 'This is used in a recipe or an event. Remove it from those first.');
     throw err;
   }
+  res.status(204).end();
+});
+
+// A sauce's own price per serving, set from elsewhere than its editor.
+router.put('/:id/price', async (req, res) => {
+  const id = uuid(req.params.id, 'id');
+  const price = number(req.body?.salePrice, 'Sale price', { required: true, min: 0, minExclusive: true });
+  const { rowCount } = await query("UPDATE spice_blends SET sale_price = $2, updated_at = now() WHERE id = $1 AND kind = 'sauce'", [id, price]);
+  if (!rowCount) throw notFound('Sauce');
   res.status(204).end();
 });
 

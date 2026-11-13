@@ -201,7 +201,7 @@ test('thumbnails are small JPEGs, made once and removed with their image', { ski
   const pngBytes = await big.getBuffer('image/png');
   const recipe = (await api('POST', '/recipes', { name: 'Pie', baseServings: 8 })).data;
   const [img, broken] = (await api('POST', `/recipes/${recipe.id}/images`, form([['pie.png', pngBytes, 'image/png'], ['b.jpg', JPEG, 'image/jpeg']]))).data;
-  assert.equal(img.thumbUrl, `/api/images/${img.id}/thumb`);
+  assert.match(img.thumbUrl, new RegExp(`^/api/images/${img.id}/thumb\\?v=\\w{8}$`));
 
   const origin = base.replace('/api', '');
   const res = await fetch(origin + img.thumbUrl);
@@ -256,4 +256,38 @@ test('compressing resamples photos over a size and leaves the rest', { skip }, a
   const { rows: [row] } = await pool.query('SELECT size_bytes FROM images WHERE id = $1', [big.id]);
   assert.equal(row.size_bytes, results[0].after);
   await api('DELETE', `/recipes/${recipe.id}`);
+});
+
+test('turning a photo a quarter turn either way rewrites it under new URLs', { skip }, async () => {
+  const { createJimp } = await import('@jimp/core');
+  const { default: png } = await import('@jimp/js-png');
+  const Jimp = createJimp({ formats: [png] });
+  // 30 × 20, red in the top-left corner and white elsewhere.
+  const pic = new Jimp({ width: 30, height: 20, color: 0xffffffff });
+  pic.setPixelColor(0xff0000ff, 0, 0);
+  const receipt = (await api('POST', '/receipts', form([['r.png', await pic.getBuffer('image/png'), 'image/png'], ['b.jpg', JPEG, 'image/jpeg']], { vendor: 'Turned', date: '2026-10-03', source: '{"time":"7:05 pm"}' }))).data;
+  assert.equal(receipt.time, '19:05');
+  assert.equal((await api('GET', '/receipts')).data.find((r) => r.id === receipt.id).time, '19:05');
+  const [img, broken] = receipt.images;
+  const files = (await filesOnDisk()).length;
+  const origin = base.replace('/api', '');
+  const fetched = async (url) => Jimp.fromBuffer(Buffer.from(await (await fetch(origin + url)).arrayBuffer()));
+
+  const right = await api('POST', `/images/${img.id}/rotate`, { direction: 'right' });
+  assert.equal(right.status, 200);
+  assert.notEqual(right.data.url, img.url);
+  let turned = await fetched(right.data.url);
+  assert.deepEqual([turned.bitmap.width, turned.bitmap.height], [20, 30]);
+  assert.equal(turned.getPixelColor(19, 0), 0xff0000ff); // top-left goes to top-right
+
+  const left = await api('POST', `/images/${img.id}/rotate`, { direction: 'left' });
+  turned = await fetched(left.data.url);
+  assert.deepEqual([turned.bitmap.width, turned.bitmap.height], [30, 20]);
+  assert.equal(turned.getPixelColor(0, 0), 0xff0000ff); // and back
+  assert.equal((await filesOnDisk()).length, files); // each replaced the file before it
+  assert.deepEqual((await api('GET', `/receipts/${receipt.id}`)).data.images.map((i) => i.url), [left.data.url, broken.url]);
+
+  assert.equal((await api('POST', `/images/${img.id}/rotate`, { direction: 'up' })).status, 400);
+  assert.equal((await api('POST', `/images/${broken.id}/rotate`, { direction: 'left' })).status, 400);
+  await api('DELETE', `/receipts/${receipt.id}`);
 });

@@ -50,6 +50,17 @@ export function unitsForName(name) {
   return FRESH_GARLIC.test(String(name ?? '')) ? ['clove'] : [];
 }
 
+/**
+ * How an ingredient's unit of measure is stored, so "Lb", "LBS" and "lb" are one unit: a kitchen
+ * unit's own name, "each" for ea/ct/pc, anything else lowercased ("Box" → "box"). Null when blank.
+ */
+export function canonicalUom(unit) {
+  const u = String(unit ?? '').trim().replace(/\s+/g, ' ');
+  if (!u) return null;
+  if (/^(ea|each|ct|pc|pcs|piece|pieces|count)$/i.test(u)) return 'each';
+  return normalizeUnit(u) ?? u.toLowerCase();
+}
+
 /** Canonical unit name ("Tablespoons" → "tbsp"), or null when it isn't a known kitchen unit. */
 export function normalizeUnit(unit) {
   let u = String(unit ?? '').trim().toLowerCase().replace(/\.$/, '');
@@ -97,6 +108,63 @@ export function unitRatio(from, to) {
   return kind(f) === 'volume' ? new Decimal(TSP[f]).div(TSP[t]) : new Decimal(GRAMS[f]).div(GRAMS[t]);
 }
 
+/** Kitchen units a recipe line can be measured in, by kind. */
+const RECIPE_UNITS = { weight: ['oz', 'lb', 'g', 'kg'], volume: ['tsp', 'tbsp', 'cup', 'fl oz', 'pt', 'qt', 'gal', 'ml', 'l'] };
+
+/**
+ * What one cup of an ingredient weighs, in grams, when it doesn't say: a few dry goods and
+ * liquids by name (rice about 185 g), else null. Liquids come first, so "Rice vinegar" is a liquid.
+ */
+const CUP_GRAMS_BY_NAME = [
+  [/\b(water|milk|stock|broth|vinegar|juice|cream)\b/i, 240], [/\boil\b/i, 218],
+  [/\bflour\b/i, 125], [/\bbrown sugar\b/i, 220], [/\bpowdered sugar\b/i, 120], [/\bsugar\b/i, 200],
+  [/\brice\b(?!.*\b(noodles?|paper|cakes?)\b)/i, 185], [/\bquinoa\b/i, 170], [/\blentils?\b/i, 190],
+  [/\b(oats?|oatmeal)\b/i, 90], [/\b(dried beans?|chickpeas?|chick peas)\b/i, 180], [/\bsalt\b/i, 290],
+];
+export function estimatedCupGrams(name) {
+  const hit = CUP_GRAMS_BY_NAME.find(([re]) => re.test(String(name ?? '')));
+  return hit ? hit[1] : null;
+}
+
+/** What a cup of the ingredient weighs: its own `cupGrams`, else estimatedCupGrams by name; null when unknown. */
+export const cupGramsOf = ({ cupGrams = null, name = null } = {}) => toDecimal(cupGrams) ?? (estimatedCupGrams(name) === null ? null : new Decimal(estimatedCupGrams(name)));
+
+/**
+ * A recipe line's `amount` in `unit` (null or blank: the ingredient's own) as the ingredient's
+ * `uom`: the same unit as is, weight↔weight and volume↔volume exactly, and weight↔volume through
+ * what a cup of it weighs (cupGramsOf: rice bought by the lb and used by the cup). Null when it
+ * can't be worked out.
+ */
+export function lineAmountInUom(amount, unit, ingredient = {}) {
+  const a = toDecimal(amount);
+  const { uom = null } = ingredient;
+  if (a === null) return null;
+  if (!String(unit ?? '').trim() || sameUnit(unit, uom)) return a;
+  const ratio = unitRatio(unit, uom);
+  if (ratio) return a.times(ratio);
+  const f = normalizeUnit(unit);
+  const t = normalizeUnit(uom);
+  const kinds = new Set([f && kind(f), t && kind(t)]);
+  if (!kinds.has('weight') || !kinds.has('volume')) return null;
+  const cup = cupGramsOf(ingredient);
+  return cup ? convertUnits(a, f, t, cup.div(TSP.cup)) : null;
+}
+
+/**
+ * The units a recipe line of this ingredient can be measured in: its own unit first, then the
+ * kitchen units of the same kind, then (when a cup of it has a weight) those of the other kind.
+ * Only its own for a unit kitchen measures don't reach (each, box).
+ */
+export function recipeUnits(ingredient = {}) {
+  const own = ingredient.uom ?? 'each';
+  const k = normalizeUnit(own) && kind(normalizeUnit(own));
+  if (k !== 'weight' && k !== 'volume') return [own];
+  const other = k === 'weight' ? 'volume' : 'weight';
+  const units = [own, ...RECIPE_UNITS[k].filter((u) => u !== normalizeUnit(own))];
+  if (cupGramsOf(ingredient)) units.push(...RECIPE_UNITS[other]);
+  return units;
+}
+
 /** Parse "1 1/2", "3/4", "½" or "0.5" into a Decimal; null if it isn't an amount. */
 export function parseAmount(text) {
   const s = String(text ?? '').trim()
@@ -110,6 +178,18 @@ export function parseAmount(text) {
     d = d.plus(new Decimal(m[2]).div(m[3]));
   }
   return d;
+}
+
+/**
+ * Amounts ("1 1/2", "30") for a new size per serving: a bigger serving takes proportionally more of
+ * everything, so cost per serving follows. Unchanged unless both sizes are above 0, or for an
+ * amount that isn't a number yet.
+ */
+export function scaleAmounts(amounts, fromSize, toSize) {
+  const from = parseAmount(fromSize);
+  const to = parseAmount(toSize);
+  if (!from?.gt(0) || !to?.gt(0)) return amounts;
+  return amounts.map((a) => parseAmount(a)?.times(to).div(from).toDecimalPlaces(4).toString() ?? a);
 }
 
 /** One of a unit kitchen measures can't reach is taken to weigh about this: a box 750 g, a small fresh chili 2 g, anything else (can, jar, each) 75 g like a bunch. */

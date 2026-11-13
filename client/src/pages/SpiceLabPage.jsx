@@ -80,7 +80,7 @@ export default function SpiceLabPage() {
         </div>
         <div className="form-actions">
           <Link className="btn orange" to="/spice-lab/new-sauce"><Icon.plus /> New sauce</Link>
-          <Link className="btn primary" to="/spice-lab/new"><Icon.plus /> New blend</Link>
+          <Link className="btn primary" to="/spice-lab/new"><Icon.plus /> New Spice Blend</Link>
         </div>
       </div>
       {error && <Notice kind="error">{error.message}</Notice>}
@@ -154,7 +154,7 @@ const amountProblem = (it) => { const a = parseAmount(it.amount); return !a || a
 /** A sauce's serving size in oz: above 0 and no more than its container. */
 const servingProblem = (f) => { const s = toDecimal(f.servingOz); return !s || s.lte(0) || s.gt(SAUCE_CONTAINERS[f.container] ?? 0); };
 
-/** Edits a spice blend, or a sauce (`kind="sauce"` for a new one; a saved one keeps its kind). */
+/** Edits a spice blend, or a sauce (`kind="sauce"` for a new one). A saved blend can be made a sauce; a sauce stays one. */
 export function BlendEditor({ kind: newKind = 'spice' }) {
   const { id } = useParams();
   const blank = useMemo(() => blankFor(newKind), [newKind]);
@@ -175,6 +175,8 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
   }));
   const [needed, setNeeded] = useState('1'); // servings to scale to; never saved
   const [makeQt, setMakeQt] = useState(null); // a sauce's quarts to scale to; null: one container. Never saved
+  const [savedKind, setSavedKind] = useState(newKind); // what it is on the server, while the form may be turning it into a sauce
+  const [asBlend, setAsBlend] = useState(null); // the form as a blend, kept while it's being made a sauce
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -193,6 +195,7 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
         const f = fromServer(b);
         setForm(f);
         setSaved(savedShape(f));
+        setSavedKind(f.kind);
         setNeeded(f.servings);
         setMakeQt(null);
       })
@@ -279,6 +282,7 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
       const f = fromServer(b);
       setForm(f);
       setSaved(savedShape(f));
+      setSavedKind(f.kind);
       notifyDataChanged();
       toast(id ? `${sauce ? 'Sauce' : 'Blend'} saved` : `${sauce ? 'Sauce' : 'Blend'} created`);
       if (!id) {
@@ -330,10 +334,17 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
         </div>
         <div className="form-actions">
           {id && <button className="btn ghost" onClick={() => setDeleting(true)}><Icon.trash /> Delete</button>}
+          {id && savedKind === 'spice' && (sauce
+            ? <button className="btn ghost" onClick={() => { setMakeQt(null); setForm((f) => ({ ...asBlend, name: f.name, notes: f.notes, items: f.items })); }}>Keep it a spice blend</button>
+            : <button className="btn orange" title="Sell it by the container on events, as a sauce. Saving makes it one; a sauce can’t go back to a blend."
+              onClick={() => { setMakeQt(null); setAsBlend(form); setForm((f) => ({ ...f, kind: 'sauce', container: '1 qt', servingOz: '1', salePrice: '' })); }}>Make it a sauce</button>)}
           <SaveButton dirty={dirty} saving={saving} disabled={!dirty || saving || problems} onClick={save} isNew={!id} createLabel={`Create ${thing}`} />
         </div>
       </div>
       {saveError && <Notice kind="error">{saveError}</Notice>}
+      {sauce && savedKind === 'spice' && id && (
+        <Notice>Pick the container the amounts below fill and the serving size, then save to make this spice blend a sauce. A sauce can’t be turned back into a blend.</Notice>
+      )}
 
       <section className="panel panel-pad">
         <div className="form-grid">
