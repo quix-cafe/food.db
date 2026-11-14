@@ -21,7 +21,7 @@ const noPricing = () => ({ salePrice: '', dealPrice: '', dealQty: '', servingSiz
 const EVENT_TYPES = [
   ['market', 'Market', 'Each recipe sold by the serving at its own price'],
   ['personal_chef', 'Personal Cheffing', 'A flat rate, plus the groceries at cost'],
-  ['supper_club', 'Supper Club', 'Tickets for a plate of everything; Hoamsy takes its fee first'],
+  ['supper_club', 'Supper Club', 'Tickets for a plate of everything; with a Hoamsy fee, Hoamsy takes it first'],
 ];
 const blankOrPercent = (v) => v.trim() === '' || ((toDecimal(v.replace('%', ''))?.gte(0) && toDecimal(v.replace('%', '')).lt(100)) ?? false);
 /** Blank (the recipe's own size), or an amount above 0; fractions are fine. */
@@ -73,6 +73,7 @@ function formOf(ev) {
     vendorFee: optional(ev.vendorFee),
     kind: ev.kind,
     flatPrice: optional(ev.flatPrice),
+    hoamsy: ev.hoamsyPercent != null, // the Hoamsy fee box ticked (unticked: no fee)
     hoamsyPercent: ev.hoamsyPercent == null ? '' : toDecimal(ev.hoamsyPercent).toString(),
     sauces: Object.fromEntries(ev.sauces.map((b) => [b.blendId, {
       servings: String(b.servings),
@@ -90,7 +91,7 @@ function TargetHint({ s, form, setForm, saved }) {
   const typed = toDecimal(priceText(form.flatPrice));
   if (typed?.eq(target)) return <>{DEFAULT_MARGIN}% on food</>;
   return (
-    <span className="nowrap" title={`The ${supper ? 'plate price' : 'rate'} that sells the food at a ${DEFAULT_MARGIN}% gross margin, as recipe prices are set, and covers labor and the vendor fee at cost${supper ? ', after Hoamsy’s cut' : ''}`}>
+    <span className="nowrap" title={`The ${supper ? 'plate price' : 'rate'} that sells the food at a ${DEFAULT_MARGIN}% gross margin, as recipe prices are set, and covers labor and the vendor fee at cost${supper && form.hoamsy ? ', after Hoamsy’s cut' : ''}`}>
       {DEFAULT_MARGIN}% on food: {money(target)}{' '}
       <button type="button" className="link-btn" onClick={() => setForm((f) => ({ ...f, flatPrice: target }))}>Use</button>
     </span>
@@ -100,12 +101,15 @@ function TargetHint({ s, form, setForm, saved }) {
 /** The plan's bottom line, under the fields that move it; dimmed while a change is still saving. */
 function BarFigures({ s, pending }) {
   const loss = toDecimal(s.profit).lt(0);
+  const hoamsy = s.flat?.hoamsyPercent != null;
+  const ticketsNote = s.kind === 'supper_club' ? `${s.flat.tickets} × ${money(s.flat.flatPrice)}` : null;
   const figures = [
-    s.kind === 'supper_club' && ['Tickets', money(s.flat.gross), `${s.flat.tickets} × ${money(s.flat.flatPrice)}`],
-    s.kind === 'supper_club' && ['Hoamsy fee', `−${money(s.hoamsyFee)}`, `${s.flat.hoamsyPercent}% off the top`],
-    ['Revenue', money(s.revenue), s.kind === 'personal_chef' ? `${money(s.flat.groceries)} groceries` : null],
-    ['Cost', money(s.totalCost), toDecimal(s.labor.cost).gt(0) ? `${money(s.labor.cost)} labor` : null],
-    !toDecimal(s.vendorFee).isZero() && ['Vendor fee', `−${money(s.vendorFee)}`, null],
+    // Tickets apart from revenue only when Hoamsy's fee comes between them; otherwise they're the revenue.
+    hoamsy && ['Tickets', money(s.flat.gross), ticketsNote],
+    hoamsy && ['Hoamsy fee', `−${money(s.hoamsyFee)}`, `${s.flat.hoamsyPercent}% off the top`],
+    ['Revenue', money(s.revenue), s.kind === 'personal_chef' ? `${money(s.flat.groceries)} groceries` : s.kind === 'supper_club' && !hoamsy ? ticketsNote : null],
+    ['Cost', money(s.totalCost), toDecimal(s.labor.cost).gt(0) ? `${money(toDecimal(s.totalCost).minus(s.labor.cost))} food / ${money(s.labor.cost)} labor` : null],
+    !toDecimal(s.vendorFee).isZero() && ['Vendor fee', money(s.vendorFee), null],
     ['Profit', money(s.profit), null, loss ? 'loss' : 'profit'],
     ['Gross margin', s.grossMarginPercent == null ? '—' : `${s.grossMarginPercent}%`, 'on food'],
     ['Net margin', s.marginPercent == null ? '—' : `${s.marginPercent}%`, 'after everything', loss ? 'loss' : ''],
@@ -252,7 +256,7 @@ function EventPlanner({ id }) {
       form.guestCount !== '' && !isInt(form.guestCount) ? 'Guests must be a whole number' :
       !blankOrPrice(form.vendorFee) ? 'Vendor fee must be an amount' :
       !blankOrPrice(form.flatPrice) ? `${form.kind === 'supper_club' ? 'Plate price' : 'Flat rate'} must be an amount` :
-      !blankOrPercent(form.hoamsyPercent) ? 'The Hoamsy fee must be a percent from 0 to under 100' :
+      form.hoamsy && !blankOrPercent(form.hoamsyPercent) ? 'The Hoamsy fee must be a percent from 0 to under 100' :
       Object.values(form.servings).some((s) => !isInt(s)) ? 'Servings must be whole numbers' :
       Object.values(form.sauces).some((x) => x.count !== undefined && !isCount(x.count)) ? 'Sauce containers must be whole numbers, 1 or more' :
       Object.values(form.sauces).some((x) => !isCount(x.servings)) ? 'Sauce servings must be whole numbers, 1 or more' :
@@ -283,7 +287,8 @@ function EventPlanner({ id }) {
             vendorFee: priceText(form.vendorFee),
             kind: form.kind,
             flatPrice: priceText(form.flatPrice),
-            hoamsyPercent: form.hoamsyPercent.replace('%', '').trim(),
+            // Ticked with the box left blank: the usual fee. Unticked: none.
+            hoamsyPercent: form.hoamsy ? form.hoamsyPercent.replace('%', '').trim() || String(HOAMSY_FEE_PERCENT) : '',
             recipes: Object.entries(form.servings).map(([recipeId, expectedServings]) => {
               const p = form.prices[recipeId] ?? noPricing();
               return { recipeId, expectedServings, salePrice: priceText(p.salePrice), dealPrice: priceText(p.dealPrice), dealQty: p.dealQty.trim(), servingSize: p.servingSize.trim() && parseAmount(p.servingSize).toString() };
@@ -401,16 +406,26 @@ function EventPlanner({ id }) {
   // A personal chef job or supper club has no prices per recipe: each takes a share of the rate, from the summary.
   const flat = form.kind !== 'market';
   const supper = form.kind === 'supper_club';
+  const tickets = form.hoamsy ? 'ticket money after Hoamsy’s cut' : 'ticket money';
   const summed = new Map([...(s?.recipes ?? []).map((r) => [r.recipeId, r]), ...(s?.sauces ?? []).map((b) => [`blend:${b.blendId}`, b])]);
   const revenueCell = (key, on) => {
     const row = on && summed.get(key);
-    return row?.netPrice != null ? <span title={`${row.share}% of the food cost, so ${row.share}% of the ${supper ? 'ticket money after Hoamsy’s cut' : 'rate and groceries'}: ${money(row.revenue)}`}>{money(row.netPrice)}</span> : <span className="muted">—</span>;
+    return row?.netPrice != null ? <span title={`${row.share}% of the food cost, so ${row.share}% of the ${supper ? tickets : 'rate and groceries'}: ${money(row.revenue)}`}>{money(row.netPrice)}</span> : <span className="muted">—</span>;
   };
   const flatMargin = (key, on) => {
     const row = on && summed.get(key);
     return row?.marginPerServing != null ? <MarginCell pricing={row} /> : <span className="muted">—</span>;
   };
   const columns = flat ? 7 : 8;
+  // On a phone, a flat-rate event's chosen row ends with one line of what it comes to (it has no price
+  // or discount boxes): cost, revenue and margin per serving. Hidden on wider screens, which have columns.
+  const figs = (cost, revenue, margin) => (
+    <td className="c-figs">
+      <span><i>Cost</i> {cost}</span>
+      <span><i>Revenue</i> {revenue}</span>
+      <span><i>Margin</i> {margin}</span>
+    </td>
+  );
   const statusText = { saved: 'All changes saved', pending: 'Unsaved changes', saving: 'Saving…', invalid: saveError, error: saveError, conflict: 'Not saved' }[status];
 
   return (
@@ -468,21 +483,29 @@ function EventPlanner({ id }) {
               </span>
             </Field>
           )}
-          {supper && (
-            <Field label="Hoamsy fee" className="f-pct">
-              <span className="unit-input">
-                <input className="input num" inputMode="decimal" value={form.hoamsyPercent} onChange={set('hoamsyPercent')} placeholder={String(HOAMSY_FEE_PERCENT)}
-                  aria-label="Hoamsy fee, percent of each ticket" aria-invalid={!blankOrPercent(form.hoamsyPercent)} title="Taken off every ticket before anything else" />
-                <span aria-hidden="true">%</span>
-              </span>
-            </Field>
-          )}
           <Field label="Vendor fee" className="f-money">
             <span className="money-input vendor-fee">
               <span aria-hidden="true">$</span>
               <input className="input num" inputMode="decimal" value={form.vendorFee} onChange={set('vendorFee')} placeholder="0.00" aria-invalid={!blankOrPrice(form.vendorFee)} />
             </span>
           </Field>
+          {supper && (
+            // Optional: ticked, Hoamsy takes this percent off every ticket before anything else.
+            <div className={`field f-hoamsy ${form.hoamsy ? '' : 'off'}`}>
+              <label className="hoamsy-check">
+                <input type="checkbox" checked={form.hoamsy}
+                  onChange={(e) => { const on = e.target.checked; setForm((f) => ({ ...f, hoamsy: on, hoamsyPercent: on && !f.hoamsyPercent ? String(HOAMSY_FEE_PERCENT) : f.hoamsyPercent })); }} />
+                <span>Hoamsy fee</span>
+              </label>
+              {form.hoamsy && (
+                <span className="unit-input">
+                  <input className="input num" inputMode="decimal" value={form.hoamsyPercent} onChange={set('hoamsyPercent')} placeholder={String(HOAMSY_FEE_PERCENT)}
+                    aria-label="Hoamsy fee, percent of each ticket" aria-invalid={!blankOrPercent(form.hoamsyPercent)} title="Taken off every ticket before anything else" />
+                  <span aria-hidden="true">%</span>
+                </span>
+              )}
+            </div>
+          )}
           </div>
           </div>
         </div>
@@ -506,7 +529,7 @@ function EventPlanner({ id }) {
           <div className="empty"><p>There are no recipes yet.</p><Link className="btn" to="/recipes/new">Create a recipe</Link></div>
         ) : (
           <div className="table-wrap">
-            <table className="grid recipe-pick cards-sm">
+            <table className={`grid recipe-pick cards-sm ${flat ? 'flat' : ''}`}>
               <thead>
                 <tr>
                   <th style={{ width: 40 }}><span className="visually-hidden">Include</span></th>
@@ -514,7 +537,7 @@ function EventPlanner({ id }) {
                   <th title="What one serving is at this event, like 3 tacos. Blank: the recipe’s own size. Cost and price follow it.">Size / serving</th>
                   <th className="num">Cost / serving</th>
                   {flat ? (
-                    <th className="num" title={`Each item’s revenue per serving: its share of the ${supper ? 'ticket money after Hoamsy’s cut' : 'rate and groceries'}, by its share of the food cost. Updates once the plan saves.`}>Revenue / serving</th>
+                    <th className="num" title={`Each item’s revenue per serving: its share of the ${supper ? tickets : 'rate and groceries'}, by its share of the food cost. Updates once the plan saves.`}>Revenue / serving</th>
                   ) : (
                     <>
                       <th className="num" title="Per serving at this event. Starts at the recipe’s target price; change it here for this event only.">Sale price</th>
@@ -568,6 +591,7 @@ function EventPlanner({ id }) {
                         ) : '—'}
                         {showTotal && <div><b className="serving-total">{amountLabel(toDecimal(form.servings[r.id]).times(parseAmount(p.servingSize)), served.unit)} in all</b></div>}
                       </td>
+                      {on && flat && figs(money(served.costPerServing), revenueCell(r.id, on), flatMargin(r.id, on))}
                     </tr>
                   );
                 })}
@@ -614,6 +638,7 @@ function EventPlanner({ id }) {
                         ) : b.container}
                         {c && <div className="sauce-holds"><small className="muted"><span>{c.containerOz} oz,</span> <span>{qty(c.servingsPerContainer, 1)} servings each</span></small></div>}
                       </td>
+                      {on && flat && figs(c?.costPerServing ? money(c.costPerServing) : '—', revenueCell(`blend:${b.id}`, on), flatMargin(`blend:${b.id}`, on))}
                     </tr>
                   );
                 })}

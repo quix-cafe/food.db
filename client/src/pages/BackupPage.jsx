@@ -192,6 +192,8 @@ export default function BackupPage() {
 
       <TestDataCard />
 
+      <AltThemeCard />
+
       <section className="panel">
         <div className="panel-head">
           <div>
@@ -364,6 +366,31 @@ const TEST_ROWS = [
 ];
 
 /** Test mode on/off, and clearing everything added in test mode. */
+/** Switches the alternate theme (`theme-alt.css`, `html[data-skin="alt"]`) for this browser. */
+function AltThemeCard() {
+  const [on, setOn] = useState(() => document.documentElement.dataset.skin === 'alt');
+  const toggle = (next) => {
+    setOn(next);
+    try { localStorage.setItem('skin', next ? 'alt' : ''); } catch { /* not remembered, still applied */ }
+    if (next) document.documentElement.dataset.skin = 'alt';
+    else delete document.documentElement.dataset.skin;
+  };
+  return (
+    <section className="panel panel-pad backup-card" id="alt-theme">
+      <h2>Appearance</h2>
+      <label className="switch-row">
+        <input type="checkbox" checked={on} onChange={(e) => toggle(e.target.checked)} />
+        <span>
+          <b>Alternate theme</b>
+          <span className="muted" style={{ display: 'block' }}>
+            A completely different look for the whole app, still in testing. It applies to this browser only; turn it off to go back.
+          </span>
+        </span>
+      </label>
+    </section>
+  );
+}
+
 function TestDataCard() {
   const on = useTestMode();
   const { data, error } = useApi('/test-data');

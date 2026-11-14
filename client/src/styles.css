@@ -125,7 +125,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .theme-switch[aria-checked='true'] .knob { transform: translateX(28px); }
 .theme-switch:hover { background: var(--switch-hover); }
 .theme-switch:focus-visible { outline: 2px solid var(--basil); outline-offset: 2px; }
-@media (prefers-reduced-motion: reduce) { .theme-switch, .theme-switch .knob, .theme-switch svg { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .theme-switch, .theme-switch .knob, .theme-switch svg, .topbar { transition: none; } }
 .sidebar .menu-toggle, .menu-scrim { display: none; } /* .sidebar: outranks .icon-btn's display */
 
 .main { min-width: 0; display: flex; flex-direction: column; }
@@ -608,7 +608,16 @@ a.receipt-thumbs:hover img, a.receipt-thumbs:focus-visible img { outline: 2px so
 .labor-input { display: inline-flex; align-items: center; gap: 4px; justify-content: flex-end; }
 .labor-input > span[aria-hidden] { color: var(--muted); font-size: 0.9rem; }
 .needed-input .labor-input .unit-input.rate { width: 108px; }
-@media (max-width: 640px) { .labor-sm.show-sm { display: flex !important; flex-direction: column; align-items: flex-end; gap: 4px; margin-top: 4px; } }
+/* Financials: the recipe name keeps its room; the labor boxes are kept narrow (the unit sits inside). */
+@media (min-width: 641px) { .fin-table td:first-child { min-width: 200px; } }
+.recipe-pick .c-figs { display: none; } /* the phone cards' figures line (cards-sm) */
+.fin-table .needed-input .unit-input { width: 72px; }
+.fin-table .needed-input .labor-input .unit-input.rate { width: 92px; }
+.fin-table .needed-input .unit-input .input { padding-left: 6px; }
+@media (max-width: 640px) {
+  .labor-sm.show-sm { display: flex !important; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 6px; }
+  .labor-sm .labor-input, .labor-sm .labor-input > span[aria-hidden] { white-space: nowrap; flex-wrap: nowrap; }
+}
 
 /* The review grid's save button, kept in reach while scrolling a long receipt. */
 .floating-save {
@@ -637,7 +646,7 @@ a.receipt-thumbs:hover img, a.receipt-thumbs:focus-visible img { outline: 2px so
   body.printing .no-print { display: none; }
   body.printing .panel { box-shadow: none; border-color: #999; }
   body.printing .table-wrap { overflow: visible; }
-  body.printing tr.labor-row > td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body.printing tr.fee-row > td, body.printing tr.labor-row > td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   @page { margin: 12mm; }
   /* The printed shopping list: small type, tight rows, a box to tick per line. */
   .printed-list { font-size: 9pt; line-height: 1.25; color: #000; }
@@ -656,6 +665,11 @@ a.receipt-thumbs:hover img, a.receipt-thumbs:focus-visible img { outline: 2px so
 
 /* Labor lines: costed like ingredients, always last, tinted so they read as a different kind of cost. */
 tr.labor-row > td { background: var(--basil-wash); }
+/* The vendor fee comes off the profit: red, as labor is green. */
+tr.fee-row > td { background: var(--tomato-wash); }
+tr.fee-row > td:first-child { box-shadow: inset 3px 0 0 var(--tomato); }
+tr.fee-row > td:last-child { color: var(--tomato-ink); font-weight: 650; }
+.figure.fee b { color: var(--tomato); }
 .pack-size-edit .input { width: 72px; padding: 4px 6px; }
 .pack-size-edit.money-input { display: inline-block; }
 .pack-size-edit.money-input .input { width: 84px; padding: 4px 6px 4px 18px; font-size: inherit; font-weight: inherit; font-stretch: inherit; }
@@ -798,9 +812,13 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 .event-bar-row .f-type { flex: 0 0 170px; }
 .event-bar-row .f-num { flex: 0 0 76px; }
 .event-bar-row .f-money { flex: 0 0 128px; }
-.event-bar-row .f-pct { flex: 0 0 76px; }
-.event-bar-row .f-pct .unit-input { display: block; width: 100%; }
-.event-bar-row .f-pct .input { padding-top: 7px; padding-bottom: 7px; font-size: 1rem; font-weight: 600; }
+/* The optional Hoamsy fee: a checkbox, with the percent under it once ticked; unticked, the box sits level with the inputs. */
+.event-bar-row .f-hoamsy { flex: 0 0 auto; }
+.hoamsy-check { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; font-weight: 600; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
+.hoamsy-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--basil); }
+.f-hoamsy.off .hoamsy-check { margin-top: 31px; }
+.f-hoamsy .unit-input { display: block; width: 84px; }
+.f-hoamsy .input { padding-top: 7px; padding-bottom: 7px; font-size: 1rem; font-weight: 600; }
 .event-bar-row .f-type .select { width: 100%; }
 /* One line: a grid whose columns are the first group's fields, then the money fields, so nothing can overlap. */
 @container (min-width: 1080px) {
@@ -926,7 +944,10 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
   .nav a { padding: 12px 12px; font-size: 1.05rem; }
   .theme-switch { order: 0; margin: 0 0 0 auto; }
   .sidebar .menu-toggle { margin-left: 4px; }
-  .topbar { position: static; padding: 10px 16px; flex-wrap: wrap; }
+  /* Under the sticky app bar; slides up behind it while scrolling down, back as soon as scrolling up (useStickyTableHeads). */
+  .topbar { position: sticky; top: var(--app-bar, 0px); padding: 10px 16px; flex-wrap: wrap; transition: transform 0.2s ease-out; }
+  .topbar[data-hidden='1'] { transform: translateY(-100%); }
+  .page .table-wrap[data-fits='1'] > .grid > thead th { transition: top 0.2s ease-out; }
   .page { padding: 18px 16px; }
   .stat-row { grid-template-columns: 1fr 1fr; }
   .form-grid .span-2 { grid-column: auto; }
@@ -945,6 +966,8 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
 .grid tfoot.shop-total small { font-size: 0.85rem; }
 .serving-size { display: inline-flex; align-items: center; gap: 6px; }
 .serving-size .input { width: 50px; padding: 4px 6px; }
+/* Every box in the event's recipe table (servings, size, price, deal, containers) is one height. */
+.recipe-pick :is(.input, .select) { box-sizing: border-box; height: 34px; min-height: 34px; padding-top: 0; padding-bottom: 0; }
 .recipe-pick thead th { white-space: normal; vertical-align: bottom; }
 .recipe-pick .c-name { min-width: 150px; }
 .sauce-holds span { white-space: nowrap; }
@@ -1026,7 +1049,9 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
   .figure b { font-size: 1.35rem; }
 
   /* The event's recipe table becomes one short card per recipe: name with the discount tick beside it, a row of
-     what gets typed, then what it comes to. A ticked discount takes a row of its own. Unchosen rows are one line. */
+     what gets typed, then what it comes to. A ticked discount takes a row of its own. Unchosen rows are one line.
+     A flat-rate event has no price or discount boxes: its servings and size share the row, and cost, revenue and
+     margin go in one figures line (.c-figs). */
   .recipe-pick.cards-sm, .recipe-pick.cards-sm tbody { display: block; }
   .recipe-pick.cards-sm thead { display: none; }
   .recipe-pick.cards-sm tr {
@@ -1036,6 +1061,9 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
     box-shadow: inset 7px 0 0 var(--tile, transparent);
   }
   .recipe-pick.cards-sm tr:has(.deal-input) { grid-template-areas: 'check name name name' 'serv serv size price' 'cost cost margin margin' 'deal deal deal deal'; }
+  .recipe-pick.cards-sm.flat tr { grid-template-areas: 'check name name name' 'serv serv size size' 'figs figs figs figs'; }
+  .recipe-pick.cards-sm tr.sauce-row:not(.off) { grid-template-areas: 'check name name name' 'serv serv serv price' 'cost cost margin margin'; }
+  .recipe-pick.cards-sm.flat tr.sauce-row:not(.off) { grid-template-areas: 'check name name name' 'serv serv serv serv' 'figs figs figs figs'; }
   .recipe-pick.cards-sm tr.off { grid-template-columns: 26px minmax(0, 1fr) auto; grid-template-areas: 'check name price'; align-items: center; padding: 8px 12px 8px 16px; }
   .recipe-pick.cards-sm td { display: block; padding: 0; border: 0; text-align: left; }
   .recipe-pick.cards-sm td[data-label]::before {
@@ -1046,23 +1074,33 @@ tr.labor-row > td:first-child { box-shadow: inset 3px 0 0 var(--basil); }
   .recipe-pick.cards-sm .c-check { grid-area: check; align-self: center; }
   .recipe-pick.cards-sm .c-name { grid-area: name; align-self: center; }
   .recipe-pick.cards-sm .c-serv { grid-area: serv; }
-  .recipe-pick.cards-sm .c-cost { grid-area: cost; }
-  .recipe-pick.cards-sm .c-margin { grid-area: margin; }
   .recipe-pick.cards-sm .c-price { grid-area: price; }
   .recipe-pick.cards-sm .c-deal { grid-area: deal; }
   .recipe-pick.cards-sm .c-size { grid-area: size; }
+  .recipe-pick.cards-sm .c-cost { grid-area: cost; }
+  .recipe-pick.cards-sm .c-margin { grid-area: margin; }
+  /* At a flat-rate event, cost, revenue and margin are in the figures line instead. */
+  .recipe-pick.cards-sm.flat tr:not(.off) :is(.c-cost, .c-margin, .c-price) { display: none; }
   .recipe-pick.cards-sm tr.off :is(.c-size, .c-deal, .c-serv, .c-margin, .c-cost), .recipe-pick.cards-sm .c-none { display: none; }
   .recipe-pick.cards-sm tr.off .c-price::before { display: none; }
   .recipe-pick.cards-sm tr:not(.sauce-row) .c-serv .input { width: 100% !important; }
-  /* The figures read as one line, label beside value. */
   .recipe-pick.cards-sm tr:not(.off) :is(.c-cost, .c-margin)::before { display: inline; margin-right: 5px; }
   .recipe-pick.cards-sm tr:not(.off) :is(.c-cost, .c-margin) { align-self: center; font-size: 0.9rem; }
   .recipe-pick.cards-sm tr:not(.off) .c-margin { color: var(--basil-ink); font-weight: 650; }
+  .recipe-pick.cards-sm .c-figs {
+    grid-area: figs; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px;
+    padding: 6px 10px; border-radius: var(--radius); background: var(--wash); font-size: 0.95rem; font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .recipe-pick.cards-sm .c-figs > span { display: flex; flex-direction: column; }
+  .recipe-pick.cards-sm .c-figs > span:not(:first-child) { text-align: right; }
+  .recipe-pick.cards-sm .c-figs i { font-style: normal; font-size: 0.66rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  .recipe-pick.cards-sm .c-figs small { font-size: 0.78rem; }
+  .recipe-pick.cards-sm .c-figs > span:last-child { color: var(--basil-ink); font-weight: 650; }
   .recipe-pick.cards-sm .c-deal:not(:has(.deal-input)) { display: flex; align-items: center; justify-content: flex-end; gap: 6px; align-self: center; }
   .recipe-pick.cards-sm .c-deal:not(:has(.deal-input))::before { margin: 0; }
   .recipe-pick.cards-sm .c-deal:has(.deal-input) { border-top: 1px dashed var(--line); padding-top: 8px; }
-  /* A sauce's "2 × 1/2 qt" needs the room; it has no size or discount. */
-  .recipe-pick.cards-sm tr.sauce-row:not(.off) { grid-template-areas: 'check name name name' 'serv serv serv price' 'cost cost margin margin'; }
+  .recipe-pick.cards-sm td.c-none { display: none !important; } /* placeholders for desktop columns (a sauce has no size or deal) */
+  /* A sauce: containers × size across the row, its price at the end. */
   .recipe-pick.cards-sm .c-name .badge { margin-left: 2px; }
   .recipe-pick.cards-sm .c-name a { font-size: 1.08rem; line-height: 1.25; }
   .recipe-pick.cards-sm tr.off .c-name a { font-size: 0.98rem; }
@@ -1198,55 +1236,46 @@ body.pos-open { overflow: hidden; }
 .pos-stage b { color: inherit; }
 .pos-panes { display: none; background: var(--paper); padding: 0 8px; }
 .pos-open-orders { padding: 2px 10px; border-radius: 999px; background: var(--tomato); color: #fff; font-weight: 800; }
-.pos-desk { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 11fr) minmax(0, 12fr); }
+.pos-desk { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); } /* the menu list needs the room more than the board */
 .pos-sell { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 320px; border-right: 1px solid var(--line); }
 .pos-menu { min-height: 0; overflow-y: auto; padding: 12px; }
-.pos-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
-.pos-tile-group { display: grid; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); overflow: hidden; }
-.pos-tile-group.in-line { border-color: var(--pos-violet); box-shadow: 0 0 0 1px var(--pos-violet); }
-.pos-tile-group.has-deal { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
-/* A narrower tile: the name gets the whole width, and the count moves down beside "sold". */
-.pos-tile-group.has-deal .pos-tile b { padding-right: 0; overflow-wrap: break-word; }
-.pos-tile-group.has-deal .pos-qty { top: auto; bottom: 6px; }
-.pos-add-deal {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 8px 2px; cursor: pointer;
-  background: color-mix(in srgb, var(--basil) 20%, var(--paper)); color: var(--basil-ink); border: 2px solid var(--basil); border-radius: 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0; font: inherit; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+.pos-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+/* One menu item: − count +, its name (tap adds one), a deal button, price, and the note icon. */
+.pos-item {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 0; min-height: 60px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); border-left: 8px solid var(--tile, var(--line));
 }
-.pos-add-deal b { font-size: 1.35rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
-.pos-add-deal small { font-size: 0.8rem; font-weight: 650; }
-.pos-add-deal:hover:not(:disabled) { background: color-mix(in srgb, var(--basil) 32%, var(--paper)); }
-.pos-add-deal:active:not(:disabled) { transform: scale(0.97); }
-.pos-add-deal:focus-visible { outline: 2px solid var(--pos-violet); outline-offset: -3px; }
-.pos-line-deal { grid-column: 1 / -1; justify-self: start; margin-left: 0; }
-.pos-tile {
-  position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-height: 112px; padding: 12px 12px 10px 18px; text-align: left; cursor: pointer;
-  background: transparent; color: var(--ink); border: 0; font: inherit; touch-action: manipulation; -webkit-tap-highlight-color: transparent; overflow: hidden;
+.pos-item.tiled { padding-left: 0; }
+.pos-item.in-line { border-color: var(--tile, var(--pos-violet)); box-shadow: 0 0 0 1px var(--tile, var(--pos-violet)); } /* outlined in its own color */
+.pos-item-name {
+  all: unset; box-sizing: border-box; flex: 1; min-width: 0; align-self: stretch; display: flex; flex-direction: column; justify-content: center; gap: 2px;
+  padding: 4px; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
 }
-.pos-tile::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 9px; background: var(--tile); }
-.pos-tile:hover:not(:disabled) { background: var(--wash-hover); }
-.pos-tile:active:not(:disabled) { transform: scale(0.98); }
-.pos-tile:focus-visible { outline: 2px solid var(--pos-violet); outline-offset: -3px; }
-.pos-tile b { padding-right: 26px; font-size: 1.05rem; line-height: 1.2; overflow-wrap: anywhere; }
-.pos-tile > span { font-weight: 650; }
-.pos-tile small { margin-top: auto; color: var(--muted); }
-.pos-qty { position: absolute; top: 6px; right: 6px; min-width: 30px; height: 30px; display: grid; place-items: center; border-radius: 999px; background: var(--pos-violet); color: #fff; font-style: normal; font-weight: 800; }
+.pos-item-name:focus-visible { outline: 2px solid var(--pos-violet); outline-offset: -2px; }
+.pos-item-name b { font-size: 1.05rem; line-height: 1.2; overflow-wrap: break-word; }
+.pos-item-name small { color: var(--muted); font-size: 0.82rem; overflow-wrap: anywhere; }
+.pos-item-note { font-style: italic; color: var(--tomato-ink); }
+.pos-item-price { all: unset; align-self: stretch; display: flex; align-items: center; padding: 0 2px; cursor: pointer; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; touch-action: manipulation; -webkit-tap-highlight-color: transparent; } /* tapping it adds one, like the name */
+.pos-item .stepper { gap: 2px; flex: none; margin-left: 8px; }
+.pos-item .stepper .btn { width: 42px; height: 42px; font-size: 1.3rem; }
+.pos-item .stepper output { min-width: 2.2ch; font-size: 1.15rem; }
+.pos-item .stepper output { color: var(--ink); } /* black, or white in the dark theme */
+.btn.pos-add-deal { flex: none; flex-direction: column; gap: 0; padding: 2px 8px; min-height: 42px; line-height: 1.1; font-weight: 800; color: var(--basil-ink); background: color-mix(in srgb, var(--basil) 18%, var(--paper)); border-color: var(--basil); }
+.btn.pos-add-deal small { font-size: 0.72rem; font-weight: 650; }
+.note-btn { flex: none; width: 42px; height: 42px; color: var(--muted); }
+.note-btn.has-note { color: var(--tomato-ink); background: var(--tomato-wash); }
+.note-btn:disabled { opacity: 0.35; }
 .pos-ticket { min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--paper); border-left: 1px solid var(--line); }
-.pos-lines { flex: 1; min-height: 40px; overflow-y: auto; }
-.pos-lines > p { margin: 8px 0; }
-.pos-line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--line); }
-.pos-line.tiled { padding-left: 8px; }
-.pos-line .stepper { gap: 2px; }
-.pos-line .stepper .btn { width: 36px; height: 36px; font-size: 1.15rem; }
-.pos-line .stepper output { font-size: 1.05rem; }
-.pos-line-name { overflow-wrap: anywhere; font-size: 0.95rem; }
-.pos-line-note-add { grid-column: 1 / -1; justify-self: start; font-size: 0.85rem; }
-.input.pos-line-note { grid-column: 1 / -1; min-height: 36px; padding: 4px 8px; font-size: 0.92rem; }
-.input.order-note-input { min-height: 44px; padding: 6px 12px; font-size: 1rem; }
+.name-row { display: flex; gap: 6px; align-items: center; }
+.name-row .input { flex: 1; min-width: 0; }
+.name-row .note-btn { width: 48px; height: 54px; }
+.pos-order-note { margin: 0; font-size: 0.9rem; font-style: italic; color: var(--tomato-ink); overflow-wrap: anywhere; }
+.note-dialog textarea { width: 100%; font-size: 1.05rem; resize: vertical; }
 .order-note { font-size: 0.85rem; font-style: italic; color: var(--tomato-ink); overflow-wrap: anywhere; }
 .order-note-btn { all: unset; cursor: pointer; font-size: 0.85rem; font-style: italic; color: var(--tomato-ink); overflow-wrap: anywhere; }
 .order-note-btn.none { font-style: normal; color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
 .order-note-btn:focus-visible { outline: 2px solid var(--basil); }
-.pos-total { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--ink-2); font-size: 0.9rem; }
+.pos-total { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--ink-2); font-size: 1.05rem; font-weight: 600; }
 .pos-total b { color: var(--ink); font-family: var(--font-heading); font-size: 1.9rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 .pos-pay { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .pos-pay .btn { min-height: 54px; justify-content: center; font-size: 1.02rem; }
@@ -1288,9 +1317,6 @@ body.pos-open { overflow: hidden; }
   .pos-clock { display: none; }
   .pos-sell { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
   .pos-ticket { border-left: 0; border-top: 2px solid var(--line); box-shadow: 0 -6px 14px rgba(28, 42, 51, 0.1); }
-  .pos-lines { flex: none; max-height: 22dvh; }
-  .pos-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .pos-tile { min-height: 92px; }
   .pos-pay { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .pos-pay .btn { padding: 0 2px; font-size: 0.9rem; }
   .pos-pay .btn:nth-last-child(-n + 2) { grid-column: span 2; }

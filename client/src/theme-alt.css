@@ -1,0 +1,22 @@
+/*
+ * Alternate theme: a completely different look for food.db, switched on per browser from the
+ * Backup page ("Appearance" → Alternate theme). It's off by default and still in development.
+ *
+ * How it's wired:
+ *  - The switch sets `data-skin="alt"` on <html> and saves `skin` = 'alt' in localStorage;
+ *    the inline script in `client/index.html` applies it before the first paint.
+ *  - This file loads after `styles.css` (`main.jsx`), so a rule here wins at equal specificity.
+ *  - Scope EVERY rule under `:root[data-skin='alt']` so nothing changes while the theme is off.
+ *  - Light/dark still applies alongside it: `:root[data-skin='alt'][data-theme='dark']` for the
+ *    dark variant. Print CSS should stay readable (printing uses the light tokens).
+ *  - Start with the tokens on `:root` in `styles.css` (colors, radii, fonts); components use
+ *    them, so redefining tokens restyles most of the app. Override component classes after that.
+ */
+
+:root[data-skin='alt'] {
+  /* tokens go here */
+}
+
+:root[data-skin='alt'][data-theme='dark'] {
+  /* dark-variant tokens go here */
+}

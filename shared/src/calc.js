@@ -403,7 +403,7 @@ export function sauceContainer(blend, container = null) {
  * plate of everything on the menu at one price, and Hoamsy keeps a share of every ticket.
  */
 export const EVENT_KINDS = ['market', 'personal_chef', 'supper_club'];
-export const HOAMSY_FEE_PERCENT = 25; // the default; each supper club can set its own
+export const HOAMSY_FEE_PERCENT = 25; // filled in when a supper club's Hoamsy fee is ticked; each can set its own
 
 /**
  * `vendorFee`: what the event charges for the stand, taken off the profit (not part of the food cost).
@@ -419,7 +419,7 @@ export const HOAMSY_FEE_PERCENT = 25; // the default; each supper club can set i
  *   by each item's share of the food cost as its revenue. Its margin per serving is that less its
  *   food and its share of amounts set by hand, so it's a margin on food, like a market recipe's; its
  *   `profit` is revenue less its own food, so the Financials columns add up.
- *   Hoamsy takes its fee (`hoamsyPercent`, default HOAMSY_FEE_PERCENT) off a supper club's tickets
+ *   A supper club with a Hoamsy fee (`hoamsyPercent`; none without one) has it taken off its tickets
  *   first: only what's left is revenue, and that is what's shared out. `flat.suggestedPrice` is the
  *   plate price or flat rate that sells the food at DEFAULT_MARGIN and covers labor and the vendor
  *   fee at cost (so a $50 fee adds $50 of revenue, not $200).
@@ -579,7 +579,9 @@ export function summarizeEvent(recipes = [], amounts = {}, { vendorFee = null, s
     if (price.lt(0)) throw new CalcError('The rate cannot be negative');
     const supper = kind === 'supper_club';
     const tickets = supper ? toDecimal(format.tickets) ?? new Decimal(0) : null;
-    const hoamsy = supper ? toDecimal(format.hoamsyPercent) ?? new Decimal(HOAMSY_FEE_PERCENT) : new Decimal(0);
+    // Hoamsy's fee is optional: a supper club without a percent has none.
+    const hoamsyOn = supper && toDecimal(format.hoamsyPercent) !== null;
+    const hoamsy = hoamsyOn ? toDecimal(format.hoamsyPercent) : new Decimal(0);
     if (hoamsy.lt(0) || hoamsy.gte(100)) throw new CalcError('The Hoamsy fee must be from 0 to under 100%');
     const keep = new Decimal(1).minus(hoamsy.div(100)); // of each ticket, after Hoamsy's cut
     const gross = supper ? price.times(tickets) : price;
@@ -624,7 +626,7 @@ export function summarizeEvent(recipes = [], amounts = {}, { vendorFee = null, s
     flat = {
       flatPrice: money(price),
       tickets: tickets?.toString() ?? null,
-      hoamsyPercent: supper ? hoamsy.toString() : null,
+      hoamsyPercent: hoamsyOn ? hoamsy.toString() : null, // null: no Hoamsy fee
       gross: money(gross), // what the tickets bring in, before Hoamsy's fee
       pool: money(pool), // what's shared out across the menu
       groceries: money(groceries),

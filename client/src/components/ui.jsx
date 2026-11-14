@@ -22,6 +22,7 @@ export const Icon = {
   grip: () => <svg {...s} strokeWidth="2.5"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" /></svg>,
   rotateLeft: () => <svg {...s}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>,
   rotateRight: () => <svg {...s}><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></svg>,
+  note: () => <svg {...s}><path d="M5 4h10l4 4v12H5z" /><path d="M15 4v4h4M8.5 12h7M8.5 15.5h5" /></svg>,
   trash: () => <svg {...s}><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>,
   download: () => <svg {...s}><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>,
   upload: () => <svg {...s}><path d="M12 20V9M7 14l5-5 5 5M5 4h14" /></svg>,

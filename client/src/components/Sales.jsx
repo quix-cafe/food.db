@@ -68,11 +68,14 @@ function SalesTotals({ totals }) {
 const NAME_WARNING_GUARD_MS = 500;
 
 /** The name box for a new order, and the warning under it when an order is placed without one. */
-export function CustomerNameField({ draft }) {
+export function CustomerNameField({ draft, after = null }) {
   return (
     <>
-      <input ref={draft.nameRef} className="input customer-name new-order-name" value={draft.name} maxLength={120} autoComplete="off" placeholder="Customer name"
-        aria-label="Customer name" aria-invalid={!!draft.unnamed} onChange={(e) => draft.setName(e.target.value)} />
+      <div className="name-row">
+        <input ref={draft.nameRef} className="input customer-name new-order-name" value={draft.name} maxLength={120} autoComplete="off" placeholder="Customer name"
+          aria-label="Customer name" aria-invalid={!!draft.unnamed} onChange={(e) => draft.setName(e.target.value)} />
+        {after}
+      </div>
       {draft.unnamed && (
         <div className="name-warning" role="alert">
           <span><Icon.alert /> <b>No name on this order.</b> Add one above, or place it without a name.</span>

@@ -6,7 +6,7 @@ import { useApi, useLeaveGuard, useTick, useWhileVisible } from '../hooks.js';
 import { date, duration, money, toDecimal, todayIso } from '../format.js';
 import { OrderTiming } from '../components/OrderTiming.jsx';
 import { CustomerNameField, ORDER_STATUS_LABEL, PAYMENT_METHODS, OrderStatus, dealLabel, orderItemTile, paymentLabel, saleMenu, tile, time, useSaleDraft } from '../components/Sales.jsx';
-import { Icon, LeaveModal, Notice, Spinner, useToast } from '../components/ui.jsx';
+import { Icon, LeaveModal, Modal, Notice, Spinner, useToast } from '../components/ui.jsx';
 
 // An event picked by hand holds for the day, so leaving the page doesn't switch it back, but one
 // on another date gives way to an event today: see useOrderEvent.
@@ -61,16 +61,33 @@ const OrderNote = ({ order, onSave }) => (
   <OrderField value={order.note} field="note" label="note" placeholder="Add note" className="order-note-btn" max={500} onSave={onSave} />
 );
 
-/** A note for the kitchen on one line of the ticket ("no onions"): a link until there is one. */
-function LineNote({ item, draft }) {
-  const [open, setOpen] = useState(false);
-  if (!open && !item.note) {
-    return <button type="button" className="link-btn pos-line-note-add" disabled={draft.busy} onClick={() => setOpen(true)}>+ Note</button>;
-  }
+/**
+ * A note for the kitchen ("no onions"), typed in a dialog near the top of the screen so a phone's
+ * keyboard doesn't cover it. Done keeps it; Remove clears it.
+ */
+function NoteDialog({ title, value, max, onSave, onClose }) {
+  const [text, setText] = useState(value);
+  const done = () => { onSave(text.trim()); onClose(); };
   return (
-    <input className="input pos-line-note" value={item.note} maxLength={300} autoComplete="off" autoFocus={open && !item.note} placeholder="Note for the kitchen"
-      aria-label={`Note for ${item.r.name}`} onChange={(e) => draft.setLineNote(item.r.key, e.target.value)}
-      onBlur={() => { if (!item.note.trim()) setOpen(false); }} />
+    <Modal title={title} onClose={onClose} className="note-dialog">
+      <textarea className="input" rows={3} value={text} maxLength={max} autoFocus placeholder="For the kitchen, e.g. no onions"
+        aria-label={title} onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); done(); } }} />
+      <div className="form-actions">
+        {value && <button type="button" className="btn ghost" onClick={() => { onSave(''); onClose(); }}>Remove note</button>}
+        <button type="button" className="btn primary" onClick={done}>Done</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** The note icon at the end of a row: filled in once there's a note. */
+function NoteButton({ label, has, disabled, onClick }) {
+  return (
+    <button type="button" className={`icon-btn note-btn ${has ? 'has-note' : ''}`} disabled={disabled} onClick={onClick}
+      aria-label={has ? `Change the ${label}` : `Add a ${label}`} title={has ? `Change the ${label}` : `Add a ${label}`}>
+      <Icon.note />
+    </button>
   );
 }
 
@@ -134,67 +151,69 @@ function CloseButton({ event }) {
 }
 
 /**
- * Tap a tile to add one to the ticket. An item with a deal is split: the large part adds one, the
- * smaller part a deal's worth. An item keeps its color on every screen, so hands learn the menu.
+ * The menu as a list, which is also the order being built: − and + (first, before the name) set how many of each, and the
+ * note icon at the end of a row adds a note for that item once it's on the order. An item with a
+ * deal has a button adding a deal's worth. Each keeps its color on every screen, so hands learn it.
  */
-function MenuTiles({ menu, draft, prepaid }) {
+function MenuList({ menu, draft, prepaid }) {
+  const [noting, setNoting] = useState(null); // the menu row whose note is open
   return (
-    <div className="pos-tiles">
-      {menu.map((r) => {
-        const qty = draft.line[r.key]?.qty ?? 0;
-        const t = draft.tally.get(r.key);
-        return (
-          <div key={r.key} className={`pos-tile-group ${r.dealQty ? 'has-deal' : ''} ${qty ? 'in-line' : ''}`}>
-            <button type="button" className="pos-tile" style={tile(r)} disabled={draft.busy}
-              aria-label={`Add ${r.name}${prepaid ? '' : `, ${money(r.salePrice)}`}${qty ? `, ${qty} on the ticket` : ''}`} onClick={() => draft.change(r, 1)}>
-              <b>{r.name}</b>
-              {!prepaid && <span>{money(r.salePrice)}</span>}
-              <small>{prepaid ? (t ? `${t.sold + t.givenAway} ordered` : 'None yet') : (t ? `${t.sold} sold` : 'None yet')}</small>
-              {qty > 0 && <i className="pos-qty">{qty}</i>}
-            </button>
-            {r.dealQty && (
-              <button type="button" className="pos-add-deal" disabled={draft.busy} aria-label={`Add ${r.dealQty} ${r.name}, ${dealLabel(r)}`} onClick={() => draft.change(r, r.dealQty)}>
-                <b>+{r.dealQty}</b>
-                <small>{money(r.dealPrice)}</small>
+    <>
+      <ul className="pos-items">
+        {menu.map((r) => {
+          const l = draft.line[r.key];
+          const qty = l?.qty ?? 0;
+          const t = draft.tally.get(r.key);
+          const done = t ? (prepaid ? `${t.sold + t.givenAway} ordered` : `${t.sold} sold`) : null;
+          return (
+            <li key={r.key} className={`pos-item tiled ${qty ? 'in-line' : ''}`} style={tile(r)}>
+              <div className="stepper">
+                <button type="button" className="btn" disabled={draft.busy || !qty} onClick={() => draft.change(r, -1)} aria-label={`One fewer ${r.name}`}>−</button>
+                <output aria-label={`${r.name} on the order`}>{qty}</output>
+                <button type="button" className="btn" disabled={draft.busy} onClick={() => draft.change(r, 1)} aria-label={`One more ${r.name}`}>+</button>
+              </div>
+              <button type="button" className="pos-item-name" disabled={draft.busy} onClick={() => draft.change(r, 1)}
+                aria-label={`Add ${r.name}${prepaid ? '' : `, ${money(r.salePrice)}`}`}>
+                <b>{r.name}</b>
+                {(done || l?.note) && (
+                  <small>{done}{done && l?.note ? ' · ' : ''}{l?.note && <span className="pos-item-note">“{l.note}”</span>}</small>
+                )}
               </button>
-            )}
-          </div>
-        );
-      })}
-    </div>
+              {r.dealQty && !prepaid && (
+                <button type="button" className="btn small pos-add-deal" disabled={draft.busy} onClick={() => draft.change(r, r.dealQty)}
+                  aria-label={`Add ${r.dealQty} ${r.name}, ${dealLabel(r)}`}>+{r.dealQty} <small>{money(r.dealPrice)}</small></button>
+              )}
+              {!prepaid && (
+                <button type="button" className="pos-item-price" disabled={draft.busy} onClick={() => draft.change(r, 1)} tabIndex={-1} aria-hidden="true">{money(r.salePrice)}</button>
+              )}
+              <NoteButton label={`note for ${r.name}`} has={!!l?.note} disabled={draft.busy || !qty} onClick={() => setNoting(r)} />
+            </li>
+          );
+        })}
+      </ul>
+      {noting && (
+        <NoteDialog title={`Note for ${noting.name}`} value={draft.line[noting.key]?.note ?? ''} max={300}
+          onSave={(text) => draft.setLineNote(noting.key, text)} onClose={() => setNoting(null)} />
+      )}
+    </>
   );
 }
 
 function Ticket({ draft, prepaid }) {
-  const { items, count, total, discount, busy } = draft;
+  const { count, total, discount, busy } = draft;
+  const [noting, setNoting] = useState(false);
   return (
     <section className="pos-ticket" aria-label="Current order">
-      <div className="pos-lines">
-        {!count && <p className="muted">Tap an item to start an order.</p>}
-        {items.map((item) => {
-          const { r, qty, priced } = item;
-          return (
-          <div key={r.key} className="pos-line tiled" style={tile(r)}>
-            <div className="stepper">
-              <button type="button" className="btn" disabled={busy} onClick={() => draft.change(r, -1)} aria-label={`One fewer ${r.name}`}>−</button>
-              <output aria-label={`${r.name} on the ticket`}>{qty}</output>
-              <button type="button" className="btn" disabled={busy} onClick={() => draft.change(r, 1)} aria-label={`One more ${r.name}`}>+</button>
-            </div>
-            <span className="pos-line-name">{r.name}</span>
-            {!prepaid && <b>{money(priced.amount)}</b>}
-            {priced.deals > 0 && <span className="deal-tag pos-line-deal">{priced.deals > 1 ? `${priced.deals} × ` : ''}{dealLabel(r)}</span>}
-            <LineNote item={item} draft={draft} />
-          </div>
-          );
-        })}
-      </div>
-      <div className="pos-total">
-        <span>{count} item{count === 1 ? '' : 's'}{discount.gt(0) ? `, deal −${money(discount)}` : ''}</span>
-        {!prepaid && <b>{money(total)}</b>}
-      </div>
-      <CustomerNameField draft={draft} />
-      <input className="input order-note-input" value={draft.note} maxLength={500} autoComplete="off" placeholder="Order note (optional)"
-        aria-label="Note for the order" onChange={(e) => draft.setNote(e.target.value)} />
+      {!prepaid && (
+        <div className="pos-total">
+          <span>{count ? `${count} item${count === 1 ? '' : 's'}` : ''}{discount.gt(0) ? `${count ? ', ' : ''}deal −${money(discount)}` : ''}</span>
+          <b>{money(total)}</b>
+        </div>
+      )}
+      <CustomerNameField draft={draft}
+        after={<NoteButton label="note for the order" has={!!draft.note.trim()} disabled={busy} onClick={() => setNoting(true)} />} />
+      {draft.note.trim() && <p className="pos-order-note">“{draft.note.trim()}”</p>}
+      {noting && <NoteDialog title="Note for the order" value={draft.note} max={500} onSave={draft.setNote} onClose={() => setNoting(false)} />}
       {draft.error && <Notice kind="error">{draft.error}</Notice>}
       {prepaid ? (
         // Paid for up front: one button sends it to the kitchen, free.
@@ -319,7 +338,7 @@ function PosDesk({ event }) {
         <div className="pos-sell" data-shown={pane === 'sell'}>
           <div className="pos-menu">
             {menu.length
-              ? <MenuTiles menu={menu} draft={draft} prepaid={prepaid} />
+              ? <MenuList menu={menu} draft={draft} prepaid={prepaid} />
               : <p className="muted">Nothing on the menu yet. <Link to={`/events/${event.id}`}>Add recipes to this event</Link> first.</p>}
           </div>
           <Ticket draft={draft} prepaid={prepaid} />

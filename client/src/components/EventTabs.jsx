@@ -24,8 +24,9 @@ export function Financials({ s, eventId }) {
   const loss = toDecimal(s.profit).lt(0);
   const flat = s.kind !== 'market';
   // What the price column says: a market's price per serving, or the share of the rate an item carries.
+  const hoamsy = s.flat?.hoamsyPercent != null; // a supper club with a Hoamsy fee
   const priceCell = (r) => (flat
-    ? <span title={`${r.share}% of the food cost, so ${r.share}% of the ${s.kind === 'supper_club' ? 'ticket money after Hoamsy’s cut' : 'rate and groceries'}`}>{r.netPrice == null ? '—' : money(r.netPrice)}</span>
+    ? <span title={`${r.share}% of the food cost, so ${r.share}% of the ${s.kind !== 'supper_club' ? 'rate and groceries' : hoamsy ? 'ticket money after Hoamsy’s cut' : 'ticket money'}`}>{r.netPrice == null ? '—' : money(r.netPrice)}</span>
     : <>{money(r.salePrice)}{r.priceSet && <small className="muted" title={`The recipe’s target price is ${money(r.recommendedPrice)}`}> (set)</small>}</>);
   const deals = [...s.recipes, ...s.sauces].some((r) => !toDecimal(r.discount).isZero());
   const laborCost = toDecimal(s.labor.cost);
@@ -37,26 +38,28 @@ export function Financials({ s, eventId }) {
   const plate = (key) => items.reduce((a, r) => a.plus(toDecimal(r[key]) ?? 0), new Decimal(0));
   const marginCell = (r) => flat && <td className="num hide-sm">{r.marginPerServing == null ? '—' : money(r.marginPerServing)}</td>;
   const blank = (deals ? 1 : 0) + (flat ? 1 : 0); // columns between price and cost
+  // At a flat-rate event, labor and the vendor fee are paid out of the rate before the dishes' share.
+  const setAside = flat ? toDecimal(s.flat.passThrough) ?? new Decimal(0) : new Decimal(0);
   return (
     <>
       <div className="figures">
-        {s.kind === 'supper_club' && <div className="panel figure"><span>Hoamsy fee</span><b>{money(s.hoamsyFee)}</b><small className="muted">{s.flat.hoamsyPercent}% of {money(s.flat.gross)} in tickets, taken first</small></div>}
+        {hoamsy && <div className={`panel figure ${toDecimal(s.hoamsyFee).gt(0) ? 'fee' : ''}`}><span>Hoamsy fee</span><b>{toDecimal(s.hoamsyFee).gt(0) ? '−' : ''}{money(s.hoamsyFee)}</b><small className="muted">{s.flat.hoamsyPercent}% of {money(s.flat.gross)} in tickets, taken first</small></div>}
         <div className="panel figure"><span>Projected revenue</span><b>{money(s.revenue)}</b>
-          {s.kind === 'supper_club' && <small className="muted">{s.flat.tickets} tickets × {money(s.flat.flatPrice)}, less the Hoamsy fee</small>}
+          {s.kind === 'supper_club' && <small className="muted">{s.flat.tickets} tickets × {money(s.flat.flatPrice)}{hoamsy ? ', less the Hoamsy fee' : ''}</small>}
           {s.kind === 'personal_chef' && <small className="muted">{money(s.flat.flatPrice)} rate + {money(s.flat.groceries)} groceries</small>}
         </div>
-        <div className="panel figure"><span>Projected cost</span><b>{money(s.totalCost)}</b>{laborCost.gt(0) && <small className="muted">incl. {money(laborCost)} labor</small>}</div>
-        <div className="panel figure"><span>Vendor fee</span><b>{money(s.vendorFee)}</b></div>
+        <div className="panel figure"><span>Projected cost</span><b>{money(s.totalCost)}</b>{laborCost.gt(0) && <small className="muted">{money(toDecimal(s.totalCost).minus(laborCost))} food / {money(laborCost)} labor</small>}</div>
+        <div className="panel figure"><span>Vendor fee</span><b>{money(s.vendorFee)}</b><small className="muted">off the profit</small></div>
         <div className={`panel figure ${loss ? 'loss' : 'profit'}`}><span>Projected profit</span><b>{money(s.profit)}</b></div>
         <div className="panel figure" title={flat ? 'The food’s revenue (after labor and the vendor fee are paid back at cost) less the food, over that revenue' : 'Revenue less the food, over revenue'}><span>Gross margin</span><b>{s.grossMarginPercent == null ? '—' : `${s.grossMarginPercent}%`}</b><small className="muted">on food</small></div>
         <div className={`panel figure ${loss ? 'loss' : ''}`} title="Profit over revenue: food, labor and the vendor fee all out"><span>Net margin</span><b>{s.marginPercent == null ? '—' : `${s.marginPercent}%`}</b><small className="muted">after food, labor and fees</small></div>
       </div>
       <div className="panel table-wrap">
-        <table className="grid">
+        <table className="grid fin-table">
           <thead>
             <tr>
               <th>Recipe</th><th className="num hide-sm">Servings</th><th className="num hide-sm">Cost / serving</th><th className="num hide-sm" title={flat ? 'Each item’s revenue per serving: its share of the revenue, by its share of the food cost' : undefined}>{flat ? 'Revenue / serving' : 'Price / serving'}</th>
-              {flat && <th className="num hide-sm" title="What a serving makes after its food and its share of labor, the vendor fee and amounts set by hand">Margin / serving</th>}
+              {flat && <th className="num hide-sm" title="What a serving makes on its food (and its share of amounts set by hand); labor and the vendor fee are set aside from the rate first">Margin / serving</th>}
               {deals && <th className="num hide-sm" title="Deals taken off revenue, as if every serving sells on the deal">Discounts</th>}
               <th className="num">Cost</th><th className="num">Revenue</th><th className="num">Profit</th>
             </tr>
@@ -88,21 +91,29 @@ export function Financials({ s, eventId }) {
                 <td className="num">{money(b.profit)}</td>
               </tr>
             ))}
+            {setAside.gt(0) && (
+              <tr className="set-aside-row">
+                <td>Set aside for labor and the vendor fee <span className="muted">(out of the {s.kind === 'supper_club' ? 'tickets' : 'rate'}, at cost)</span></td>
+                <td className="hide-sm" colSpan={3 + blank} />
+                <td />
+                <td className="num">{money(setAside)}</td>
+                <td className="num">+{money(setAside)}</td>
+              </tr>
+            )}
             <tr className="labor-row">
-              <td>Labor{s.labor.rate === null && <> <span className="badge warn">No rate</span></>}</td>
-              <td className="num hide-sm"><LaborInput key={`h:${s.labor.hours}`} eventId={eventId} field="hours" value={s.labor.hours} /></td>
-              <td className="num nowrap hide-sm"><LaborInput key={`r:${s.labor.rate}`} eventId={eventId} field="rate" value={s.labor.rate} /></td>
-              <td className="hide-sm" colSpan={1 + blank} />
-              <td className="num">
-                {money(laborCost)}
+              <td>
+                Labor{s.labor.rate === null && <> <span className="badge warn">No rate</span></>}
+                {/* On a phone the hours and rate columns are hidden: their boxes go under the name, not in Cost. */}
                 <div className="show-sm labor-sm">
                   <LaborInput key={`h:${s.labor.hours}`} eventId={eventId} field="hours" value={s.labor.hours} />
                   <LaborInput key={`r:${s.labor.rate}`} eventId={eventId} field="rate" value={s.labor.rate} />
                 </div>
               </td>
-              {flat
-                ? <><td className="num" title="Paid back at cost out of the rate, before the menu’s share">{money(laborCost)}</td><td className="num muted">{money(0)}</td></>
-                : <><td /><td className="num">−{money(laborCost)}</td></>}
+              <td className="num hide-sm"><LaborInput key={`h:${s.labor.hours}`} eventId={eventId} field="hours" value={s.labor.hours} /></td>
+              <td className="num nowrap hide-sm"><LaborInput key={`r:${s.labor.rate}`} eventId={eventId} field="rate" value={s.labor.rate} /></td>
+              <td className="hide-sm" colSpan={1 + blank} />
+              <td className="num">{money(laborCost)}</td>
+              <td /><td className="num">−{money(laborCost)}</td>
             </tr>
             {!other.toDecimalPlaces(2).isZero() && (
               <tr className="labor-row">
@@ -117,9 +128,7 @@ export function Financials({ s, eventId }) {
               <tr className="fee-row">
                 <td>Vendor fee</td>
                 <td className="hide-sm" colSpan={3 + blank} />
-                {flat
-                  ? <><td /><td className="num" title="Paid back at cost out of the rate, before the menu’s share">{money(s.vendorFee)}</td><td className="num muted">{money(0)}</td></>
-                  : <><td /><td /><td className="num">−{money(s.vendorFee)}</td></>}
+                <td /><td /><td className="num">−{money(s.vendorFee)}</td>
               </tr>
             )}
 
@@ -146,8 +155,8 @@ export function Results({ s, form, set, setForm, eventId }) {
   const guests = isInt(form.guestCount) ? new Decimal(form.guestCount) : null;
   const actualGuests = isInt(form.actualGuests) ? new Decimal(form.actualGuests) : null;
   const entered = dec(form.actualRevenue);
-  // A supper club's actual revenue is the ticket money; Hoamsy takes its share of that first, as in the plan.
-  const keep = s.kind === 'supper_club' ? new Decimal(1).minus(toDecimal(s.flat.hoamsyPercent).div(100)) : null;
+  // A supper club's actual revenue is the ticket money; with a Hoamsy fee, Hoamsy takes its share of that first, as in the plan.
+  const keep = s.flat?.hoamsyPercent != null ? new Decimal(1).minus(toDecimal(s.flat.hoamsyPercent).div(100)) : null;
   const revenue = entered && keep ? entered.times(keep) : entered;
   const hoamsy = entered && keep ? entered.minus(revenue) : null;
   const spend = dec(form.actualCost);

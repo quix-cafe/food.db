@@ -4,6 +4,7 @@ import { createBrowserRouter, RouterProvider } from 'react-router';
 import '@fontsource-variable/archivo/wdth.css';
 import '@fontsource-variable/roboto-slab';
 import './styles.css';
+import './theme-alt.css';
 import App from './App.jsx';
 
 // A data router (rather than <BrowserRouter>) so pages can use useBlocker to confirm

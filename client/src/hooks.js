@@ -216,15 +216,32 @@ export function useMedia(query) {
  * that fits its width gets `data-fits="1"` (no scroll box, so its headers stick under the page's
  * sticky bar, whose height goes in --sticky-top; see styles.css), and a wider one `data-fits="0"`,
  * whose header cells are moved down with the page instead (a transform, kept inside the table).
+ *
+ * On a phone the search / Quick add / POS bar sits under the sticky app bar and gets out of the way
+ * while scrolling down: `data-hidden` slides it up behind the app bar, and scrolling up (or nearing
+ * the top) brings it straight back. The headers stick under whatever is showing.
  */
 export function useStickyTableHeads() {
   useEffect(() => {
     let frame = 0;
+    let lastY = window.scrollY;
     const update = () => {
       frame = 0;
-      const bar = document.querySelector(window.innerWidth <= 800 ? '.sidebar' : '.topbar');
-      document.documentElement.style.setProperty('--sticky-top', `${bar?.offsetHeight ?? 0}px`);
-      const top = bar?.offsetHeight ?? 0;
+      const phone = window.innerWidth <= 800;
+      const bar = document.querySelector(phone ? '.sidebar' : '.topbar');
+      let top = bar?.offsetHeight ?? 0;
+      const tools = phone ? document.querySelector('.topbar') : null;
+      if (tools) {
+        const y = window.scrollY;
+        const hide = y > top + tools.offsetHeight && (y > lastY + 4 ? true : y < lastY - 4 ? false : tools.dataset.hidden === '1');
+        if (Math.abs(y - lastY) > 4 || y <= top) lastY = y;
+        if ((tools.dataset.hidden === '1') !== hide) tools.dataset.hidden = hide ? '1' : '0';
+        document.documentElement.style.setProperty('--app-bar', `${top}px`);
+        if (!hide) top += tools.offsetHeight;
+      } else {
+        document.querySelector('.topbar')?.removeAttribute('data-hidden');
+      }
+      document.documentElement.style.setProperty('--sticky-top', `${top}px`);
       for (const wrap of document.querySelectorAll('.page .table-wrap')) {
         if (wrap.closest('.modal, .drawer')) continue;
         const fits = wrap.scrollWidth <= wrap.clientWidth + 1 ? '1' : '0';

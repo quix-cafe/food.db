@@ -344,7 +344,7 @@ test('supper clubs and personal chef jobs: recipes take a share of the rate, and
   await api('POST', `/events/${ev.id}/recipes`, { recipeId: ids.pasta, expectedServings: 12, salePrice: '9' });
   const save = async (body) => api('PUT', `/events/${ev.id}`, { name: 'Supper', date: '2026-11-05', guestCount: 12, version: (await api('GET', `/events/${ev.id}`)).data.version, ...body });
   assert.equal((await save({ kind: 'potluck' })).status, 400);
-  assert.equal((await save({ kind: 'supper_club', flatPrice: '50' })).status, 200);
+  assert.equal((await save({ kind: 'supper_club', flatPrice: '50', hoamsyPercent: '25' })).status, 200);
   const s = (await api('GET', `/events/${ev.id}/summary`)).data;
   // Hoamsy's 25% comes off the $600 of tickets first.
   assert.deepEqual([s.kind, s.flat.gross, s.hoamsyFee, s.revenue, s.recipes[0].share, s.recipes[0].revenue, s.recipes[0].salePrice], ['supper_club', '600.00', '150.00', '450.00', '100.0', '450.00', null]);

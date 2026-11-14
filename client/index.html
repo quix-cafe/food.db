@@ -11,6 +11,10 @@
         var t = null;
         try { t = localStorage.getItem('theme'); } catch (e) {}
         document.documentElement.dataset.theme = t === 'dark' ? 'dark' : 'light';
+        // The alternate theme (Backup page), off by default.
+        var k = null;
+        try { k = localStorage.getItem('skin'); } catch (e) {}
+        if (k === 'alt') document.documentElement.dataset.skin = 'alt';
       })();
     </script>
   </head>

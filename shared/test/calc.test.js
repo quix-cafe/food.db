@@ -161,7 +161,7 @@ test('a personal chef job or supper club shares its rate out by food cost', asyn
 
   // Supper club: 10 tickets at $40. Hoamsy takes 25% first, so revenue is the $300 left, shared out;
   // every dish makes the same margin percent.
-  const supper = (more) => summarizeEvent(menu, {}, { format: { kind: 'supper_club', flatPrice: '40', tickets: '10', ...more }, labor: { hours: '2', rate: '20' }, vendorFee: '10' });
+  const supper = (more) => summarizeEvent(menu, {}, { format: { kind: 'supper_club', flatPrice: '40', tickets: '10', hoamsyPercent: '25', ...more }, labor: { hours: '2', rate: '20' }, vendorFee: '10' });
   const club = supper();
   assert.deepEqual([club.kind, club.flat.gross, club.hoamsyFee, club.revenue, club.totalCost, club.profit], ['supper_club', '400.00', '100.00', '300.00', '80.0000', '210.00']);
   // Labor and the vendor fee ($50) are paid back at cost first; the $250 left is the dishes' revenue,
@@ -183,7 +183,10 @@ test('a personal chef job or supper club shares its rate out by food cost', asyn
   const sold = summarizeEvent(menu, {}, { vendorFee: '10', labor: { hours: '1', rate: '20' } });
   assert.deepEqual([sold.revenue, sold.grossMarginPercent, sold.marginPercent], ['50.00', '20.0', '-40.0']);
   // A fee or labor adds its own amount, spread over the tickets after Hoamsy: $30 more is $4 a plate.
-  const fee30 = summarizeEvent(menu, {}, { format: { kind: 'supper_club', flatPrice: '40', tickets: '10' }, labor: { hours: '2', rate: '20' }, vendorFee: '40' });
+  const fee30 = summarizeEvent(menu, {}, { format: { kind: 'supper_club', flatPrice: '40', tickets: '10', hoamsyPercent: '25' }, labor: { hours: '2', rate: '20' }, vendorFee: '40' });
+  // Without a Hoamsy fee (unticked), the tickets are all revenue.
+  const none = supper({ hoamsyPercent: null });
+  assert.deepEqual([none.hoamsyFee, none.revenue, none.flat.hoamsyPercent, none.flat.suggestedPrice], ['0.00', '400.00', null, '21.00']); // $210 over 10 tickets
   assert.equal(fee30.flat.suggestedPrice, '32.00');
   // Its own Hoamsy fee.
   assert.deepEqual([supper({ hoamsyPercent: '20' }).hoamsyFee, supper({ hoamsyPercent: '20' }).revenue], ['80.00', '320.00']);
