@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import CropModal from './CropModal.jsx';
 import { Icon, Spinner } from './ui.jsx';
 
 const ACCEPT = 'image/jpeg,image/png,image/webp,image/gif';
@@ -7,10 +8,12 @@ const ACCEPT = 'image/jpeg,image/png,image/webp,image/gif';
  * Thumbnail grid with add/remove/cover controls and a full-size viewer.
  * images: [{ id, url, originalName }] — the first one is the cover when `onMakeCover` is given.
  * `onRotate(image, 'left' | 'right')`, where given, offers turning a photo a quarter turn (a receipt
- * photographed sideways), on its thumbnail and in the viewer.
+ * photographed sideways), on its thumbnail and in the viewer. `onCrop(image, rect)`, where given, offers
+ * cutting a photo down to a rectangle of itself (`rect` in fractions of it; see CropModal).
  */
-export default function ImageGallery({ images, onAdd, onRemove, onMakeCover, onRotate, busy = false, label = 'photo', emptyText }) {
+export default function ImageGallery({ images, onAdd, onRemove, onMakeCover, onRotate, onCrop, busy = false, label = 'photo', emptyText }) {
   const [viewing, setViewing] = useState(null);
+  const [cropping, setCropping] = useState(null);
   const [over, setOver] = useState(false);
   // The photo being turned: { id, from }, its thumbnail's URL before. Held until the turned
   // thumbnail has loaded, so the photo stays covered (and can't be turned again) until it shows.
@@ -47,10 +50,11 @@ export default function ImageGallery({ images, onAdd, onRemove, onMakeCover, onR
             {turning?.id === img.id && <span className="turning-cover" role="status"><Spinner /> Rotating…</span>}
           </button>
           {onMakeCover && i === 0 && images.length > 1 && <span className="badge cover-badge">Cover</span>}
-          {(onRemove || onRotate || (onMakeCover && i > 0)) && (
+          {(onRemove || onRotate || onCrop || (onMakeCover && i > 0)) && (
             <figcaption>
               {onMakeCover && i > 0 && <button type="button" className="link-btn" onClick={() => onMakeCover(img)}>Make cover</button>}
               {rotate && <RotateButtons label={`${label} ${i + 1}`} disabled={!!turning} onRotate={(direction) => rotate(img, direction)} />}
+              {onCrop && <button type="button" className="icon-btn crop-btn" aria-label={`Crop ${label} ${i + 1}`} title="Crop" onClick={() => setCropping(img)}><Icon.crop /></button>}
               {onRemove && (
                 <button type="button" className="icon-btn" aria-label={`Remove ${label} ${i + 1}`} onClick={() => onRemove(img)}><Icon.trash /></button>
               )}
@@ -68,8 +72,10 @@ export default function ImageGallery({ images, onAdd, onRemove, onMakeCover, onR
       {!images.length && !onAdd && emptyText && <p className="muted">{emptyText}</p>}
       {viewing !== null && images[viewing] && (
         <Lightbox images={images} index={viewing} onIndex={setViewing} onClose={() => setViewing(null)}
-          onRotate={rotate && ((direction) => rotate(images[viewing], direction))} turning={turning?.id === images[viewing].id} />
+          onRotate={rotate && ((direction) => rotate(images[viewing], direction))} turning={turning?.id === images[viewing].id}
+          onCrop={onCrop && (() => { setCropping(images[viewing]); setViewing(null); })} />
       )}
+      {cropping && <CropModal image={cropping} onCrop={(rect) => onCrop(cropping, rect)} onClose={() => setCropping(null)} />}
     </div>
   );
 }
@@ -83,7 +89,7 @@ function RotateButtons({ label, disabled, onRotate }) {
   );
 }
 
-function Lightbox({ images, index, onIndex, onClose, onRotate, turning }) {
+function Lightbox({ images, index, onIndex, onClose, onRotate, onCrop, turning }) {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') onClose();
@@ -111,6 +117,7 @@ function Lightbox({ images, index, onIndex, onClose, onRotate, turning }) {
             <button type="button" className="btn small" disabled={turning} onClick={() => onRotate('right')}><Icon.rotateRight /> Rotate right</button>
           </>
         )}
+        {onCrop && <button type="button" className="btn small" onClick={onCrop}><Icon.crop /> Crop</button>}
         <button type="button" className="btn small" onClick={onClose} autoFocus>Close</button>
       </div>
     </div>

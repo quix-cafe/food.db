@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { api, notifyDataChanged } from '../api.js';
 import { estimatedCupGrams, normalizeUnit, unitRatio } from '@kitchen/shared';
 import { useApi } from '../hooks.js';
+import { useSkinPart } from '../skin.js';
 import { Decimal, date, money, pack, perUnit, qty, signedPercent, toDecimal, unitMoney } from '../format.js';
 import { CategoryInput, PurchaseFields, UomInput, emptyPurchase } from './forms.jsx';
 import PriceChart from './PriceChart.jsx';
@@ -10,7 +11,7 @@ import { Drawer, Field, Icon, Notice, Spinner, TestBadge, useToast } from './ui.
 
 const cupText = (v) => (v ? toDecimal(v).toString() : '');
 /** 'weight' or 'volume' for a unit kitchen measures convert, else null (each, box). */
-const measurable = (uom) => {
+export const measurable = (uom) => {
   const u = normalizeUnit(uom);
   if (!u) return null;
   return unitRatio(u, 'g') ? 'weight' : unitRatio(u, 'tsp') ? 'volume' : null;
@@ -19,8 +20,15 @@ const measurable = (uom) => {
 /**
  * An ingredient's detail panel: prices, details, where it's used, purchases. Also opened over the
  * recipe builder, which passes no `onMerge` (merging needs this page) and no duplicates.
+ * A skin may bring its own panel (`registerSkinPart('IngredientDrawer', …)`), shown wherever this one is.
  */
-export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMerge }) {
+export function IngredientDrawer(props) {
+  const Skinned = useSkinPart('IngredientDrawer');
+  return Skinned ? <Skinned {...props} /> : <DefaultIngredientDrawer {...props} />;
+}
+
+/** The panel's data, its details form and what it can change; shared by every skin's panel. */
+export function useIngredientPanel(id, onClose) {
   const { data, error, reload } = useApi(`/ingredients/${id}/history`);
   const { data: vendors } = useApi('/ingredients/vendors');
   const [form, setForm] = useState(null);
@@ -77,6 +85,18 @@ export function IngredientDrawer({ id, onClose, duplicates = [], onReview, onMer
   const purchaseById = new Map((data?.purchases ?? []).map((p) => [p.id, p]));
   const latest = data?.trips[0]; // newest first; a trip is one receipt's lines, averaged
   const hike = latest?.priceHike ? latest : null;
+
+  return {
+    data, error, vendors, ing, form, setForm, dirty, saving, formError, adding, setAdding, purchase, setPurchase, confirmDelete, setConfirmDelete,
+    run, save, addPurchase, remove, removeAlias, removePurchase, purchaseById, latest, hike,
+  };
+}
+
+function DefaultIngredientDrawer({ id, onClose, duplicates = [], onReview, onMerge }) {
+  const {
+    data, error, vendors, ing, form, setForm, dirty, saving, formError, adding, setAdding, purchase, setPurchase, confirmDelete, setConfirmDelete,
+    run, save, addPurchase, remove, removeAlias, removePurchase, purchaseById, hike,
+  } = useIngredientPanel(id, onClose);
 
   return (
     <Drawer title={ing ? <>{ing.name} <TestBadge item={ing} /></> : 'Loading…'} subtitle={ing && `Asset ID ${ing.id.slice(0, 8)}`} onClose={onClose}>
@@ -289,7 +309,7 @@ const PURCHASE_FIELDS = {
  * pack price and the total in agreement: new packs keep the total, a new price or total works out
  * the other.
  */
-function PurchaseNumberInput({ purchase, field, uom, ingredientId, run }) {
+export function PurchaseNumberInput({ purchase, field, uom, ingredientId, run }) {
   const spec = PURCHASE_FIELDS[field];
   const stored = toDecimal(purchase[field]);
   const saved = spec.money && stored.decimalPlaces() <= 2 ? stored.toFixed(2) : stored.toString(); // $1.50, but $0.3317 a lime
@@ -317,7 +337,7 @@ function PurchaseNumberInput({ purchase, field, uom, ingredientId, run }) {
  * A purchase's vendor, editable in place to fill in a missing one or fix a wrong one (saved on
  * Enter or when leaving the field; Escape undoes; blank clears it). Suggests vendors already in use.
  */
-function VendorInput({ purchase, ingredientId, run }) {
+export function VendorInput({ purchase, ingredientId, run }) {
   const saved = purchase.vendor ?? '';
   const [value, setValue] = useState(saved);
   useEffect(() => setValue(saved), [saved]);
@@ -336,7 +356,7 @@ function VendorInput({ purchase, ingredientId, run }) {
 }
 
 /** The recipes an ingredient is in, directly or through a Spice Lab blend or sauce. */
-function UsedIn({ usedIn, ing }) {
+export function UsedIn({ usedIn, ing }) {
   const { recipes, blends } = usedIn;
   return (
     <section className="used-in">
@@ -374,10 +394,10 @@ function undo(e, value, saved, setValue) {
   setValue(saved);
 }
 
-const averageUnitPrice = (purchases) =>
+export const averageUnitPrice = (purchases) =>
   purchases.reduce((sum, p) => sum.plus(p.unitPrice), new Decimal(0)).div(purchases.length);
 
-function Change({ value, hike }) {
+export function Change({ value, hike }) {
   if (value == null) return <span className="muted">—</span>;
   const d = toDecimal(value);
   const cls = hike ? 'price-up' : d.lt(0) ? 'price-down' : '';

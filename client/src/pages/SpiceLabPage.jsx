@@ -12,18 +12,18 @@ import { Field, Icon, LeaveModal, Modal, Notice, SaveButton, Spinner, TestBadge,
 import { IngredientDrawer } from '../components/IngredientDrawer.jsx';
 
 /** A spice keeps the color of its position in the blend; past the palette it's "Other". */
-const colorAt = (i) => SERIES[i] ?? OTHER;
+export const colorAt = (i) => SERIES[i] ?? OTHER;
 
 // A sauce's scaler: anything up to a gallon on the slider, by the quarter quart; more can be typed.
 const QUART_OZ = SAUCE_CONTAINERS['1 qt'];
-const QT_STEP = 0.25;
+export const QT_STEP = 0.25;
 const MAX_SLIDER_QT = 4;
 
 /**
  * Donut of a blend by weight. items: calculateBlend items, in blend order. Spices beyond the
  * palette are folded into one "Other" slice rather than given made-up colors.
  */
-function BlendPie({ items, totalGrams, size = 220, interactive = true }) {
+export function BlendPie({ items, totalGrams, size = 220, interactive = true }) {
   const slices = [];
   let other = 0;
   items.forEach((it, i) => {
@@ -149,13 +149,16 @@ const apiBody = (f) => ({
   ...(f.kind === 'sauce' ? { servingOz: f.servingOz, salePrice: priceText(f.salePrice) } : { servings: f.servings }),
 });
 const savedShape = (f) => JSON.stringify(apiBody(f));
-const wholeNumber = (v) => /^\d+$/.test(String(v).trim()) && Number(v) > 0;
-const amountProblem = (it) => { const a = parseAmount(it.amount); return !a || a.lte(0); };
+export const wholeNumber = (v) => /^\d+$/.test(String(v).trim()) && Number(v) > 0;
+export const amountProblem = (it) => { const a = parseAmount(it.amount); return !a || a.lte(0); };
 /** A sauce's serving size in oz: above 0 and no more than its container. */
-const servingProblem = (f) => { const s = toDecimal(f.servingOz); return !s || s.lte(0) || s.gt(SAUCE_CONTAINERS[f.container] ?? 0); };
+export const servingProblem = (f) => { const s = toDecimal(f.servingOz); return !s || s.lte(0) || s.gt(SAUCE_CONTAINERS[f.container] ?? 0); };
 
-/** Edits a spice blend, or a sauce (`kind="sauce"` for a new one). A saved blend can be made a sauce; a sauce stays one. */
-export function BlendEditor({ kind: newKind = 'spice' }) {
+/**
+ * A spice blend or sauce as its page edits it: the form, the live breakdown, scaling, saving and the
+ * leave guard. Shared by every skin's editor. `form` is null until it has loaded (or failed: `loadError`).
+ */
+export function useBlendEditor(newKind = 'spice') {
   const { id } = useParams();
   const blank = useMemo(() => blankFor(newKind), [newKind]);
   const [form, setForm] = useState(id ? null : blank);
@@ -213,8 +216,7 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
     amount: parseAmount(it.amount)?.toString() ?? '0',
   })), form), [form]);
 
-  if (loadError) return <main className="page"><Notice kind="error">{loadError}</Notice><Link to="/spice-lab">Back to the Spice Lab</Link></main>;
-  if (!form) return <main className="page"><Spinner /></main>;
+  if (loadError || !form) return { loadError, form: null };
 
   // After the ingredient panel closes, its items pick up any rename or new price; amounts stay.
   const closeIngredient = async (ingredientId) => {
@@ -324,6 +326,26 @@ export function BlendEditor({ kind: newKind = 'spice' }) {
   const priceHint = ownPrice && servingCost && ownPrice.gt(0) ? `Per serving, ${new Decimal(1).minus(servingCost.div(ownPrice)).times(100).toFixed(1)}% margin`
     : !ownPrice && marginPrice ? `Per serving. Left blank: ${money(marginPrice)} at the default margin`
     : 'Per serving';
+
+  return {
+    id, form, setForm, saveError, saving, search, setSearch, deleting, setDeleting, viewing, setViewing, rowProps, handleProps,
+    needed, setNeeded, setMakeQt, savedKind, asBlend, setAsBlend, dirty, blocker, phone, breakdown, closeIngredient, setContainer,
+    setItem, removeItem, addItem, sauce, noun, thing, addIngredient, problems, base, qtText, quarts, quartsOk, scale, scaled,
+    qtSliderMax, qtSlider, sliderMax, save, remove, costed, grams, tsp, batch, servingOz, perContainer, servingCost, marginPrice, ownPrice, priceHint,
+  };
+}
+
+/** Edits a spice blend, or a sauce (`kind="sauce"` for a new one). A saved blend can be made a sauce; a sauce stays one. */
+export function BlendEditor({ kind = 'spice' }) {
+  const editor = useBlendEditor(kind);
+  if (editor.loadError) return <main className="page"><Notice kind="error">{editor.loadError}</Notice><Link to="/spice-lab">Back to the Spice Lab</Link></main>;
+  if (!editor.form) return <main className="page"><Spinner /></main>;
+  const {
+    id, form, setForm, saveError, saving, search, setSearch, deleting, setDeleting, viewing, setViewing, rowProps, handleProps,
+    needed, setNeeded, setMakeQt, savedKind, asBlend, setAsBlend, dirty, blocker, phone, breakdown, closeIngredient, setContainer,
+    setItem, removeItem, addItem, sauce, noun, thing, addIngredient, problems, base, qtText, quarts, quartsOk, scale, scaled,
+    qtSliderMax, qtSlider, sliderMax, save, remove, costed, grams, tsp, batch, servingOz, perContainer, servingCost, marginPrice, ownPrice, priceHint,
+  } = editor;
 
   return (
     <main className="page">

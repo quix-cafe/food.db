@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { calculateRecipe, DEFAULT_MARGIN, parseAmount, recipeUnits, scaleAmounts } from '@kitchen/shared';
 import { api, imageForm, notifyDataChanged } from '../api.js';
 import { useLeaveGuard, useRowReorder } from '../hooks.js';
 import ImageGallery, { useLocalImages } from '../components/ImageGallery.jsx';
+import { cropFile } from '../components/CropModal.jsx';
 import { date, money, pack, percent, perUnit, qty, unitMoney, toDecimal } from '../format.js';
 import IngredientCombobox from '../components/IngredientCombobox.jsx';
 import { Field, Icon, LeaveModal, Modal, Notice, SaveButton, Spinner, TestBadge, useToast } from '../components/ui.jsx';
@@ -60,9 +61,9 @@ const fromServer = (r) => ({
 // measured in grams (a sauce in oz), its "pack" being one batch of the blend.
 // Amounts are typed as decimals or fractions ("1/2", "1 1/2", "½") and sent as decimals.
 const amountOf = (l) => parseAmount(l.amount)?.toString() ?? l.amount;
-const lineUnit = (l) => (l.unit && l.unit !== l.uom ? l.unit : null);
+export const lineUnit = (l) => (l.unit && l.unit !== l.uom ? l.unit : null);
 const apiLines = (lines) => lines.map((l) => (l.blendId ? { blendId: l.blendId, amount: amountOf(l) } : { ingredientId: l.ingredientId, amount: amountOf(l), unit: lineUnit(l) }));
-const amountProblem = (lines) => lines.some((l) => { const a = parseAmount(l.amount); return !a || a.lt(0); });
+export const amountProblem = (lines) => lines.some((l) => { const a = parseAmount(l.amount); return !a || a.lt(0); });
 
 const savedShape = (f) => JSON.stringify({ ...f, lines: apiLines(f.lines) });
 
@@ -71,7 +72,7 @@ const savedShape = (f) => JSON.stringify({ ...f, lines: apiLines(f.lines) });
  * weight can be measured by volume once a cup of it has a weight (rice: about 185 g), and the
  * other way round. The number stays as typed when the unit changes.
  */
-function AmountInput({ line: l, problem, onChange }) {
+export function AmountInput({ line: l, problem, onChange }) {
   const units = l.blendId ? [l.uom ?? 'each'] : recipeUnits(l);
   const unit = lineUnit(l) ?? l.uom ?? 'each';
   const input = (
@@ -91,12 +92,15 @@ function AmountInput({ line: l, problem, onChange }) {
   );
 }
 
-export default function RecipeBuilder() {
-  const { id } = useParams();
+/**
+ * A recipe as its page edits it: the form, the instant costing, saving, photos and the leave guard.
+ * Shared by every skin's recipe page.
+ */
+export function useRecipeBuilder(id) {
   const [form, setForm] = useState(id ? null : blank);
   const [saved, setSaved] = useState(id ? null : savedShape(blank));
   const [expected, setExpected] = useState(id ? '' : blank.baseServings);
-  const sizeStart = useRef(null); // the size and amounts when the size box was entered, so typing can't compound
+  const [sizeWas, setSizeWas] = useState(null); // the size when its box was entered: what "scale the amounts" scales from
   const [loadError, setLoadError] = useState(null);
   const [removing, setRemoving] = useState(null); // the line waiting on "Remove it?"
   const [saveError, setSaveError] = useState(null);
@@ -190,23 +194,31 @@ export default function RecipeBuilder() {
     }
   }, [form, expected]);
 
-  if (loadError) return <main className="page"><Notice kind="error">{loadError}</Notice><Link to="/recipes">Back to recipes</Link></main>;
-  if (!form) return <main className="page"><Spinner /></main>;
-
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   // Total qty needed follows size per serving × expected servings; it's what's saved as the yield.
-  // The servings stay, so each needs more or less of everything: the amounts scale with the size.
+  // The amounts stay exactly as written: a new size only offers to scale them (`sizeOffer`), since
+  // it may be a correction to the header rather than a bigger or smaller serving.
   const setServingSize = (e) => {
     const servingSize = e.target.value;
-    const { size, amounts } = sizeStart.current;
-    const scaled = scaleAmounts(amounts, size, servingSize);
-    setForm((f) => ({ ...f, servingSize, totalYield: totalQty(servingSize, f.baseServings), lines: f.lines.map((l, i) => ({ ...l, amount: scaled[i] })) }));
+    setForm((f) => ({ ...f, servingSize, totalYield: totalQty(servingSize, f.baseServings) }));
   };
+  const noteSizeStart = () => setSizeWas(form.servingSize);
+  const sizeFrom = toDecimal(sizeWas);
+  const sizeTo = toDecimal(form?.servingSize);
+  const sizeOffer = form?.lines.length && sizeFrom?.gt(0) && sizeTo?.gt(0) && !sizeFrom.eq(sizeTo)
+    ? { from: sizeFrom.toString(), to: sizeTo.toString(), factor: sizeTo.div(sizeFrom).toDecimalPlaces(2).toString() }
+    : null;
+  const scaleToSize = () => {
+    const scaled = scaleAmounts(form.lines.map((l) => l.amount), sizeWas, form.servingSize);
+    setForm((f) => ({ ...f, lines: f.lines.map((l, i) => ({ ...l, amount: scaled[i] })) }));
+    setSizeWas(null);
+  };
+  const keepAmounts = () => setSizeWas(null);
   const setServings = (e) => {
     const baseServings = e.target.value;
     setForm((f) => ({ ...f, baseServings, totalYield: f.servingSize.trim() ? totalQty(f.servingSize, baseServings) : f.totalYield }));
   };
-  const unitLabel = form.yieldUnit.trim() || 'units';
+  const unitLabel = form?.yieldUnit.trim() || 'units';
 
   // Typing a price sets it by hand: it's saved and kept when ingredient costs change. The margin it
   // makes (1 − cost / price) is saved too, as where the slider starts if the price is let go.
@@ -224,7 +236,7 @@ export default function RecipeBuilder() {
     setForm((f) => ({ ...f, targetMargin: margin.toString(), targetPrice: p.toFixed(2) }));
   };
   // With a price set by hand the slider shows the margin that price makes now.
-  const shownMargin = costing?.priceSet ? costing.targetMargin : form.targetMargin;
+  const shownMargin = costing?.priceSet ? costing.targetMargin : form?.targetMargin;
   const marginLoss = costing?.priceSet && toDecimal(costing.targetMargin).lt(0);
   const setLine = (key, patch) => setForm((f) => ({ ...f, lines: f.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) }));
   const removeLine = (key) => setForm((f) => ({ ...f, lines: f.lines.filter((l) => l.key !== key) }));
@@ -304,12 +316,43 @@ export default function RecipeBuilder() {
   const removePhoto = (img) => (id
     ? photoAction(async () => { await api(`/images/${img.id}`, { method: 'DELETE' }); return images.filter((i) => i.id !== img.id); })
     : setPendingPhotos((p) => p.filter((f) => f !== img.file)));
+  // A saved photo is cropped on the server (its file is replaced); one waiting for Create, here in the browser.
+  const cropPhoto = async (img, rect) => {
+    if (!id) {
+      const cut = await cropFile(img.file, rect);
+      setPendingPhotos((p) => p.map((f) => (f === img.file ? cut : f)));
+      return;
+    }
+    const cut = await api(`/images/${img.id}/crop`, { method: 'POST', body: rect });
+    setImages((list) => list.map((i) => (i.id === cut.id ? cut : i)));
+    notifyDataChanged();
+  };
   const makeCover = (img) => (id
     ? photoAction(() => api(`/recipes/${id}/images/order`, { method: 'PUT', body: { imageIds: [img.id, ...images.filter((i) => i.id !== img.id).map((i) => i.id)] } }))
     : setPendingPhotos((p) => [img.file, ...p.filter((f) => f !== img.file)]));
 
   const lineById = new Map((costing?.lines ?? []).map((l) => [l.key, l]));
   const scaled = costing && costing.scale !== '1';
+
+  return {
+    form, setForm, expected, setExpected, noteSizeStart, sizeOffer, scaleToSize, keepAmounts, loadError, removing, setRemoving, saveError, saving, viewing, setViewing, search, setSearch,
+    rowProps, handleProps, addToEvent, setAddToEvent, images, pendingImages, photoBusy, photoError, priceDraft, setPriceDraft, closeIngredient,
+    dirty, blocker, costing, calcError, set, setServingSize, setServings, unitLabel, priceProblem, setPrice, shownMargin, marginLoss,
+    setLine, removeLine, addIngredient, save, addPhotos, removePhoto, makeCover, cropPhoto, lineById, scaled,
+  };
+}
+
+export default function RecipeBuilder() {
+  const { id } = useParams();
+  const {
+    form, setForm, expected, setExpected, noteSizeStart, sizeOffer, scaleToSize, keepAmounts, loadError, removing, setRemoving, saveError, saving, viewing, setViewing, search, setSearch,
+    rowProps, handleProps, addToEvent, setAddToEvent, images, pendingImages, photoBusy, photoError, priceDraft, setPriceDraft, closeIngredient,
+    dirty, blocker, costing, calcError, set, setServingSize, setServings, unitLabel, priceProblem, setPrice, shownMargin, marginLoss,
+    setLine, removeLine, addIngredient, save, addPhotos, removePhoto, makeCover, cropPhoto, lineById, scaled,
+  } = useRecipeBuilder(id);
+
+  if (loadError) return <main className="page"><Notice kind="error">{loadError}</Notice><Link to="/recipes">Back to recipes</Link></main>;
+  if (!form) return <main className="page"><Spinner /></main>;
 
   return (
     <main className="page">
@@ -331,9 +374,11 @@ export default function RecipeBuilder() {
             <div className="recipe-header">
               <Field label="Recipe name"><input className="input" value={form.name} onChange={set('name')} placeholder="e.g. Marinara sauce" /></Field>
               <Field label="Unit of measurement" hint="What a serving is measured in"><input className="input" value={form.yieldUnit} onChange={set('yieldUnit')} placeholder="oz, tacos, bowls…" /></Field>
-              <Field label="Size per serving" hint={`${unitLabel} in one serving; changing it scales the amounts`}>
+              <Field label="Size per serving" hint={sizeOffer
+                ? <>Amounts kept as written. <button type="button" className="link-btn" onClick={scaleToSize}>Scale them ×{sizeOffer.factor}</button> or <button type="button" className="link-btn" onClick={keepAmounts}>keep</button></>
+                : `${unitLabel} in one serving`}>
                 <input className="input num" inputMode="decimal" value={form.servingSize} onChange={setServingSize} placeholder="Optional"
-                  onFocus={() => { sizeStart.current = { size: form.servingSize, amounts: form.lines.map((l) => l.amount) }; }}
+                  onFocus={noteSizeStart}
                   aria-invalid={form.servingSize.trim() !== '' && !(toDecimal(form.servingSize)?.gt(0))} />
               </Field>
               <Field label="Expected servings" hint="What the recipe makes as written"><input className="input num" inputMode="numeric" value={form.baseServings} onChange={setServings} /></Field>
@@ -436,6 +481,7 @@ export default function RecipeBuilder() {
                 onAdd={addPhotos}
                 onRemove={removePhoto}
                 onMakeCover={makeCover}
+                onCrop={cropPhoto}
                 busy={photoBusy}
               />
               {photoError && <Notice kind="error">{photoError}</Notice>}

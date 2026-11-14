@@ -462,6 +462,20 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 .thumb figcaption { display: flex; justify-content: space-between; align-items: center; min-height: 32px; font-size: 0.85rem; }
 .thumb figcaption > .icon-btn { margin-left: auto; }
 .rotate-btns { display: inline-flex; gap: 2px; }
+/* Crop a photo: the selection over it, everything outside dimmed. */
+.modal.crop-modal { width: min(760px, calc(100vw - 24px)); }
+.crop-modal .modal-body { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+.crop-modal .modal-body > :not(.crop-stage) { align-self: stretch; }
+.crop-stage { position: relative; display: inline-block; max-width: 100%; overflow: hidden; border-radius: 4px; touch-action: none; user-select: none; -webkit-user-select: none; line-height: 0; }
+.crop-stage img { display: block; max-width: 100%; max-height: 58vh; pointer-events: none; }
+.crop-sel { position: absolute; cursor: move; border: 2px solid #fff; box-shadow: 0 0 0 9999px rgba(18, 26, 31, 0.6); }
+.crop-handle { position: absolute; width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 2px solid var(--basil); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+.crop-handle.nw { left: -12px; top: -12px; cursor: nwse-resize; }
+.crop-handle.ne { right: -12px; top: -12px; cursor: nesw-resize; }
+.crop-handle.sw { left: -12px; bottom: -12px; cursor: nesw-resize; }
+.crop-handle.se { right: -12px; bottom: -12px; cursor: nwse-resize; }
+.crop-shapes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.crop-shapes small { flex: 1 1 220px; }
 .thumb-img { position: relative; }
 .thumb-img:disabled { cursor: progress; }
 /* Over a photo being turned: dark in either theme, so the photo is plainly out of reach until it's back. */

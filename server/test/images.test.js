@@ -287,6 +287,17 @@ test('turning a photo a quarter turn either way rewrites it under new URLs', { s
   assert.equal((await filesOnDisk()).length, files); // each replaced the file before it
   assert.deepEqual((await api('GET', `/receipts/${receipt.id}`)).data.images.map((i) => i.url), [left.data.url, broken.url]);
 
+  // Cropping keeps a rectangle of the photo, given as fractions of it, and replaces the file again.
+  const cropped = await api('POST', `/images/${img.id}/crop`, { x: 0.5, y: 0, width: 0.5, height: 0.5 });
+  assert.equal(cropped.status, 200);
+  assert.notEqual(cropped.data.url, left.data.url);
+  const cut = await fetched(cropped.data.url);
+  assert.deepEqual([cut.bitmap.width, cut.bitmap.height], [15, 10]);
+  assert.equal((await filesOnDisk()).length, files);
+  assert.equal((await api('POST', `/images/${img.id}/crop`, { x: 0.6, y: 0, width: 0.5, height: 1 })).status, 400); // runs off the photo
+  assert.equal((await api('POST', `/images/${img.id}/crop`, { x: 0, y: 0, width: 0, height: 1 })).status, 400);
+  assert.equal((await api('POST', `/images/${broken.id}/crop`, { x: 0, y: 0, width: 0.5, height: 0.5 })).status, 400);
+
   assert.equal((await api('POST', `/images/${img.id}/rotate`, { direction: 'up' })).status, 400);
   assert.equal((await api('POST', `/images/${broken.id}/rotate`, { direction: 'left' })).status, 400);
   await api('DELETE', `/receipts/${receipt.id}`);

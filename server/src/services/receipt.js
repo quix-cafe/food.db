@@ -110,6 +110,8 @@ function pickDeep(raw, field) {
 }
 
 /** "CLEANING SUPPLIES" → "Cleaning Supplies"; mixed-case names are left alone. */
+/** A receipt section as the kitchen's category: capitals tidied, and a store's "Meat" is the kitchen's Protein. */
+const receiptCategory = (s) => (/^\s*meats?\s*$/i.test(s ?? '') ? 'Protein' : tidyCapitals(s));
 const tidyCapitals = (s) => (s && s === s.toUpperCase() ? s.toLowerCase().replace(/(^|[\s/&-])(\p{L})/gu, (_, a, b) => a + b.toUpperCase()) : s);
 
 function parseLine(el, category) {
@@ -204,7 +206,7 @@ function walkList(list, category, ctx) {
     const quantity = line.quantity && !line.quantity.isZero() ? line.quantity : new Decimal(1);
     const item = {
       name: line.name,
-      category: tidyCapitals(line.category),
+      category: receiptCategory(line.category),
       unit: line.unit,
       quantity,
       unitCost: line.unitCost ?? line.total.div(quantity),

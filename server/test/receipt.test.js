@@ -54,7 +54,7 @@ test('tests/receipt1.json: sections map, discount and PRICE YOU PAY lines, weigh
 
   const [turkey] = byName(r, 'PK TURK BRST CUTLE');
   assert.equal(turkey.totalCost, '6.19'); // 8.25 − 2.06 markdown
-  assert.equal(turkey.category, 'Meat');
+  assert.equal(turkey.category, 'Protein'); // a store's Meat section is the kitchen's Protein
 
   assert.deepEqual(byName(r, '4011 BANANAS')[0], {
     name: '4011 BANANAS', category: 'Produce', quantity: '2.21', unit: 'lb', unitCost: '0.59', totalCost: '1.3', note: null,

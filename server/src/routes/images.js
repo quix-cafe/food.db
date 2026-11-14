@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { imageJson, uploadDir, removeFiles, thumbDir } from '../images.js';
 import { thumbFor } from '../thumbs.js';
-import { MAX_SIDE, MIN_SIDE, compressPhoto, photoSizes, rotatePhoto } from '../compress.js';
+import { MAX_SIDE, MIN_SIDE, compressPhoto, cropPhoto, photoSizes, rotatePhoto } from '../compress.js';
 import { saveSnapshot } from '../backup.js';
 import { HttpError, array, badRequest, notFound, number, uuid } from '../validate.js';
 
@@ -37,6 +37,19 @@ router.post('/:id/rotate', async (req, res) => {
   const status = await rotatePhoto(id, direction === 'right');
   if (status === 'missing') throw notFound('Image');
   if (status === 'unsupported') throw new HttpError(400, 'Only JPEG and PNG photos can be turned');
+  const { rows } = await query('SELECT * FROM images WHERE id = $1', [id]);
+  res.json(imageJson(rows[0]));
+});
+
+// Crop a photo: { x, y, width, height } as fractions of the photo (0–1). Returns the image with its new URLs.
+router.post('/:id/crop', async (req, res) => {
+  const id = uuid(req.params.id, 'id');
+  const part = (key, label, min) => Number(number(req.body?.[key], label, { required: true, min, max: 1 }));
+  const rect = { x: part('x', 'Left edge', 0), y: part('y', 'Top edge', 0), width: part('width', 'Width', 0.01), height: part('height', 'Height', 0.01) };
+  if (rect.x + rect.width > 1.001 || rect.y + rect.height > 1.001) throw badRequest('The crop must stay inside the photo');
+  const status = await cropPhoto(id, rect);
+  if (status === 'missing') throw notFound('Image');
+  if (status === 'unsupported') throw new HttpError(400, 'Only JPEG and PNG photos can be cropped');
   const { rows } = await query('SELECT * FROM images WHERE id = $1', [id]);
   res.json(imageJson(rows[0]));
 });

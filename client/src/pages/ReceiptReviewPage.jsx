@@ -32,7 +32,11 @@ export default function ReceiptReviewPage() {
   return <ReviewGrid key={state.source} {...state} />;
 }
 
-function ReviewGrid({ receipt, source, draftId }) {
+/**
+ * A receipt being reviewed: its lines as rows, the vendor, date and photos, and saving the ticked
+ * lines (which creates the receipt on the first save). Shared by every skin's review page.
+ */
+export function useReceiptReview({ receipt, source, draftId }) {
   const [vendor, setVendor] = useState(receipt.vendor ?? '');
   const [date, setDate] = useState(receipt.date ?? todayIso());
   // `line` = position in the normalised JSON; the server stores lines in the same order.
@@ -97,6 +101,19 @@ function ReviewGrid({ receipt, source, draftId }) {
       setBusy(false);
     }
   };
+
+  return {
+    vendor, setVendor, date, setDate, rows, setRows, photos, setPhotos, photoImages, receiptId, zoom, setZoom, view, setView, busy, error, saved, done,
+    confirmed, blocker, allowLeave, lineSum, commit,
+  };
+}
+
+function ReviewGrid({ receipt, source, draftId }) {
+  const {
+    vendor, setVendor, date, setDate, rows, setRows, photos, setPhotos, photoImages, receiptId, zoom, setZoom, view, setView, busy, error, saved, done,
+    confirmed, blocker, allowLeave, lineSum, commit,
+  } = useReceiptReview({ receipt, source, draftId });
+  const navigate = useNavigate();
 
   if (done) {
     const leave = (to) => { allowLeave(); navigate(to); };
@@ -210,7 +227,7 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
  * Shown once every line of the receipt is saved: everything that was added (across all the
  * saves for this receipt), then back to Ingredients or on to the next receipt.
  */
-function ReceiptSaved({ saved, vendor, date, receiptId, photos, onIngredients, onAnother }) {
+export function ReceiptSaved({ saved, vendor, date, receiptId, photos, onIngredients, onAnother }) {
   const heading = useRef(null);
   const [viewing, setViewing] = useState(null); // ingredient id whose panel is open over the summary
   useEffect(() => {

@@ -452,7 +452,7 @@ function PacksInput({ eventId, line }) {
  * The event's labor hours or hourly rate, typed in on Financials (as "5 hrs × $20.00/hr"); leaving
  * the box saves it. A blank rate clears it; hours can't be blank.
  */
-function LaborInput({ eventId, field, value }) {
+export function LaborInput({ eventId, field, value }) {
   const hours = field === 'hours';
   const shown = value === null ? '' : hours ? toDecimal(value).toDecimalPlaces(2).toString() : toDecimal(value).toFixed(2);
   const [draft, setDraft] = useState(null);

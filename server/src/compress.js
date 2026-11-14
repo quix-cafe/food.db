@@ -110,6 +110,38 @@ export async function rotatePhoto(id, clockwise) {
   return (await replaceFile(id, img, out)) ? 'done' : 'missing';
 }
 
+/**
+ * Cut a photo down to a rectangle of itself. `rect` is { x, y, width, height } as fractions (0–1) of the
+ * photo as it's shown (EXIF orientation applied), so the page needn't know its pixel size. JPEG and PNG
+ * only; the file is replaced like a turned one. 'missing' | 'unsupported' | 'done'.
+ */
+export async function cropPhoto(id, rect) {
+  const { rows: [img] } = await query('SELECT filename, mime FROM images WHERE id = $1', [id]);
+  if (!img) return 'missing';
+  if (!COMPRESSIBLE.has(img.mime)) return 'unsupported';
+  const buf = await readFile(path.join(uploadDir(), img.filename)).catch(() => null);
+  if (!buf) return 'missing';
+  let out;
+  try {
+    const image = await Jimp.fromBuffer(buf);
+    const { width, height } = image.bitmap;
+    const x = Math.min(width - 1, Math.round(rect.x * width));
+    const y = Math.min(height - 1, Math.round(rect.y * height));
+    const w = Math.max(1, Math.min(width - x, Math.round(rect.width * width)));
+    const h = Math.max(1, Math.min(height - y, Math.round(rect.height * height)));
+    // Copied row by row, like the quarter turn: this jimp is built without its crop plugin.
+    const cut = new Jimp({ width: w, height: h });
+    for (let row = 0; row < h; row++) {
+      const from = ((y + row) * width + x) * 4;
+      image.bitmap.data.copy(cut.bitmap.data, row * w * 4, from, from + w * 4);
+    }
+    out = img.mime === 'image/png' ? await cut.getBuffer('image/png') : await cut.getBuffer('image/jpeg', { quality: ROTATE_QUALITY });
+  } catch {
+    return 'unsupported';
+  }
+  return (await replaceFile(id, img, out)) ? 'done' : 'missing';
+}
+
 /** Re-encoding a turned JPEG loses a little, so less is given up than when compressing. */
 const ROTATE_QUALITY = 92;
 

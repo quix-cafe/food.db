@@ -96,7 +96,7 @@ function keepCostsInStep(r, patch) {
 }
 
 /** Price per unit of measure for a row: pack price (or total ÷ qty) ÷ pack size; null if incomplete. */
-function rowUnitPrice(r) {
+export function rowUnitPrice(r) {
   const q = toDecimal(r.quantity);
   const size = toDecimal(r.packSize);
   const packPrice = toDecimal(r.unitCost) ?? (q && !q.isZero() ? toDecimal(r.totalCost)?.div(q) : null);
@@ -106,7 +106,7 @@ function rowUnitPrice(r) {
 /** Comparable form of the rows (minus React keys), to tell whether anything was edited. */
 export const rowsSnapshot = (rows) => JSON.stringify(rows.map(({ key, ...r }) => r));
 
-function rowProblem(r) {
+export function rowProblem(r) {
   const t = rowTarget(r);
   if (!t.name) return r.source ? 'Type a name or keep the receipt name' : 'Needs a name';
   if (t.kind === 'new' && r.candidates?.length && !r.addNew) return 'Pick what it might be, or add it as new';
@@ -151,13 +151,19 @@ export function savedMessage(res) {
  * saveButton(className): the page's save button, repeated under the table and floating in
  * the bottom-right corner while any line is ticked. The page puts its own above the table.
  */
+/**
+ * Changes one review row: keeps its costs in step, refits the pack size when its ingredient changes,
+ * and unticks it if the change leaves it with a problem. Shared by every skin's review lines.
+ */
+export const rowUpdater = (setRows) => (key, patch) => setRows((rs) => rs.map((r) => {
+  if (r.key !== key) return r;
+  let next = keepCostsInStep({ ...r, ...patch }, patch);
+  if ('ingredientId' in patch || 'keep' in patch) next = withPackSize(next);
+  return next.confirmed && rowProblem(next) ? { ...next, confirmed: false } : next;
+}));
+
 export default function ReviewLinesTable({ rows, setRows, pending = false, allowAdd = true, saveButton }) {
-  const update = (key, patch) => setRows((rs) => rs.map((r) => {
-    if (r.key !== key) return r;
-    let next = keepCostsInStep({ ...r, ...patch }, patch);
-    if ('ingredientId' in patch || 'keep' in patch) next = withPackSize(next);
-    return next.confirmed && rowProblem(next) ? { ...next, confirmed: false } : next;
-  }));
+  const update = rowUpdater(setRows);
   const confirmed = rows.filter((r) => r.confirmed).length;
 
   return (

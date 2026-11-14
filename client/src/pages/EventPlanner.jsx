@@ -12,20 +12,20 @@ import { recipeColors } from '../palette.js';
 import { DuplicateEventModal } from './EventsPage.jsx';
 
 const optional = (v) => (v == null ? '' : String(v));
-const blankOrInt = (v) => v.trim() === '' || isInt(v);
-const isCount = (v) => isInt(v) && Number(v) > 0;
+export const blankOrInt = (v) => v.trim() === '' || isInt(v);
+export const isCount = (v) => isInt(v) && Number(v) > 0;
 /** A sauce's container cost and default price, or null while it can't be worked out. */
-const containerOf = (b, container) => { try { return sauceContainer(b, container); } catch { return null; } };
-const noPricing = () => ({ salePrice: '', dealPrice: '', dealQty: '', servingSize: '' });
+export const containerOf = (b, container) => { try { return sauceContainer(b, container); } catch { return null; } };
+export const noPricing = () => ({ salePrice: '', dealPrice: '', dealQty: '', servingSize: '' });
 /** How an event makes its money (EVENT_KINDS): each recipe sold by the serving, or one rate for the lot. */
-const EVENT_TYPES = [
+export const EVENT_TYPES = [
   ['market', 'Market', 'Each recipe sold by the serving at its own price'],
   ['personal_chef', 'Personal Cheffing', 'A flat rate, plus the groceries at cost'],
   ['supper_club', 'Supper Club', 'Tickets for a plate of everything; with a Hoamsy fee, Hoamsy takes it first'],
 ];
-const blankOrPercent = (v) => v.trim() === '' || ((toDecimal(v.replace('%', ''))?.gte(0) && toDecimal(v.replace('%', '')).lt(100)) ?? false);
+export const blankOrPercent = (v) => v.trim() === '' || ((toDecimal(v.replace('%', ''))?.gte(0) && toDecimal(v.replace('%', '')).lt(100)) ?? false);
 /** Blank (the recipe's own size), or an amount above 0; fractions are fine. */
-const blankOrSize = (v) => v.trim() === '' || (parseAmount(v)?.gt(0) ?? false);
+export const blankOrSize = (v) => v.trim() === '' || (parseAmount(v)?.gt(0) ?? false);
 
 /** Servings in `count` containers of a sauce: whole servings, at least 1. */
 function sauceServings(b, count, container) {
@@ -34,13 +34,13 @@ function sauceServings(b, count, container) {
 }
 
 /** How many containers a sauce's saved servings take. */
-function containersOf(b, x) {
+export function containersOf(b, x) {
   const per = Number(containerOf(b, x.container)?.servingsPerContainer ?? 1);
   return Math.max(1, Math.ceil(Number(x.servings) / per));
 }
 
 /** Scroll the window to `to` in about a quarter-second, easing out (at once when motion is reduced). */
-function quickScroll(to) {
+export function quickScroll(to) {
   const from = window.scrollY;
   if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { window.scrollTo(0, to); return; }
   const start = performance.now();
@@ -84,7 +84,7 @@ function formOf(ev) {
 }
 
 /** The plate price or flat rate that sells the food at DEFAULT_MARGIN gross and covers labor and fees at cost, offered under its box. */
-function TargetHint({ s, form, setForm, saved }) {
+export function TargetHint({ s, form, setForm, saved }) {
   const target = saved && s?.kind === form.kind ? s.flat?.suggestedPrice : null;
   if (!target) return null;
   const supper = form.kind === 'supper_club';
@@ -133,52 +133,15 @@ export default function EventPlannerPage() {
   return <EventPlanner key={id} id={id} />;
 }
 
-function EventPlanner({ id }) {
+/**
+ * An event's plan as the page edits it: the form, its autosave (one save at a time, each naming the version
+ * the last returned), the summary, and the changes a page can make. Shared by every skin's event page.
+ */
+export function useEventPlan(id) {
   const [form, setForm] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [status, setStatus] = useState('saved'); // saved | pending | saving | invalid | error | conflict
   const [saveError, setSaveError] = useState(null);
-  const [tab, setTab] = useState('financials');
-  const tabsRef = useRef(null);
-  // The phone's jump menu under the event's details: open a tab and scroll down to it, quickly. (`always: false`: only
-  // when the tab bar is above the screen, as when picking a tab from far down a long one.)
-  const jumpTo = (t, { always = true } = {}) => {
-    const el = tabsRef.current;
-    if (el && t !== tab) setHold(el.offsetHeight);
-    setTab(t);
-    if (!el) return;
-    const from = window.scrollY;
-    // Land just below the bar that stays stuck to the top: the menu bar on a phone, the search bar on a wider screen.
-    const bar = document.querySelector(window.innerWidth <= 800 ? '.sidebar' : '.topbar')?.offsetHeight ?? 0;
-    const to = from + el.getBoundingClientRect().top - bar - 8;
-    if (!always && to >= from) return;
-    quickScroll(to);
-  };
-  // A tab switch keeps the tab area as tall as it was, so a short or still-loading tab can't shrink the page and
-  // pull the scroll position away from the tab bar. The hold shrinks as scrolling up stops needing it, then goes.
-  const [hold, setHold] = useState(null);
-  useEffect(() => {
-    if (hold == null) return;
-    const fit = () => {
-      const el = tabsRef.current;
-      if (!el) return;
-      const top = el.getBoundingClientRect().top;
-      const below = document.documentElement.scrollHeight - (el.getBoundingClientRect().bottom + window.scrollY);
-      const need = Math.ceil(window.innerHeight - top - below);
-      const content = (el.lastElementChild?.getBoundingClientRect().bottom ?? top) - top;
-      if (need <= content) setHold(null);
-      else if (need < hold) setHold(need);
-    };
-    fit();
-    window.addEventListener('scroll', fit, { passive: true });
-    window.addEventListener('resize', fit);
-    return () => {
-      window.removeEventListener('scroll', fit);
-      window.removeEventListener('resize', fit);
-    };
-  }, [hold]);
-  const [deleting, setDeleting] = useState(false);
-  const [copying, setCopying] = useState(false);
   const { data: recipes } = useApi('/recipes');
   const { data: blends } = useApi('/blends');
   const sauces = (blends ?? []).filter((b) => b.kind === 'sauce');
@@ -186,10 +149,6 @@ function EventPlanner({ id }) {
   // while choosing the first ones on a new event.
   const [showAll, setShowAll] = useState(false);
   const summary = useApi(`/events/${id}/summary`);
-  // ?sales=1 goes straight to the POS screen, so a phone can bookmark it.
-  const [params] = useSearchParams();
-  const openPos = useOpenPos();
-  const posUrl = `/pos?event=${id}`;
   const navigate = useNavigate();
   const toast = useToast();
   const lastSaved = useRef(null);
@@ -322,10 +281,6 @@ function EventPlanner({ id }) {
     return () => clearTimeout(t);
   }, [form, id]);
 
-  if (params.has('sales')) return <Navigate to={posUrl} replace />;
-  if (loadError) return <main className="page"><Notice kind="error">{loadError}</Notice><Link to="/events">Back to events</Link></main>;
-  if (!form) return <main className="page"><Spinner /></main>;
-
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const toggle = (r) => setForm((f) => {
     const servings = { ...f.servings };
@@ -387,6 +342,67 @@ function EventPlanner({ id }) {
     toast(`Deleted ${form.name}`);
     navigate('/events');
   };
+
+  return {
+    form, setForm, loadError, status, saveError, recipes, sauces, summary, showAll, setShowAll, lastEdit, lastOrder, changedBy,
+    set, toggle, toggleSauce, setSauceMake, setSauce, setServings, setPrice, applyGuests, saveOwnPrice, loadLatest, keepMine, remove,
+  };
+}
+
+function EventPlanner({ id }) {
+  const {
+    form, setForm, loadError, status, saveError, recipes, sauces, summary, showAll, setShowAll, lastEdit, lastOrder, changedBy,
+    set, toggle, toggleSauce, setSauceMake, setSauce, setServings, setPrice, applyGuests, saveOwnPrice, loadLatest, keepMine, remove,
+  } = useEventPlan(id);
+  const [tab, setTab] = useState('financials');
+  const tabsRef = useRef(null);
+  // The phone's jump menu under the event's details: open a tab and scroll down to it, quickly. (`always: false`: only
+  // when the tab bar is above the screen, as when picking a tab from far down a long one.)
+  const jumpTo = (t, { always = true } = {}) => {
+    const el = tabsRef.current;
+    if (el && t !== tab) setHold(el.offsetHeight);
+    setTab(t);
+    if (!el) return;
+    const from = window.scrollY;
+    // Land just below the bar that stays stuck to the top: the menu bar on a phone, the search bar on a wider screen.
+    const bar = document.querySelector(window.innerWidth <= 800 ? '.sidebar' : '.topbar')?.offsetHeight ?? 0;
+    const to = from + el.getBoundingClientRect().top - bar - 8;
+    if (!always && to >= from) return;
+    quickScroll(to);
+  };
+  // A tab switch keeps the tab area as tall as it was, so a short or still-loading tab can't shrink the page and
+  // pull the scroll position away from the tab bar. The hold shrinks as scrolling up stops needing it, then goes.
+  const [hold, setHold] = useState(null);
+  useEffect(() => {
+    if (hold == null) return;
+    const fit = () => {
+      const el = tabsRef.current;
+      if (!el) return;
+      const top = el.getBoundingClientRect().top;
+      const below = document.documentElement.scrollHeight - (el.getBoundingClientRect().bottom + window.scrollY);
+      const need = Math.ceil(window.innerHeight - top - below);
+      const content = (el.lastElementChild?.getBoundingClientRect().bottom ?? top) - top;
+      if (need <= content) setHold(null);
+      else if (need < hold) setHold(need);
+    };
+    fit();
+    window.addEventListener('scroll', fit, { passive: true });
+    window.addEventListener('resize', fit);
+    return () => {
+      window.removeEventListener('scroll', fit);
+      window.removeEventListener('resize', fit);
+    };
+  }, [hold]);
+  const [deleting, setDeleting] = useState(false);
+  const [copying, setCopying] = useState(false);
+  // ?sales=1 goes straight to the POS screen, so a phone can bookmark it.
+  const [params] = useSearchParams();
+  const openPos = useOpenPos();
+  const posUrl = `/pos?event=${id}`;
+
+  if (params.has('sales')) return <Navigate to={posUrl} replace />;
+  if (loadError) return <main className="page"><Notice kind="error">{loadError}</Notice><Link to="/events">Back to events</Link></main>;
+  if (!form) return <main className="page"><Spinner /></main>;
 
   const s = summary.data;
   const selectedCount = Object.keys(form.servings).length;

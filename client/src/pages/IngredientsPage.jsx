@@ -236,7 +236,7 @@ function Pager({ place, page, pageCount, pageSize, total, onPage, onPageSize }) 
 }
 
 /** Ingredients that look like one thing under two names, each with Review merge and Not the same. */
-function DuplicatesNotice({ duplicates, onReview, onDismiss }) {
+export function DuplicatesNotice({ duplicates, onReview, onDismiss }) {
   if (!duplicates?.length) return null;
   return (
     <Notice>

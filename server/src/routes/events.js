@@ -152,7 +152,10 @@ router.get('/', async (req, res) => {
             coalesce(sum(er.expected_servings), 0)::int AS "totalServings",
             (SELECT count(*)::int FROM event_blends eb WHERE eb.event_id = e.id) AS "sauceCount",
             (SELECT count(*)::int FROM event_sales s WHERE s.event_id = e.id AND s.status = 'in_progress') AS "openOrders",
-            (SELECT max(s.created_at) FROM event_sales s WHERE s.event_id = e.id) AS "lastOrderAt"
+            (SELECT max(s.created_at) FROM event_sales s WHERE s.event_id = e.id) AS "lastOrderAt",
+            -- What the order screen recorded (cancelled orders left out), null with none: lists show it when no actual revenue was entered.
+            (SELECT sum(i.amount) FROM event_sales s JOIN event_sale_items i ON i.sale_id = s.id
+              WHERE s.event_id = e.id AND s.status <> 'cancelled') AS "recordedRevenue"
      FROM events e LEFT JOIN event_recipes er ON er.event_id = e.id
      ${day ? 'WHERE e.event_date = $1' : ''}
      GROUP BY e.id
