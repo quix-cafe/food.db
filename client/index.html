@@ -11,9 +11,15 @@
         var t = null;
         try { t = localStorage.getItem('theme'); } catch (e) {}
         document.documentElement.dataset.theme = t === 'dark' ? 'dark' : 'light';
-        // The alternate theme (Backup page), off by default.
+        // The alternate theme (Backup page), off by default. ?skin=alt / ?skin=default switch it
+        // from the address bar, a way back if the alternate app hides its switch.
         var k = null;
+        var q = new URLSearchParams(location.search).get('skin');
+        if (q === 'alt' || q === 'default') {
+          try { localStorage.setItem('skin', q === 'alt' ? 'alt' : ''); } catch (e) {}
+        }
         try { k = localStorage.getItem('skin'); } catch (e) {}
+        if (q) k = q;
         if (k === 'alt') document.documentElement.dataset.skin = 'alt';
       })();
     </script>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, notifyDataChanged, setTestMode } from '../api.js';
 import { useApi, useTestMode } from '../hooks.js';
+import { setSkin, useSkin } from '../skin.js';
 import { dateTime } from '../format.js';
 import { Icon, Modal, Notice, Spinner, useToast } from '../components/ui.jsx';
 
@@ -366,24 +367,18 @@ const TEST_ROWS = [
 ];
 
 /** Test mode on/off, and clearing everything added in test mode. */
-/** Switches the alternate theme (`theme-alt.css`, `html[data-skin="alt"]`) for this browser. */
+/** Switches the alternate theme (`skins/alt/`: its own app and styles) for this browser. */
 function AltThemeCard() {
-  const [on, setOn] = useState(() => document.documentElement.dataset.skin === 'alt');
-  const toggle = (next) => {
-    setOn(next);
-    try { localStorage.setItem('skin', next ? 'alt' : ''); } catch { /* not remembered, still applied */ }
-    if (next) document.documentElement.dataset.skin = 'alt';
-    else delete document.documentElement.dataset.skin;
-  };
+  const on = useSkin() === 'alt';
   return (
     <section className="panel panel-pad backup-card" id="alt-theme">
       <h2>Appearance</h2>
       <label className="switch-row">
-        <input type="checkbox" checked={on} onChange={(e) => toggle(e.target.checked)} />
+        <input type="checkbox" checked={on} onChange={(e) => setSkin(e.target.checked ? 'alt' : 'default')} />
         <span>
           <b>Alternate theme</b>
           <span className="muted" style={{ display: 'block' }}>
-            A completely different look for the whole app, still in testing. It applies to this browser only; turn it off to go back.
+            A completely different look and layout for the whole app, still in testing. It applies to this browser only. If it ever hides this switch, adding <code>?skin=default</code> to the address turns it off.
           </span>
         </span>
       </label>

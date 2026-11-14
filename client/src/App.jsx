@@ -27,7 +27,7 @@ const QUICK_ADD = [
   { to: '/spice-lab/new-sauce', label: 'Sauce' },
 ];
 
-function QuickAdd({ onClose }) {
+export function QuickAdd({ onClose }) {
   const [tab, setTab] = useState('receipt');
   return (
     <Modal title="Quick add" onClose={onClose}>
@@ -45,7 +45,7 @@ function QuickAdd({ onClose }) {
   );
 }
 
-function TestModeBar() {
+export function TestModeBar() {
   const on = useTestMode();
   if (!on) return null;
   return (
@@ -58,7 +58,7 @@ function TestModeBar() {
 
 // Opens the order screen in a window of its own. Its window is kept: tapping again brings it
 // forward rather than reloading it, which would lose an order being rung up.
-function NewBuildBar() {
+export function NewBuildBar() {
   if (!useNewBuild()) return null;
   return (
     <div className="new-build-bar no-print" role="alert">
@@ -68,7 +68,7 @@ function NewBuildBar() {
   );
 }
 
-function PosButton() {
+export function PosButton() {
   const openPos = useOpenPos();
   return (
     <a className="btn pos-btn" href="/pos" aria-label="POS: open the order screen" title="Open the order screen" onClick={openPos('/pos')}>
@@ -78,7 +78,7 @@ function PosButton() {
 }
 
 /** The POS screen, filling the page, over the app or (from a bookmark) on its own. */
-function PosFrame() {
+export function PosFrame() {
   useEffect(() => {
     document.body.classList.add('pos-open');
     return () => document.body.classList.remove('pos-open');
@@ -98,7 +98,7 @@ function OldReceiptRedirect() {
 }
 
 // Light unless switched to dark; remembered per browser (index.html applies it before the first paint).
-function ThemeToggle() {
+export function ThemeToggle() {
   const [dark, setDark] = useState(() => document.documentElement.dataset.theme === 'dark');
   const toggle = () => {
     const next = dark ? 'light' : 'dark';
@@ -110,6 +110,33 @@ function ThemeToggle() {
     <button type="button" className="theme-switch" role="switch" aria-checked={dark} aria-label="Dark mode" title={dark ? 'Switch to light mode' : 'Switch to dark mode'} onClick={toggle}>
       <Icon.sun /><Icon.moon /><span className="knob" aria-hidden="true" />
     </button>
+  );
+}
+
+/** Every page's route; `location` is the page to show (the one under the POS while it's open). */
+export function AppRoutes({ location }) {
+  return (
+    <Routes location={location}>
+      <Route path="/" element={<DashboardPage />} />
+      <Route path="/ingredients" element={<IngredientsPage />} />
+      <Route path="/ingredients/review" element={<ReceiptReviewPage />} />
+      <Route path="/purchases" element={<PurchasesPage />} />
+      <Route path="/purchases/:id" element={<ReceiptDetailPage />} />
+      {/* Old addresses from before the page was renamed. */}
+      <Route path="/receipts" element={<Navigate to="/purchases" replace />} />
+      <Route path="/receipts/:id" element={<OldReceiptRedirect />} />
+      <Route path="/recipes" element={<RecipeGallery />} />
+      <Route path="/recipes/new" element={<RecipeBuilder />} />
+      <Route path="/recipes/:id" element={<RecipeBuilder />} />
+      <Route path="/events" element={<EventsPage />} />
+      <Route path="/events/:id" element={<EventPlanner />} />
+      <Route path="/backup" element={<BackupPage />} />
+      <Route path="/spice-lab" element={<SpiceLabPage />} />
+      <Route path="/spice-lab/new" element={<BlendEditor key="new" />} />
+      <Route path="/spice-lab/new-sauce" element={<BlendEditor key="new-sauce" kind="sauce" />} />
+      <Route path="/spice-lab/:id" element={<BlendEditor />} />
+      <Route path="*" element={<main className="page"><div className="panel empty"><h2>Page not found</h2><Link className="btn" to="/ingredients">Go to ingredients</Link></div></main>} />
+    </Routes>
   );
 }
 
@@ -162,27 +189,7 @@ export default function App() {
             </button>
             <PosButton />
           </header>
-          <Routes location={background ?? location}>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/ingredients" element={<IngredientsPage />} />
-            <Route path="/ingredients/review" element={<ReceiptReviewPage />} />
-            <Route path="/purchases" element={<PurchasesPage />} />
-            <Route path="/purchases/:id" element={<ReceiptDetailPage />} />
-            {/* Old addresses from before the page was renamed. */}
-            <Route path="/receipts" element={<Navigate to="/purchases" replace />} />
-            <Route path="/receipts/:id" element={<OldReceiptRedirect />} />
-            <Route path="/recipes" element={<RecipeGallery />} />
-            <Route path="/recipes/new" element={<RecipeBuilder />} />
-            <Route path="/recipes/:id" element={<RecipeBuilder />} />
-            <Route path="/events" element={<EventsPage />} />
-            <Route path="/events/:id" element={<EventPlanner />} />
-            <Route path="/backup" element={<BackupPage />} />
-            <Route path="/spice-lab" element={<SpiceLabPage />} />
-            <Route path="/spice-lab/new" element={<BlendEditor key="new" />} />
-            <Route path="/spice-lab/new-sauce" element={<BlendEditor key="new-sauce" kind="sauce" />} />
-            <Route path="/spice-lab/:id" element={<BlendEditor />} />
-            <Route path="*" element={<main className="page"><div className="panel empty"><h2>Page not found</h2><Link className="btn" to="/ingredients">Go to ingredients</Link></div></main>} />
-          </Routes>
+          <AppRoutes location={background ?? location} />
         </div>
       </div>
       {background && <PosFrame />}
