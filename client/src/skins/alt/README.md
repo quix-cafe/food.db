@@ -63,8 +63,8 @@ Words: cost, price, revenue, profit and margin, nothing cuter.
 ## The look (`theme.css`, `parts.jsx`)
 
 A kitchen's own labelling. Soft gray paper (not white), black ink, magenta (`--accent`) for what
-you can act on and teal (`--teal`) for what something costs. In a bar, the cost is teal and what's
-left after it is ink, so green never sits beside teal. Two devices carry it:
+you can act on. A bar split into cost and profit has the cost in slate (`--cost`) and the profit
+in green (`--basil`); teal (`--teal`) is for other figures (best sellers, the purchases line). Two devices carry it:
 
 - `Tape`: a section's name on a strip of masking tape (Caveat Brush). Section headings on this
   app's own pages only.

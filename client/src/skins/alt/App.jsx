@@ -13,7 +13,6 @@ import { useOpenPos, useStickyTableHeads } from '../../hooks.js';
 import { Icon, ToastProvider } from '../../components/ui.jsx';
 import { NewBuildBar, PosFrame, TestModeBar, ThemeToggle } from '../../App.jsx';
 import { ReceiptDetailPage } from '../../pages/PurchasesPage.jsx';
-import BackupPage from '../../pages/BackupPage.jsx';
 import { AltIcon, Crumbs, todayDot } from './parts.jsx';
 import QuickAdd from './QuickAdd.jsx';
 import TodayPage from './TodayPage.jsx';
@@ -25,6 +24,7 @@ import ReceiptsPage from './ReceiptsPage.jsx';
 import ReceiptReviewPage from './ReceiptReviewPage.jsx';
 import RecipePage from './RecipePage.jsx';
 import BlendPage from './BlendPage.jsx';
+import BackupPage from './BackupPage.jsx';
 import IngredientPanel from './IngredientPanel.jsx';
 import { registerSkinPart } from '../../skin.js';
 

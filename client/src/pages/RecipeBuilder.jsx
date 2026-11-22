@@ -214,9 +214,13 @@ export function useRecipeBuilder(id) {
     setSizeWas(null);
   };
   const keepAmounts = () => setSizeWas(null);
+  // The costing's "Scale to servings" follows what the recipe makes while it isn't scaled (or is still
+  // being typed), so changing the servings doesn't leave the recipe looking scaled up or down.
   const setServings = (e) => {
     const baseServings = e.target.value;
+    const following = expected === form.baseServings || !toDecimal(expected)?.gt(0);
     setForm((f) => ({ ...f, baseServings, totalYield: f.servingSize.trim() ? totalQty(f.servingSize, baseServings) : f.totalYield }));
+    if (following) setExpected(baseServings);
   };
   const unitLabel = form?.yieldUnit.trim() || 'units';
 

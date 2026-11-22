@@ -3,9 +3,9 @@
  * so EVERY rule sits under :root[data-skin='alt'] (nested below) and nothing changes while it's off.
  *
  * The idea: a kitchen's own labelling. Soft gray paper, black ink, magenta for what you can act
- * on and teal for what something costs. Section names sit on strips of masking tape, and dates are
+ * on, teal for figures that aren't money. Section names sit on strips of masking tape, and dates are
  * day dots, the stickers that say which day something was made (one bright color per weekday).
- * Money made is green, money lost is red, and in a bar what's left after the cost is ink.
+ * Money made is green, money lost is red; a bar splits into cost (slate) and profit (green).
  *
  * styles.css is still loaded underneath: the default app's pages shown inside this shell take
  * their colors from the tokens redefined here, then the overrides in "The default app's pieces".
@@ -32,8 +32,10 @@
   --accent-dark: #a30a58;
   --accent-wash: #f6dcea;
   --accent-line: #e9aacb;
-  --teal: #0b9a91;         /* teal: what something costs, in every bar */
+  --teal: #0b9a91;
   --teal-ink: #08756e;
+  /* A bar split into cost and profit: the cost slate, the profit green (--basil), never two greens. */
+  --cost: #64748b;
   --on-accent: #ffffff;
   --masking: #ead9a6;      /* masking tape, the same in both themes: it's a thing, not a surface */
   --masking-ink: #2a2413;
@@ -69,7 +71,7 @@
   --magenta-dark: #b80066;
   --pos-violet: #6d3fd8;
   --pos-teal: #12a5a0;
-  --chart-purchases: #0b9a91; /* teal, like every other cost */
+  --chart-purchases: #0b9a91;
   --chart-revenue: #c8106e;
   --side: #15181d;
   --side-ink: #6d7582;
@@ -151,7 +153,14 @@
   .btn.alt-add { background: var(--basil); border-color: var(--basil); color: #fff; }
   .btn.alt-add:hover { background: var(--basil-dark); border-color: var(--basil-dark); }
   /* The order screen's own stripe, as its button. */
-  .btn.alt-orders { background: linear-gradient(90deg, var(--magenta), var(--pos-violet) 55%, var(--pos-teal)); border-color: transparent; color: #fff; font-weight: 800; }
+  /* The order screen's own stripe, as its button. */
+  .btn.alt-orders {
+    background: linear-gradient(90deg, var(--magenta), var(--pos-violet) 55%, var(--pos-teal));
+    background-clip: padding-box;
+    border-color: transparent;
+    color: #fff;
+    font-weight: 800;
+  }
   .btn.alt-orders:hover { filter: brightness(1.08); border-color: transparent; }
   .btn.alt-orders svg { width: 18px; height: 18px; }
   .btn.alt-orders[aria-disabled='true'] { opacity: 0.45; cursor: not-allowed; }
@@ -304,8 +313,8 @@
   .rail-rows dd { margin: 0; font-weight: 700; white-space: nowrap; }
   .rail-rows .total dd { font-size: 1.15rem; font-weight: 800; }
   .rail-rows :is(.food, .labor, .fee) dt::before { content: ''; display: inline-block; width: 9px; height: 9px; margin-right: 7px; border-radius: 50%; background: var(--piece); }
-  /* Teal is what the food costs; what's left over is ink, so it never sits green beside teal. */
-  .food { --piece: var(--teal); } .labor { --piece: var(--violet); } .fee { --piece: var(--tomato); } .left { --piece: var(--ink); }
+  /* The money rail's split: food slate, labor violet, the fee red, the profit green. */
+  .food { --piece: var(--cost); } .labor { --piece: var(--violet); } .fee { --piece: var(--tomato); } .left { --piece: var(--basil); }
   .rail-profit { display: grid; gap: 2px; padding-top: 12px; border-top: 2px solid var(--ink); }
   .rail-profit span { font-size: 0.86rem; font-weight: 700; color: var(--ink-2); }
   .rail-profit b { font-size: 2.5rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1; }
@@ -367,8 +376,8 @@
   .dish .d-take b { display: block; font-size: 1.15rem; font-weight: 800; }
   .dish .d-take small { font-size: 0.82rem; font-weight: 650; color: var(--basil); }
   .take-bar { display: block; height: 16px; margin-top: 11px; }
-  .take-bar > span { display: block; height: 100%; min-width: 6px; border-radius: 8px; background: var(--ink); overflow: hidden; }
-  .take-bar i { display: block; height: 100%; background: var(--teal); box-shadow: 2px 0 0 var(--steel); }
+  .take-bar > span { display: block; height: 100%; min-width: 6px; border-radius: 8px; background: var(--basil); overflow: hidden; }
+  .take-bar i { display: block; height: 100%; background: var(--cost); box-shadow: 2px 0 0 var(--steel); }
   .dish .d-more { color: var(--muted); margin-top: 3px; }
   .dish .d-more.off:hover { color: var(--tomato); background: var(--tomato-wash); }
   .dish-more { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px 32px; padding: 4px 16px 16px 18px; }
@@ -471,7 +480,7 @@
   .rc-lines .line-name:hover, .rc-lines .line-name:focus-visible { color: var(--accent); }
   .rc-lines .l-share { width: 22%; min-width: 70px; padding-top: 22px; }
   .rc-lines .l-share .bar { display: block; }
-  .rc-lines .l-share .bar i { background: var(--teal); }
+  .rc-lines .l-share .bar i { background: var(--cost); }
   .rc-lines .l-cost { width: 1%; text-align: right; white-space: nowrap; padding-top: 16px; }
   .rc-lines .l-cost b { font-size: 1.05rem; font-weight: 800; }
   .rc-lines .l-off { width: 32px; padding-inline: 0; padding-top: 12px; }
@@ -556,8 +565,8 @@
   .board-line .b-margin { font-weight: 800; color: var(--basil); }
   .board-line .b-margin.loss { color: var(--tomato); }
   .plate-track { display: block; height: 14px; }
-  .plate-bar { display: block; height: 14px; min-width: 8px; border-radius: 7px; background: var(--ink); overflow: hidden; }
-  .plate-bar i { display: block; height: 100%; background: var(--teal); box-shadow: 2px 0 0 var(--steel); }
+  .plate-bar { display: block; height: 14px; min-width: 8px; border-radius: 7px; background: var(--basil); overflow: hidden; }
+  .plate-bar i { display: block; height: 100%; background: var(--cost); box-shadow: 2px 0 0 var(--steel); }
   .plate-bar.over i { background: var(--tomato); }
 
   .cookbook section + section { margin-top: 10px; }
@@ -629,7 +638,7 @@
   .ip-stores li { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(40px, 1fr) auto; align-items: center; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--line-soft); }
   .ip-stores .s-name { font-weight: 700; }
   .ip-stores small { display: block; font-weight: 400; font-size: 0.86rem; color: var(--muted); }
-  .ip-stores .bar i { background: var(--teal); }
+  .ip-stores .bar i { background: var(--cost); }
   .ip-stores li:first-child:not(:only-child) .bar i { background: var(--accent); }
   .ip-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .ip-add { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1.5px dashed var(--line); border-radius: 12px; }
@@ -927,6 +936,7 @@
     --on-accent: #2a0616;
     --teal: #2ccabd;
     --teal-ink: #6fe0d6;
+    --cost: #8f9cb0;
     --masking: #dccb96;
 
 
